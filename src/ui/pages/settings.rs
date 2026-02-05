@@ -5,22 +5,22 @@ use ratatui::{
 
 pub fn render(frame: &mut Frame, area: Rect) {
     let text = vec![
-        Line::from(""),
-        Line::from("  [1] 串口设置"),
-        Line::from("  [2] 显示设置"),
-        Line::from("  [3] 动作设置"),
-        Line::from(""),
-        Line::from(Span::styled(
+        Line::raw(""),
+        Line::raw("  [1] 串口设置"),
+        Line::raw("  [2] 显示设置"),
+        Line::raw("  [3] 动作设置"),
+        Line::raw(""),
+        Line::from_iter([Span::styled(
             "  按数字键选择设置项",
-            Style::default().fg(Color::Gray),
-        )),
+            Style::new().fg(Color::Gray),
+        )]),
     ];
 
     let widget = Paragraph::new(text).block(
-        Block::default()
+        Block::new()
             .title("设置")
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(Color::Green)),
+            .border_style(Style::new().fg(Color::Green)),
     );
 
     frame.render_widget(widget, area);

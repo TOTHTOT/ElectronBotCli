@@ -12,13 +12,13 @@ pub fn render(frame: &mut Frame, area: Rect, menu_state: &mut ListState) {
 
     let menu = List::new(menu_items)
         .block(
-            Block::default()
+            Block::new()
                 .title("菜单")
                 .borders(Borders::ALL)
-                .border_style(Style::default().fg(Color::Cyan)),
+                .border_style(Style::new().fg(Color::Cyan)),
         )
         .highlight_style(
-            Style::default()
+            Style::new()
                 .bg(Color::Cyan)
                 .fg(Color::Black)
                 .add_modifier(Modifier::BOLD),

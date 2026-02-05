@@ -116,7 +116,7 @@ impl CdcDevice {
             }
             Err(e) => {
                 self.state = DeviceState::Error(format!("连接失败: {}", e));
-                Err(io::Error::new(io::ErrorKind::Other, e))
+                Err(io::Error::other(e))
             }
         }
     }
@@ -141,7 +141,7 @@ impl CdcDevice {
         }
     }
 
-    /// 发送双缓冲数据
+    // /// 发送双缓冲数据
     // pub fn send_double_buffer(&mut self, frames: &[FrameData; 2]) -> io::Result<()> {
     //     for frame in frames {
     //         self.send_frame(frame)?;

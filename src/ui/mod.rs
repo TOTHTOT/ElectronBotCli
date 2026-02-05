@@ -5,13 +5,11 @@ use ratatui::prelude::*;
 use crate::app::{App, MenuItem};
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(20),
-            Constraint::Min(0),
-        ])
-        .split(frame.area());
+    let chunks = Layout::new(Direction::Horizontal, [
+        Constraint::Length(20),
+        Constraint::Min(0),
+    ])
+    .split(frame.area());
 
     // 渲染侧边栏
     sidebar::render(frame, chunks[0], &mut app.menu_state);

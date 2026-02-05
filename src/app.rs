@@ -1,5 +1,6 @@
 use ratatui::widgets::ListState;
 use crate::device::{CdcDevice, FrameData, FRAME_SIZE};
+use std::default::Default;
 
 pub const SERVO_COUNT: usize = 6;
 pub const SERVO_MIN: i16 = -180;
