@@ -8,31 +8,27 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     // 外层 Block（包含所有内容）
     let outer_block = Block::new()
         .title("ElectronBot 设备控制")
-        .title_style(
-            Style::new()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
 
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    let chunks = Layout::new(Direction::Vertical, [
-        Constraint::Length(3),
-        Constraint::Min(0),
-    ])
+    let chunks = Layout::new(
+        Direction::Vertical,
+        [Constraint::Length(3), Constraint::Min(0)],
+    )
     .split(inner_area);
 
     // 操作说明（横向满）
     render_info_bar(frame, chunks[0]);
 
     // 舵机控制和LCD缓冲区（左右各50%）
-    let main_chunks = Layout::new(Direction::Horizontal, [
-        Constraint::Percentage(50),
-        Constraint::Percentage(50),
-    ])
+    let main_chunks = Layout::new(
+        Direction::Horizontal,
+        [Constraint::Percentage(50), Constraint::Percentage(50)],
+    )
     .split(chunks[1]);
 
     render_servo_gauges(frame, main_chunks[0], app);
@@ -42,11 +38,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 fn render_info_bar(frame: &mut Frame, area: Rect) {
     let outer_block = Block::new()
         .title("操作说明")
-        .title_style(
-            Style::new()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
     let inner_area = outer_block.inner(area);
@@ -64,11 +56,7 @@ fn render_info_bar(frame: &mut Frame, area: Rect) {
 fn render_servo_gauges(frame: &mut Frame, area: Rect, app: &App) {
     let outer_block = Block::new()
         .title("舵机控制")
-        .title_style(
-            Style::new()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
     let servo_height = (area.height as usize) / SERVO_COUNT;
@@ -142,11 +130,7 @@ fn render_single_servo(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 fn render_lcd_preview(frame: &mut Frame, area: Rect, _app: &App) {
     let outer_block = Block::new()
         .title("Lcd 缓冲区")
-        .title_style(
-            Style::new()
-                .fg(Color::Cyan)
-                .add_modifier(Modifier::BOLD),
-        )
+        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
     let inner_area = outer_block.inner(area);

@@ -1,8 +1,8 @@
+use crate::app::MenuItem;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, ListState},
 };
-use crate::app::MenuItem;
 
 pub fn render(frame: &mut Frame, area: Rect, menu_state: &mut ListState) {
     let menu_items: Vec<ListItem> = MenuItem::all()

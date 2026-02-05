@@ -3,14 +3,14 @@ mod device;
 mod event_handler;
 mod ui;
 
-use std::io;
-use std::time::Duration;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
     ExecutableCommand,
 };
 use ratatui::prelude::*;
+use std::io;
+use std::time::Duration;
 
 fn main() -> io::Result<()> {
     // 初始化终端
@@ -31,6 +31,9 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let mut app = app::App::new();
     let tick_rate = Duration::from_millis(50); // 20 FPS
 
+    // 启动设备发送线程
+    app.start_device_thread();
+
     while app.running {
         // 渲染界面
         terminal.draw(|frame| ui::render(frame, &mut app))?;
@@ -42,9 +45,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                     let evt = if app.in_servo_mode {
                         // 舵机模式下的按键处理
                         match key.code {
-                            KeyCode::Char('q') | KeyCode::Esc => event_handler::AppEvent::ExitServoMode,
-                            KeyCode::Up | KeyCode::Char('k') => event_handler::AppEvent::ServoIncrease,
-                            KeyCode::Down | KeyCode::Char('j') => event_handler::AppEvent::ServoDecrease,
+                            KeyCode::Char('q') | KeyCode::Esc => {
+                                event_handler::AppEvent::ExitServoMode
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                event_handler::AppEvent::ServoIncrease
+                            }
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                event_handler::AppEvent::ServoDecrease
+                            }
                             KeyCode::Char('h') => event_handler::AppEvent::ServoPrev,
                             KeyCode::Char('l') => event_handler::AppEvent::ServoNext,
                             KeyCode::Char('a') => event_handler::AppEvent::ServoDecreaseBig,
@@ -72,22 +81,21 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             }
         }
 
-        // 如果设备已连接，定时发送帧数据
+        // 如果设备已连接，定时发送帧数据, 得通过线程发送, 不然影响刷新速度
         if app.device.is_connected() {
             let frame = app.create_test_frame();
-            app.update_lcd_buffer(&frame);
-            if let Err(e) = app.device.send_frame(&frame) {
-                eprintln!("发送失败: {}", e);
-                app.device.disconnect();
-            }
+            app.send_frame(&frame);
         }
 
         // 控制帧率
         std::thread::sleep(tick_rate);
     }
 
-    // 断开设备连接
-    app.device.disconnect();
+    // 停止设备线程并断开连接
+    if let Some(sender) = &app.device_sender {
+        sender.stop();
+        sender.disconnect();
+    }
 
     Ok(())
 }

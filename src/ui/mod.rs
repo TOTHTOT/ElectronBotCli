@@ -1,14 +1,14 @@
 mod pages;
 mod sidebar;
 
-use ratatui::prelude::*;
 use crate::app::{App, MenuItem};
+use ratatui::prelude::*;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
-    let chunks = Layout::new(Direction::Horizontal, [
-        Constraint::Length(20),
-        Constraint::Min(0),
-    ])
+    let chunks = Layout::new(
+        Direction::Horizontal,
+        [Constraint::Length(20), Constraint::Min(0)],
+    )
     .split(frame.area());
 
     // 渲染侧边栏

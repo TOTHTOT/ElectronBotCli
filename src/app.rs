@@ -1,6 +1,10 @@
-use ratatui::widgets::ListState;
 use crate::device::{CdcDevice, FrameData, FRAME_SIZE};
+use ratatui::widgets::ListState;
 use std::default::Default;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::sync::Arc;
+use std::thread;
 
 pub const SERVO_COUNT: usize = 6;
 pub const SERVO_MIN: i16 = -180;
@@ -25,21 +29,26 @@ impl MenuItem {
     }
 
     pub fn all() -> [MenuItem; 4] {
-        [MenuItem::DeviceStatus, MenuItem::DeviceControl, MenuItem::Settings, MenuItem::About]
+        [
+            MenuItem::DeviceStatus,
+            MenuItem::DeviceControl,
+            MenuItem::Settings,
+            MenuItem::About,
+        ]
     }
 }
 
 /// 舵机状态
 #[derive(Clone)]
 pub struct ServoState {
-    pub values: [i16; SERVO_COUNT],  // 6个舵机的角度值 (-180 ~ 180)
-    pub selected: usize,              // 当前选中的舵机索引
+    pub values: [i16; SERVO_COUNT], // 6个舵机的角度值 (-180 ~ 180)
+    pub selected: usize,            // 当前选中的舵机索引
 }
 
 impl Default for ServoState {
     fn default() -> Self {
         Self {
-            values: [0; SERVO_COUNT],  // 默认 0 度
+            values: [0; SERVO_COUNT], // 默认 0 度
             selected: 0,
         }
     }
@@ -103,6 +112,35 @@ impl ServoState {
     }
 }
 
+pub enum DeviceCmd {
+    SendFrame(FrameData),
+    Disconnect,
+}
+
+/// 设备发送器（在线程间传递）
+pub struct DeviceSender {
+    tx: mpsc::Sender<DeviceCmd>,
+    running: Arc<AtomicBool>,
+}
+
+impl DeviceSender {
+    pub fn new(tx: mpsc::Sender<DeviceCmd>, running: Arc<AtomicBool>) -> Self {
+        Self { tx, running }
+    }
+
+    pub fn send_frame(&self, frame: FrameData) {
+        let _ = self.tx.send(DeviceCmd::SendFrame(frame));
+    }
+
+    pub fn disconnect(&self) {
+        let _ = self.tx.send(DeviceCmd::Disconnect);
+    }
+
+    pub fn stop(&self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
+}
+
 pub struct App {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
@@ -111,7 +149,8 @@ pub struct App {
     pub frame_counter: u32,
     pub lcd_buffer: Vec<u8>,
     pub servo_state: ServoState,
-    pub in_servo_mode: bool,  // 是否在舵机控制模式
+    pub in_servo_mode: bool, // 是否在舵机控制模式
+    pub device_sender: Option<DeviceSender>,
 }
 
 impl App {
@@ -127,6 +166,44 @@ impl App {
             lcd_buffer: vec![0u8; FRAME_SIZE],
             servo_state: ServoState::default(),
             in_servo_mode: false,
+            device_sender: None,
+        }
+    }
+
+    /// 启动设备发送线程
+    pub fn start_device_thread(&mut self) {
+        let (tx, rx) = mpsc::channel();
+        let running = Arc::new(AtomicBool::new(true));
+        let running_clone = running.clone();
+
+        let mut device = CdcDevice::new();
+
+        thread::spawn(move || {
+            while running_clone.load(Ordering::Relaxed) {
+                match rx.recv_timeout(std::time::Duration::from_millis(10)) {
+                    Ok(DeviceCmd::SendFrame(frame)) => {
+                        let _ = device.send_frame(&frame);
+                    }
+                    Ok(DeviceCmd::Disconnect) => {
+                        device.disconnect();
+                    }
+                    Err(_) => {
+                        // 超时，继续循环
+                    }
+                }
+            }
+            // 清理
+            device.disconnect();
+        });
+
+        self.device_sender = Some(DeviceSender::new(tx, running));
+    }
+
+    /// 通过线程发送帧
+    pub fn send_frame(&mut self, frame: &FrameData) {
+        self.update_lcd_buffer(frame);
+        if let Some(sender) = &self.device_sender {
+            sender.send_frame(frame.clone());
         }
     }
 
@@ -177,8 +254,8 @@ impl App {
         self.frame_counter = self.frame_counter.wrapping_add(1);
 
         // 生成测试图案（彩虹效果）
-        let width = frame.header.width as usize;
-        let height = frame.header.height as usize;
+        let width = 240usize;
+        let height = 60usize;
 
         for y in 0..height {
             for x in 0..width {

@@ -12,65 +12,60 @@ pub enum DeviceState {
     Error(String),
 }
 
-/// 帧头部结构 (32 bytes)
+/// 各个关节的运动角度
 #[repr(C, packed)]
-#[derive(Clone)]
-pub struct FrameHeader {
-    pub magic: u32,        // 0xAAAAEEEE
-    pub width: u32,
-    pub height: u32,
-    pub x: u32,
-    pub y: u32,
-    pub format: u32,       // 0: RGB565, 1: RGB888
-    pub flag: u32,
-    pub reserved: [u8; 12],
+#[derive(Clone, Copy)]
+pub struct JointConfig {
+    pub enable: u8,       // 1: 使能, 0: 掉电
+    pub angles: [f32; 6], // 6个关节的角度
+    pub padding: [u8; 7], // 补齐到 32 字节
+}
+
+impl Default for JointConfig {
+    fn default() -> Self {
+        Self {
+            enable: 0,
+            angles: [0.0; 6],
+            padding: [0u8; 7],
+        }
+    }
+}
+
+impl JointConfig {
+    pub fn to_bytes(self) -> [u8; 32] {
+        let mut bytes = [0u8; 32];
+        bytes[0] = self.enable;
+        for i in 0..6 {
+            let b = self.angles[i].to_le_bytes();
+            bytes[1 + i * 4..1 + i * 4 + 4].copy_from_slice(&b);
+        }
+        bytes
+    }
 }
 
 /// 帧数据结构
 #[derive(Clone)]
 pub struct FrameData {
-    pub header: FrameHeader,
-    pub pixels: Vec<u8>,    // 60 * 240 * 3 = 43200 bytes
+    pub joint: JointConfig,
+    pub pixels: Vec<u8>, // 60 * 240 * 3 = 43200 bytes
 }
 
 impl Default for FrameData {
     fn default() -> Self {
         Self {
-            header: FrameHeader {
-                magic: 0xAAAAEEEE_u32.to_le(),
-                width: 240,
-                height: 60,
-                x: 0,
-                y: 0,
-                format: 1, // RGB888
-                flag: 0,
-                reserved: [0u8; 12],
-            },
-            pixels: vec![0u8; 60 * 240 * 3],
+            joint: JointConfig::default(),
+            pixels: vec![0u8; 60 * 240 * 3], // 43200 字节
         }
     }
 }
-
 impl FrameData {
     /// 生成完整的帧数据（包含头部 + 像素数据）
     pub fn to_bytes(&self) -> Vec<u8> {
-        let header_bytes = self.header_as_bytes();
+        let joint_bytes = self.joint.to_bytes();
         let mut frame = Vec::with_capacity(FRAME_SIZE);
-        frame.extend_from_slice(&header_bytes);
+        frame.extend_from_slice(&joint_bytes);
         frame.extend_from_slice(&self.pixels);
         frame
-    }
-
-    fn header_as_bytes(&self) -> [u8; 32] {
-        let mut bytes = [0u8; 32];
-        bytes[0..4].copy_from_slice(&self.header.magic.to_le_bytes());
-        bytes[4..8].copy_from_slice(&self.header.width.to_le_bytes());
-        bytes[8..12].copy_from_slice(&self.header.height.to_le_bytes());
-        bytes[12..16].copy_from_slice(&self.header.x.to_le_bytes());
-        bytes[16..20].copy_from_slice(&self.header.y.to_le_bytes());
-        bytes[20..24].copy_from_slice(&self.header.format.to_le_bytes());
-        bytes[24..28].copy_from_slice(&self.header.flag.to_le_bytes());
-        bytes
     }
 }
 
@@ -79,7 +74,7 @@ pub struct CdcDevice {
     port: Option<Box<dyn serialport::SerialPort>>,
     state: DeviceState,
 }
-
+#[allow(dead_code)]
 impl CdcDevice {
     pub fn new() -> Self {
         Self {
@@ -134,10 +129,7 @@ impl CdcDevice {
             port.write_all(&data)?;
             Ok(data.len())
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::NotConnected,
-                "设备未连接",
-            ))
+            Err(io::Error::new(io::ErrorKind::NotConnected, "设备未连接"))
         }
     }
 
@@ -149,7 +141,41 @@ impl CdcDevice {
     //     }
     //     Ok(())
     // }
+    /// 模拟 C++ 的 SyncTask 逻辑
+    /// full_frame: 240x240x3 = 172800 字节的原始 RGB 数据
+    /// config: 包含使能开关和 6 个角度的指令
+    pub fn sync_frame(&mut self, full_frame: &[u8], config: &JointConfig) -> io::Result<[f32; 6]> {
+        let port = self
+            .port
+            .as_mut()
+            .ok_or(io::Error::new(io::ErrorKind::NotConnected, "未连接"))?;
 
+        let mut feedback_angles = [0.0f32; 6];
+        let config_bytes = config.to_bytes();
+        let mut rx_buffer = [0u8; 32];
+
+        for p in 0..4 {
+            port.read_exact(&mut rx_buffer)?;
+
+            for j in 0..6 {
+                let mut b = [0u8; 4];
+                b.copy_from_slice(&rx_buffer[1 + j * 4..1 + j * 4 + 4]);
+                feedback_angles[j] = f32::from_le_bytes(b);
+            }
+
+            let offset = p * 43200;
+            let body_chunk = &full_frame[offset..offset + 43008];
+            port.write_all(body_chunk)?;
+
+            let mut tail_packet = [0u8; 224];
+            tail_packet[0..192].copy_from_slice(&full_frame[offset + 43008..offset + 43200]);
+            tail_packet[192..224].copy_from_slice(&config_bytes);
+
+            port.write_all(&tail_packet)?;
+        }
+
+        Ok(feedback_angles)
+    }
     /// 检查是否已连接
     pub fn is_connected(&self) -> bool {
         self.port.is_some()

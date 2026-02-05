@@ -1,9 +1,9 @@
+use crate::app::App;
+use crate::device::DeviceState;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
-use crate::app::App;
-use crate::device::DeviceState;
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let (status_text, status_color) = match app.device.state() {
@@ -16,19 +16,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     let text = vec![
         Line::raw(""),
-        Line::from_iter([Span::styled(
-            "连接状态: ",
-            Style::new().fg(Color::Yellow),
-        )]),
+        Line::from_iter([Span::styled("连接状态: ", Style::new().fg(Color::Yellow))]),
         Line::from_iter([Span::styled(
             format!("  {}", status_text),
             Style::new().fg(status_color),
         )]),
         Line::raw(""),
-        Line::from_iter([Span::styled(
-            "设备信息:",
-            Style::new().fg(Color::Yellow),
-        )]),
+        Line::from_iter([Span::styled("设备信息:", Style::new().fg(Color::Yellow))]),
         if is_connected {
             Line::raw("  型号: ElectronBot")
         } else {
@@ -40,10 +34,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Line::raw("  固件版本: -")
         },
         Line::raw(""),
-        Line::from_iter([Span::styled(
-            "帧数据:",
-            Style::new().fg(Color::Yellow),
-        )]),
+        Line::from_iter([Span::styled("帧数据:", Style::new().fg(Color::Yellow))]),
         Line::raw(format!("  帧大小: {} bytes", crate::device::FRAME_SIZE)),
         Line::raw(format!("  缓冲区: {}", crate::device::BUFFER_COUNT)),
         Line::raw(""),
@@ -59,10 +50,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             )])
         },
         Line::raw(""),
-        Line::from_iter([Span::styled(
-            "可用串口:",
-            Style::new().fg(Color::Yellow),
-        )]),
+        Line::from_iter([Span::styled("可用串口:", Style::new().fg(Color::Yellow))]),
         Line::raw("  (请在设备控制页面连接)"),
     ];
 
