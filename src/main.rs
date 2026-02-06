@@ -94,7 +94,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
         // 如果设备已连接，定时发送帧数据, 得通过线程发送, 不然影响刷新速度
         if app.device.is_connected() {
             let frame = app.create_test_frame();
-            app.send_frame(&frame);
+            app.send_frame(frame);
         }
 
         // 控制帧率

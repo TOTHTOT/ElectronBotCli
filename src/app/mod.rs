@@ -108,10 +108,10 @@ impl App {
         self.device_sender = Some(DeviceSender::new(tx, running));
     }
 
-    pub fn send_frame(&mut self, frame: &FrameData) {
-        self.update_lcd_buffer(frame);
+    pub fn send_frame(&mut self, frame: FrameData) {
+        self.lcd_buffer = frame.to_bytes();
         if let Some(sender) = &self.device_sender {
-            sender.send_frame(frame.clone());
+            sender.send_frame(frame);
         }
     }
 
@@ -149,10 +149,6 @@ impl App {
 
     pub fn disconnect_device(&mut self) {
         self.device.disconnect();
-    }
-
-    pub fn update_lcd_buffer(&mut self, frame: &FrameData) {
-        self.lcd_buffer = frame.to_bytes();
     }
 
     pub fn create_test_frame(&mut self) -> FrameData {
