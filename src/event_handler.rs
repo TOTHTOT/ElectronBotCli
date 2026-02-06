@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::device::cdc::CdcDevice;
 
 pub enum AppEvent {
     Quit,
@@ -48,7 +49,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
                 app.disconnect_device();
             } else {
                 // 尝试连接第一个可用设备
-                if let Some(port) = crate::device::CdcDevice::list_ports().first() {
+                if let Some(port) = CdcDevice::list_ports().first() {
                     app.connect_device(port);
                 }
             }

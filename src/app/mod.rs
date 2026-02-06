@@ -1,4 +1,17 @@
-use crate::device::{CdcDevice, FrameData, FRAME_SIZE};
+// app模块, 负责界面调度以及实际运行功能
+pub mod constants;
+#[allow(dead_code)]
+pub mod log;
+pub mod menu;
+pub mod servo;
+
+// 导出类型
+pub use constants::*;
+pub use log::*;
+pub use menu::*;
+pub use servo::*;
+
+use crate::device::{CdcDevice, FrameData, ImageProcessor, FRAME_SIZE};
 use ratatui::widgets::ListState;
 use std::default::Default;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,118 +19,13 @@ use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
 
-pub const SERVO_COUNT: usize = 6;
-pub const SERVO_MIN: i16 = -180;
-pub const SERVO_MAX: i16 = 180;
-
-#[derive(Clone, Copy, PartialEq)]
-pub enum MenuItem {
-    DeviceStatus,
-    DeviceControl,
-    Settings,
-    About,
-}
-
-impl MenuItem {
-    pub fn title(&self) -> &'static str {
-        match self {
-            MenuItem::DeviceStatus => "设备状态",
-            MenuItem::DeviceControl => "设备控制",
-            MenuItem::Settings => "设置",
-            MenuItem::About => "关于",
-        }
-    }
-
-    pub fn all() -> [MenuItem; 4] {
-        [
-            MenuItem::DeviceStatus,
-            MenuItem::DeviceControl,
-            MenuItem::Settings,
-            MenuItem::About,
-        ]
-    }
-}
-
-/// 舵机状态
-#[derive(Clone)]
-pub struct ServoState {
-    pub values: [i16; SERVO_COUNT], // 6个舵机的角度值 (-180 ~ 180)
-    pub selected: usize,            // 当前选中的舵机索引
-}
-
-impl Default for ServoState {
-    fn default() -> Self {
-        Self {
-            values: [0; SERVO_COUNT], // 默认 0 度
-            selected: 0,
-        }
-    }
-}
-
-impl ServoState {
-    /// 获取舵机名称
-    pub fn servo_name(index: usize) -> &'static str {
-        match index {
-            0 => "头部",
-            1 => "左臂",
-            2 => "右臂",
-            3 => "左手",
-            4 => "右手",
-            5 => "腰部",
-            _ => "未知",
-        }
-    }
-
-    /// 选中的舵机位置+1
-    pub fn next_servo(&mut self) {
-        self.selected = (self.selected + 1) % SERVO_COUNT;
-    }
-
-    /// 选中的舵机位置-1
-    pub fn prev_servo(&mut self) {
-        self.selected = (self.selected + SERVO_COUNT - 1) % SERVO_COUNT;
-    }
-
-    /// 选中的舵机角度增加
-    pub fn increase(&mut self) {
-        if self.values[self.selected] < SERVO_MAX {
-            self.values[self.selected] = (self.values[self.selected] + 1).min(SERVO_MAX);
-        }
-    }
-
-    /// 选中的舵机角度减少
-    pub fn decrease(&mut self) {
-        if self.values[self.selected] > SERVO_MIN {
-            self.values[self.selected] = (self.values[self.selected] - 1).max(SERVO_MIN);
-        }
-    }
-
-    /// 选中的舵机角度大幅增加
-    pub fn increase_big(&mut self) {
-        if self.values[self.selected] < SERVO_MAX {
-            self.values[self.selected] = (self.values[self.selected] + 5).min(SERVO_MAX);
-        }
-    }
-
-    /// 选中的舵机角度大幅减少
-    pub fn decrease_big(&mut self) {
-        if self.values[self.selected] > SERVO_MIN {
-            self.values[self.selected] = (self.values[self.selected] - 5).max(SERVO_MIN);
-        }
-    }
-
-    /// 将舵机值转换为0-100的百分比
-    pub fn to_percent(value: i16) -> u16 {
-        ((value - SERVO_MIN) * 100 / (SERVO_MAX - SERVO_MIN)) as u16
-    }
-}
-
+// 消息命令
 pub enum DeviceCmd {
     SendFrame(FrameData),
     Disconnect,
 }
 
-/// 设备发送器（在线程间传递）
+/// 设备发送器
 pub struct DeviceSender {
     tx: mpsc::Sender<DeviceCmd>,
     running: Arc<AtomicBool>,
@@ -141,6 +49,7 @@ impl DeviceSender {
     }
 }
 
+/// 主应用
 pub struct App {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
@@ -149,14 +58,17 @@ pub struct App {
     pub frame_counter: u32,
     pub lcd_buffer: Vec<u8>,
     pub servo_state: ServoState,
-    pub in_servo_mode: bool, // 是否在舵机控制模式
+    pub in_servo_mode: bool,
     pub device_sender: Option<DeviceSender>,
+    pub log_queue: LogQueue,
+    image_error_logged: bool, // 标记图片加载错误是否已记录
 }
 
 impl App {
     pub fn new() -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
+
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
@@ -167,15 +79,15 @@ impl App {
             servo_state: ServoState::default(),
             in_servo_mode: false,
             device_sender: None,
+            log_queue: LogQueue::new(),
+            image_error_logged: false,
         }
     }
 
-    /// 启动设备发送线程
     pub fn start_device_thread(&mut self) {
         let (tx, rx) = mpsc::channel();
         let running = Arc::new(AtomicBool::new(true));
         let running_clone = running.clone();
-
         let mut device = CdcDevice::new();
 
         thread::spawn(move || {
@@ -187,19 +99,15 @@ impl App {
                     Ok(DeviceCmd::Disconnect) => {
                         device.disconnect();
                     }
-                    Err(_) => {
-                        // 超时，继续循环
-                    }
+                    Err(_) => {}
                 }
             }
-            // 清理
             device.disconnect();
         });
 
         self.device_sender = Some(DeviceSender::new(tx, running));
     }
 
-    /// 通过线程发送帧
     pub fn send_frame(&mut self, frame: &FrameData) {
         self.update_lcd_buffer(frame);
         if let Some(sender) = &self.device_sender {
@@ -231,35 +139,57 @@ impl App {
         self.selected_menu = items[i];
     }
 
-    /// 连接设备
     pub fn connect_device(&mut self, port_name: &str) {
         if let Err(e) = self.device.connect(port_name) {
-            eprintln!("连接失败: {}", e);
+            self.log_queue.error(format!("连接失败: {e}"));
+        } else {
+            self.log_queue.info(format!("已连接到 {port_name}"));
         }
     }
 
-    /// 断开设备
     pub fn disconnect_device(&mut self) {
         self.device.disconnect();
     }
 
-    /// 更新 LCD 缓冲区
     pub fn update_lcd_buffer(&mut self, frame: &FrameData) {
         self.lcd_buffer = frame.to_bytes();
     }
 
-    /// 创建测试帧数据
     pub fn create_test_frame(&mut self) -> FrameData {
         let mut frame = FrameData::default();
         self.frame_counter = self.frame_counter.wrapping_add(1);
 
-        // 生成测试图案（彩虹效果）
-        let width = 240usize;
-        let height = 60usize;
+        let mut processor = ImageProcessor::new();
+        match processor.load_from_file("assets/images/tet.png") {
+            Ok(image_data) => {
+                // 图片加载成功，重置错误标记
+                self.image_error_logged = false;
+                for row in 0..FRAME_HEIGHT {
+                    let src_offset = row * ROW_SIZE;
+                    let dst_offset = row * ROW_SIZE;
+                    frame.pixels[dst_offset..dst_offset + ROW_SIZE]
+                        .copy_from_slice(&image_data[src_offset..src_offset + ROW_SIZE]);
+                }
+            }
+            Err(ref e) if !self.image_error_logged => {
+                // 只记录一次错误
+                self.image_error_logged = true;
+                self.log_queue.warn(format!("加载测试图片失败: {e}"));
+                self.generate_rainbow(&mut frame);
+            }
+            Err(_) => {
+                // 已经记录过错误，直接生成彩虹
+                self.generate_rainbow(&mut frame);
+            }
+        }
 
-        for y in 0..height {
-            for x in 0..width {
-                let idx = (y * width + x) * 3;
+        frame
+    }
+
+    fn generate_rainbow(&self, frame: &mut FrameData) {
+        for y in 0..FRAME_HEIGHT {
+            for x in 0..FRAME_WIDTH {
+                let idx = (y * FRAME_WIDTH + x) * 3;
                 let hue = ((x + y + self.frame_counter as usize) % 360) as u8;
                 let (r, g, b) = hsv_to_rgb(hue as f32, 1.0, 1.0);
 
@@ -268,8 +198,6 @@ impl App {
                 frame.pixels[idx + 2] = b;
             }
         }
-
-        frame
     }
 }
 
@@ -279,7 +207,6 @@ impl Default for App {
     }
 }
 
-/// HSV 转 RGB
 fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
     let c = v * s;
     let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());

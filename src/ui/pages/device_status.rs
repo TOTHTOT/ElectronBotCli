@@ -1,5 +1,5 @@
 use crate::app::App;
-use crate::device::DeviceState;
+use crate::device::{DeviceState, BUFFER_COUNT, FRAME_SIZE};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
@@ -35,8 +35,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         },
         Line::raw(""),
         Line::from_iter([Span::styled("帧数据:", Style::new().fg(Color::Yellow))]),
-        Line::raw(format!("  帧大小: {} bytes", crate::device::FRAME_SIZE)),
-        Line::raw(format!("  缓冲区: {}", crate::device::BUFFER_COUNT)),
+        Line::raw(format!("  帧大小: {} bytes", FRAME_SIZE)),
+        Line::raw(format!("  缓冲区: {}", BUFFER_COUNT)),
         Line::raw(""),
         if is_connected {
             Line::from_iter([Span::styled(

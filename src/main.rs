@@ -2,6 +2,7 @@ mod app;
 mod device;
 mod event_handler;
 mod ui;
+mod ui_components;
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -30,13 +31,17 @@ fn main() -> io::Result<()> {
 fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> {
     let mut app = app::App::new();
     let tick_rate = Duration::from_millis(50); // 20 FPS
+    let mut log_popup = ui_components::LogPopup::new();
 
     // 启动设备发送线程
     app.start_device_thread();
 
     while app.running {
         // 渲染界面
-        terminal.draw(|frame| ui::render(frame, &mut app))?;
+        terminal.draw(|frame| {
+            ui::render(frame, &mut app);
+            log_popup.render(frame, frame.area(), &mut app.log_queue);
+        })?;
 
         // 非阻塞读取事件
         if event::poll(Duration::from_millis(10))? {
@@ -72,6 +77,11 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
                                 } else {
                                     event_handler::AppEvent::ConnectDevice
                                 }
+                            }
+                            KeyCode::Char('l') => {
+                                // 按 'l' 显示/隐藏日志 popup
+                                log_popup.toggle();
+                                event_handler::AppEvent::None
                             }
                             _ => event_handler::AppEvent::None,
                         }
