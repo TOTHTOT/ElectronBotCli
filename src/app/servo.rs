@@ -1,4 +1,5 @@
 use crate::app::constants::{SERVO_COUNT, SERVO_MAX, SERVO_MIN};
+use crate::device::JointConfig;
 
 /// 舵机状态
 #[derive(Clone)]
@@ -63,5 +64,14 @@ impl ServoState {
 
     pub fn to_percent(value: i16) -> u16 {
         ((value - SERVO_MIN) * 100 / (SERVO_MAX - SERVO_MIN)) as u16
+    }
+
+    /// 转换为 JointConfig
+    pub fn to_joint_config(&self) -> JointConfig {
+        JointConfig {
+            enable: 1, // 使能
+            angles: self.values.map(|v| v as f32),
+            padding: [0u8; 7],
+        }
     }
 }

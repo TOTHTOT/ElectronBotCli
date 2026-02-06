@@ -1,63 +1,48 @@
+use crate::app::constants::{FRAME_HEIGHT, FRAME_SIZE, FRAME_WIDTH};
+use anyhow::{Context, Result};
 use image::{DynamicImage, GenericImageView, ImageBuffer, Pixel};
-use std::error::Error;
-
-pub const FRAME_WIDTH: usize = 240;
-pub const FRAME_HEIGHT: usize = 240;
-pub const IMAGE_FRAME_SIZE: usize = FRAME_WIDTH * FRAME_HEIGHT * 3; // 172800 bytes
 
 /// RGB888 图像处理器
 pub struct ImageProcessor {
-    frame_buffer: [u8; IMAGE_FRAME_SIZE],
+    frame_buffer: [u8; FRAME_SIZE],
 }
 
 impl ImageProcessor {
     pub fn new() -> Self {
         Self {
-            frame_buffer: [0u8; IMAGE_FRAME_SIZE],
+            frame_buffer: [0u8; FRAME_SIZE],
         }
     }
 
     /// 从文件加载并处理图像
-    pub fn load_from_file(&mut self, path: &str) -> Result<&[u8], Box<dyn Error>> {
-        let img = image::open(path)?;
+    pub fn load_from_file(&mut self, path: &str) -> Result<&[u8]> {
+        let img = image::open(path).context("打开图片文件失败")?;
         self.process(img)
     }
 
     /// 从内存加载 BGRA 格式数据
-    pub fn load_from_bgra(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> Result<&[u8], Box<dyn Error>> {
+    pub fn load_from_bgra(&mut self, data: &[u8], width: u32, height: u32) -> Result<&[u8]> {
         // BGRA -> RGBA (交换 R 和 B)
         let mut rgba_data = data.to_vec();
         for chunk in rgba_data.chunks_mut(4) {
             chunk.swap(0, 2); // 交换 R 和 B
         }
         let img: ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-            ImageBuffer::from_raw(width, height, rgba_data)
-                .ok_or("Failed to create image buffer")?;
+            ImageBuffer::from_raw(width, height, rgba_data).context("创建图片缓冲区失败")?;
         let img = DynamicImage::ImageRgba8(img);
         self.process(img)
     }
 
     /// 从内存加载 RGBA 格式数据
-    pub fn load_from_rgba(
-        &mut self,
-        data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> Result<&[u8], Box<dyn Error>> {
+    pub fn load_from_rgba(&mut self, data: &[u8], width: u32, height: u32) -> Result<&[u8]> {
         let img: ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-            ImageBuffer::from_raw(width, height, data.to_vec())
-                .ok_or("Failed to create image buffer")?;
+            ImageBuffer::from_raw(width, height, data.to_vec()).context("创建图片缓冲区失败")?;
         let img = DynamicImage::ImageRgba8(img);
         self.process(img)
     }
 
     /// 内部处理流程
-    fn process(&mut self, img: DynamicImage) -> Result<&[u8], Box<dyn Error>> {
+    fn process(&mut self, img: DynamicImage) -> Result<&[u8]> {
         let img = img.flipv();
 
         let img = img.resize(
@@ -90,8 +75,8 @@ impl ImageProcessor {
         Ok(&self.frame_buffer)
     }
 
-    /// 获取帧缓冲区指针
-    pub fn frame_data(&self) -> &[u8; IMAGE_FRAME_SIZE] {
+    /// 获取帧缓冲区
+    pub fn frame_data(&self) -> &[u8; FRAME_SIZE] {
         &self.frame_buffer
     }
 

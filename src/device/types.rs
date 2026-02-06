@@ -36,33 +36,4 @@ impl JointConfig {
         bytes
     }
 }
-
-/// 帧数据结构
-#[derive(Clone)]
-pub struct FrameData {
-    pub joint: JointConfig,
-    pub pixels: Vec<u8>, // 60 * 240 * 3 = 43200 bytes
-}
-
-impl Default for FrameData {
-    fn default() -> Self {
-        Self {
-            joint: JointConfig::default(),
-            pixels: vec![0u8; 60 * 240 * 3], // 43200 字节
-        }
-    }
-}
-
-impl FrameData {
-    /// 生成完整的帧数据（包含头部 + 像素数据）
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let joint_bytes = self.joint.to_bytes();
-        let mut frame = Vec::with_capacity(FRAME_SIZE);
-        frame.extend_from_slice(&joint_bytes);
-        frame.extend_from_slice(&self.pixels);
-        frame
-    }
-}
-
-pub const FRAME_SIZE: usize = 60 * 240 * 3 + 32; // 43232 bytes
 pub const BUFFER_COUNT: usize = 2;

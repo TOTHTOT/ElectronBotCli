@@ -33,9 +33,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
     let tick_rate = Duration::from_millis(50); // 20 FPS
     let mut log_popup = ui_components::LogPopup::new();
 
-    // 启动设备发送线程
-    app.start_device_thread();
-
     while app.running {
         // 渲染界面
         terminal.draw(|frame| {
@@ -91,21 +88,17 @@ fn run(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>) -> io::Result<()> 
             }
         }
 
-        // 如果设备已连接，定时发送帧数据, 得通过线程发送, 不然影响刷新速度
+        // 如果设备已连接，生成并发送帧数据
         if app.device.is_connected() {
-            let frame = app.create_test_frame();
-            app.send_frame(frame);
+            app.send_frame();
         }
 
         // 控制帧率
         std::thread::sleep(tick_rate);
     }
 
-    // 停止设备线程并断开连接
-    if let Some(sender) = &app.device_sender {
-        sender.stop();
-        sender.disconnect();
-    }
+    // 断开设备连接
+    app.disconnect_device();
 
     Ok(())
 }

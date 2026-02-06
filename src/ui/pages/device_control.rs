@@ -1,4 +1,4 @@
-use crate::app::{App, ServoState, SERVO_COUNT};
+use crate::app::{App, Expression, RobotEyes, ServoState, FRAME_WIDTH, SERVO_COUNT};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
@@ -129,23 +129,66 @@ fn render_single_servo(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 
 fn render_lcd_preview(frame: &mut Frame, area: Rect, _app: &App) {
     let outer_block = Block::new()
-        .title("Lcd 缓冲区")
+        .title("RobotEyes")
         .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
-    let width = (inner_area.width as usize).saturating_sub(2);
-    let height = (inner_area.height as usize).saturating_sub(2);
+
+    // 生成 RobotEyes 像素
+    let mut eyes = RobotEyes::new();
+    eyes.set_expression(Expression::Neutral);
+    eyes.random_blink();
+    let mut pixels = vec![0u8; FRAME_WIDTH * 240 * 3];
+    eyes.generate_frame(&mut pixels);
+
+    // 可用字符区域
+    let avail_width = inner_area.width.saturating_sub(2) as usize;
+    let avail_height = inner_area.height.saturating_sub(2) as usize;
+
+    // 终端字符宽高比约 2:1
+    // 240x240 像素，根据可用高度缩放
+    let image_size = 240;
+    let char_aspect = 2.0;
+
+    // 计算缩放比例（像素 -> 字符）
+    let scale = image_size as f32 / avail_height as f32;
+    let scaled_width = (image_size as f32 / scale / char_aspect) as usize;
+
+    // 居中偏移
+    let offset_x = (avail_width.saturating_sub(scaled_width)) / 2;
+
     let chars = [' ', '░', '▒', '█'];
 
     let mut lines = Vec::new();
-    for y in 0..height {
+    for py in 0..avail_height {
+        let pixel_y = (py as f32 * scale) as usize;
         let mut line = String::new();
-        for x in 0..width {
-            let v = ((x + y) as f32 / (width + height) as f32) * 255.0;
-            let idx = ((v / 64.0) as usize).min(3);
-            line.push(chars[idx]);
+        for px in 0..avail_width {
+            if pixel_y < image_size {
+                // 计算对应像素位置
+                let scaled_px = if px >= offset_x { px - offset_x } else { px };
+                let pixel_x = (scaled_px as f32 * char_aspect * scale) as usize;
+
+                if pixel_x < image_size {
+                    let idx = (pixel_y * 240 + pixel_x) * 3;
+                    if idx + 2 < pixels.len() {
+                        let r = pixels[idx];
+                        let g = pixels[idx + 1];
+                        let b = pixels[idx + 2];
+                        let brightness = (r as u16 + g as u16 + b as u16) / 3;
+                        let char_idx = ((brightness / 64) as usize).min(3);
+                        line.push(chars[char_idx]);
+                    } else {
+                        line.push(' ');
+                    }
+                } else {
+                    line.push(' ');
+                }
+            } else {
+                line.push(' ');
+            }
         }
         lines.push(Line::raw(line));
     }

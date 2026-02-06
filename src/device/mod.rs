@@ -5,4 +5,4 @@ pub mod types;
 
 pub use cdc::CdcDevice;
 pub use image::ImageProcessor;
-pub use types::{DeviceState, FrameData, JointConfig, BUFFER_COUNT, FRAME_SIZE};
+pub use types::{DeviceState, JointConfig, BUFFER_COUNT};

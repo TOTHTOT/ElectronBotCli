@@ -1,5 +1,5 @@
-use crate::app::App;
-use crate::device::{DeviceState, BUFFER_COUNT, FRAME_SIZE};
+use crate::app::{App, FRAME_SIZE};
+use crate::device::{DeviceState, BUFFER_COUNT};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},

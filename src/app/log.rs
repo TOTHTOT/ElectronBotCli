@@ -70,6 +70,7 @@ pub struct LogQueue {
     has_new_important: bool,                  // 是否有新的 warning/error
 }
 
+#[allow(dead_code)]
 impl LogQueue {
     pub fn new() -> Self {
         Self {

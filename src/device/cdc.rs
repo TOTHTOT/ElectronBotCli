@@ -1,8 +1,9 @@
+use crate::app::constants::{FRAME_CHUNK_SIZE, FRAME_SIZE};
 use crate::device::JointConfig;
-use std::io::{self, Write};
+use anyhow::{Context, Result};
 use std::time::Duration;
 
-pub use super::types::{DeviceState, FrameData};
+pub use super::types::DeviceState;
 
 /// CDC 设备连接器
 pub struct CdcDevice {
@@ -10,7 +11,6 @@ pub struct CdcDevice {
     state: DeviceState,
 }
 
-#[allow(dead_code)]
 impl CdcDevice {
     pub fn new() -> Self {
         Self {
@@ -34,7 +34,7 @@ impl CdcDevice {
     }
 
     /// 连接到 CDC 设备
-    pub fn connect(&mut self, port_name: &str) -> io::Result<()> {
+    pub fn connect(&mut self, port_name: &str) -> Result<()> {
         match serialport::new(port_name, 1_000_000) // 1Mbps
             .timeout(Duration::from_millis(100))
             .open()
@@ -46,8 +46,8 @@ impl CdcDevice {
                 Ok(())
             }
             Err(e) => {
-                self.state = DeviceState::Error(format!("连接失败: {}", e));
-                Err(io::Error::other(e))
+                self.state = DeviceState::Error(format!("连接失败: {e}"));
+                anyhow::bail!("连接失败: {e}")
             }
         }
     }
@@ -58,34 +58,17 @@ impl CdcDevice {
         self.state = DeviceState::Disconnected;
     }
 
-    /// 发送帧数据
-    pub fn send_frame(&mut self, frame: &FrameData) -> io::Result<usize> {
-        if let Some(ref mut port) = self.port {
-            let data = frame.to_bytes();
-            port.write_all(&data)?;
-            Ok(data.len())
-        } else {
-            Err(io::Error::new(io::ErrorKind::NotConnected, "设备未连接"))
-        }
-    }
-
-    /// 发送一帧完整数据, 参考原先的流程
-    /// full_frame: 240x240x3 = 172800 字节的原始 RGB 数据
-    /// config: 包含使能开关和 6 个角度的指令
-    pub fn sync_frame(&mut self, full_frame: &[u8], config: &JointConfig) -> io::Result<[f32; 6]> {
-        let port = self
-            .port
-            .as_mut()
-            .ok_or(io::Error::new(io::ErrorKind::NotConnected, "未连接"))?;
+    /// 发送一帧完整数据
+    pub fn sync_frame(&mut self, full_frame: &[u8], config: &JointConfig) -> Result<[f32; 6]> {
+        let port = self.port.as_mut().context("未连接")?;
 
         let mut feedback_angles = [0.0f32; 6];
         let config_bytes = config.to_bytes();
         let mut rx_buffer = [0u8; 32];
         const PACKET_SIZE: usize = 512;
-        const PACKET_COUNT: usize = 84;
 
         for p in 0..4 {
-            port.read_exact(&mut rx_buffer)?;
+            port.read_exact(&mut rx_buffer).context("读取请求失败")?;
 
             for j in 0..6 {
                 let mut b = [0u8; 4];
@@ -93,19 +76,21 @@ impl CdcDevice {
                 feedback_angles[j] = f32::from_le_bytes(b);
             }
 
-            let offset = p * 43008;
+            let offset = p * FRAME_CHUNK_SIZE;
             let mut sent = 0;
-            while sent < 43008 {
-                let chunk_size = std::cmp::min(PACKET_SIZE, 43008 - sent);
+            while sent < FRAME_CHUNK_SIZE {
+                let chunk_size = std::cmp::min(PACKET_SIZE, FRAME_CHUNK_SIZE - sent);
                 port.write_all(&full_frame[offset + sent..offset + sent + chunk_size])?;
                 sent += chunk_size;
             }
 
-            let mut tail_packet = [0u8; 224];
-            tail_packet[0..192].copy_from_slice(&full_frame[offset + 43008..offset + 43200]);
-            tail_packet[192..224].copy_from_slice(&config_bytes);
-
-            port.write_all(&tail_packet)?;
+            if p == 3 {
+                let mut tail_packet = [0u8; 224];
+                tail_packet[0..192]
+                    .copy_from_slice(&full_frame[offset + 43008..offset + FRAME_SIZE]);
+                tail_packet[192..224].copy_from_slice(&config_bytes);
+                port.write_all(&tail_packet)?;
+            }
         }
 
         Ok(feedback_angles)
