@@ -1,13 +1,5 @@
 use crate::app::SERVO_COUNT;
 
-/// CDC 设备连接状态
-#[derive(Debug, Clone, PartialEq)]
-pub enum DeviceState {
-    Disconnected,
-    Connected(String),
-    Error(String),
-}
-
 /// 各个关节的运动角度
 #[repr(C, packed)]
 #[derive(Clone, Copy)]

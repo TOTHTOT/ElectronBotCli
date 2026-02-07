@@ -44,19 +44,17 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
         AppEvent::MenuDown => app.next_menu(),
         AppEvent::ConnectDevice => {
             // 如果已连接则断开
-            if app.device.is_connected() {
-                app.disconnect_device();
-            } else {
+            if app.is_connected() {
+                app.stop_comm_thread();
+            } else if app.port_select_popup.is_visible() {
                 // 如果端口选择弹窗已经打开，使用选中的端口
-                if app.port_select_popup.is_visible() {
-                    if let Some(port) = app.port_select_popup.selected_port() {
-                        let port_name = port.to_string();
-                        app.connect_device(&port_name);
-                    }
-                } else {
-                    // 否则打开端口选择弹窗
-                    app.port_select_popup.show();
+                if let Some(port) = app.port_select_popup.selected_port() {
+                    let port_name = port.to_string();
+                    app.start_comm_thread(&port_name);
                 }
+            } else {
+                // 否则打开端口选择弹窗
+                app.port_select_popup.show();
             }
         }
         AppEvent::EnterServoMode => {

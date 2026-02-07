@@ -1,18 +1,15 @@
 use crate::app::{App, FRAME_SIZE};
-use crate::device::{DeviceState, BUFFER_COUNT};
+use crate::device::BUFFER_COUNT;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let (status_text, status_color) = match app.device.state() {
-        DeviceState::Disconnected => ("未连接", Color::Red),
-        DeviceState::Connected(port) => (port.as_str(), Color::Green),
-        DeviceState::Error(msg) => (msg.as_str(), Color::Red),
-    };
+    let is_connected = app.is_connected();
 
-    let is_connected = matches!(app.device.state(), DeviceState::Connected(_));
+    let status_text = if is_connected { "已连接" } else { "未连接" };
+    let status_color = if is_connected { Color::Green } else { Color::Red };
 
     let text = vec![
         Line::raw(""),

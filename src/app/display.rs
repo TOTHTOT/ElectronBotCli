@@ -10,6 +10,8 @@ pub enum DisplayMode {
 /// 屏幕显示控制器
 pub struct DisplayController {
     mode: DisplayMode,
+    // 这个用于保存图片数据, 虽然也很大, 但是和 App::shared_state::pixels 不是同一个东西,
+    // 实际渲染会被复制到pixels, 这样做免得频繁读文件
     image_data: Option<Vec<u8>>,
 }
 

@@ -1,5 +1,6 @@
 // app模块, 负责界面调度以及实际运行功能
 
+pub mod comm;
 pub mod constants;
 #[allow(dead_code)]
 pub mod display;
@@ -9,6 +10,7 @@ pub mod menu;
 pub mod servo;
 
 // 导出类型
+pub use comm::{comm_thread_handler, SharedState};
 pub use constants::*;
 pub use display::*;
 pub use menu::*;
@@ -17,20 +19,22 @@ pub use servo::*;
 // 导出 eyes 模块的类型
 pub use eyes::{Expression, RobotEyes};
 
-use crate::device::{CdcDevice, ImageProcessor};
+use crate::device::{self, ImageProcessor};
 use ratatui::widgets::ListState;
 use std::default::Default;
+use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
 /// 主应用
 pub struct App {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
     pub running: bool,
-    pub device: CdcDevice,
     pub servo_state: ServoState,
     pub in_servo_mode: bool,
     pub display_controller: DisplayController,
     pub port_select_popup: PortSelectPopup,
+    shared_state: Option<Arc<SharedState>>,
 }
 
 #[allow(dead_code)]
@@ -43,28 +47,51 @@ impl App {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
-            device: CdcDevice::new(),
             servo_state: ServoState::default(),
             in_servo_mode: false,
             display_controller: DisplayController::new(),
             port_select_popup: PortSelectPopup::new(),
+            shared_state: None,
         }
     }
 
-    /// 发送帧数据 (240x240，分4块发送)
+    /// 启动后台通信线程
+    pub fn start_comm_thread(&mut self, port_name: &str) {
+        self.stop_comm_thread();
+
+        log::info!("Connecting to {port_name}...");
+
+        let shared = Arc::new(SharedState::new(
+            vec![0u8; FRAME_WIDTH * FRAME_HEIGHT * 3],
+            self.servo_state.to_joint_config(),
+        ));
+
+        let port_name = port_name.to_string();
+        comm_thread_handler(port_name, shared.clone());
+
+        self.shared_state = Some(shared);
+    }
+
+    /// 停止后台通信线程
+    pub fn stop_comm_thread(&mut self) {
+        if let Some(shared) = &self.shared_state {
+            shared.running.store(false, Ordering::Relaxed);
+        }
+        self.shared_state = None;
+    }
+
+    /// 发送帧数据 (更新共享状态)
     pub fn send_frame(&mut self) {
-        let mut pixels = vec![0u8; FRAME_WIDTH * FRAME_HEIGHT * 3];
-        self.display_controller.generate_pixels(&mut pixels);
-        let joint = self.servo_state.to_joint_config();
-        if self.device.is_connected() {
-            match self.device.sync_frame(&pixels, &joint) {
-                Ok(_angles) => {
-                    // log::info!("SYNC_OK angles=[{:.2}, {:.2}, {:.2}, {:.2}, {:.2}, {:.2}]",
-                    //     angles[0], angles[1], angles[2], angles[3], angles[4], angles[5]);
-                }
-                Err(e) => {
-                    log::warn!("通信错误: {e}");
-                }
+        if let Some(shared) = &self.shared_state {
+            let mut pixels = vec![0u8; FRAME_WIDTH * FRAME_HEIGHT * 3];
+            self.display_controller.generate_pixels(&mut pixels);
+            let config = self.servo_state.to_joint_config();
+
+            if let Ok(mut p) = shared.pixels.lock() {
+                *p = pixels;
+            }
+            if let Ok(mut c) = shared.config.lock() {
+                *c = config;
             }
         }
     }
@@ -93,17 +120,14 @@ impl App {
         self.selected_menu = items[i];
     }
 
-    pub fn connect_device(&mut self, port_name: &str) {
-        if let Err(e) = self.device.connect(port_name) {
-            log::error!("连接失败: {e}");
-        } else {
-            log::info!("已连接到 {port_name}");
-        }
+    pub fn disconnect_device(&mut self) {
+        self.stop_comm_thread();
+        log::info!("Device disconnected");
     }
 
-    pub fn disconnect_device(&mut self) {
-        self.device.disconnect();
-        log::info!("设备已断开连接");
+    /// 检查是否已连接
+    pub fn is_connected(&self) -> bool {
+        self.shared_state.is_some()
     }
 
     /// 从文件加载图片并设置为静态显示
@@ -115,7 +139,7 @@ impl App {
                 true
             }
             Err(e) => {
-                log::warn!("加载图片失败: {e}");
+                log::warn!("Failed to load image: {e}");
                 false
             }
         }
@@ -150,7 +174,7 @@ impl PortSelectPopup {
     }
 
     pub fn show(&mut self) {
-        self.ports = CdcDevice::list_ports();
+        self.ports = device::list_ports();
         self.selected_index = 0;
         self.visible = true;
     }

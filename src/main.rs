@@ -47,17 +47,18 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
     let tick_rate = Duration::from_millis(20);
 
     while app.running {
-        render(terminal, &mut app)?;
-        handle_input(&mut app)?;
-
-        if app.device.is_connected() {
+        // 如果已连接，更新帧数据到共享状态
+        if app.is_connected() {
             app.send_frame();
         }
+
+        render(terminal, &mut app)?;
+        handle_input(&mut app)?;
 
         std::thread::sleep(tick_rate);
     }
 
-    app.disconnect_device();
+    app.stop_comm_thread();
     Ok(())
 }
 
@@ -95,7 +96,7 @@ fn handle_port_select_input(code: KeyCode, app: &mut app::App) -> event_handler:
         KeyCode::Enter => {
             if let Some(port) = app.port_select_popup.selected_port() {
                 let port_name = port.to_string();
-                app.connect_device(&port_name);
+                app.start_comm_thread(&port_name);
             }
             app.port_select_popup.hide();
             event_handler::AppEvent::None
