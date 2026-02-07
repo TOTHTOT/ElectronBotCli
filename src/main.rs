@@ -17,7 +17,7 @@ use std::fs::File;
 use std::io::{self, Stdout};
 use std::time::Duration;
 
-fn main() -> io::Result<()> {
+fn main() -> anyhow::Result<()> {
     // 初始化日志 (每次启动截断日志文件)
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
@@ -33,23 +33,22 @@ fn main() -> io::Result<()> {
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-
-    let result = run(&mut terminal);
-
+    run(&mut terminal)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
-    result
+    Ok(())
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> io::Result<()> {
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let mut app = app::App::new();
+    app.load_image_from_file("./assets/images/test.png")?;
     let tick_rate = Duration::from_millis(20);
 
     while app.running {
         // 如果已连接，更新帧数据到共享状态
         if app.is_connected() {
-            app.send_frame();
+            app.build_send_frame();
         }
 
         render(terminal, &mut app)?;

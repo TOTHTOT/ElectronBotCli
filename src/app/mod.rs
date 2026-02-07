@@ -62,7 +62,7 @@ impl App {
         log::info!("Connecting to {port_name}...");
 
         let shared = Arc::new(SharedState::new(
-            vec![0u8; FRAME_WIDTH * FRAME_HEIGHT * 3],
+            vec![0u8; FRAME_SIZE],
             self.servo_state.to_joint_config(),
         ));
 
@@ -80,18 +80,14 @@ impl App {
         self.shared_state = None;
     }
 
-    /// 发送帧数据 (更新共享状态)
-    pub fn send_frame(&mut self) {
+    /// 构建屏幕要显示的一帧数据并发送
+    pub fn build_send_frame(&mut self) {
         if let Some(shared) = &self.shared_state {
-            let mut pixels = vec![0u8; FRAME_WIDTH * FRAME_HEIGHT * 3];
-            self.display_controller.generate_pixels(&mut pixels);
-            let config = self.servo_state.to_joint_config();
-
             if let Ok(mut p) = shared.pixels.lock() {
-                *p = pixels;
+                self.display_controller.generate_pixels(&mut p);
             }
             if let Ok(mut c) = shared.config.lock() {
-                *c = config;
+                *c = self.servo_state.to_joint_config();
             }
         }
     }
@@ -131,18 +127,11 @@ impl App {
     }
 
     /// 从文件加载图片并设置为静态显示
-    pub fn load_image_from_file(&mut self, path: &str) -> bool {
+    pub fn load_image_from_file(&mut self, path: &str) -> anyhow::Result<()> {
         let mut processor = ImageProcessor::new();
-        match processor.load_from_file(path) {
-            Ok(image_data) => {
-                self.display_controller.set_image(image_data);
-                true
-            }
-            Err(e) => {
-                log::warn!("Failed to load image: {e}");
-                false
-            }
-        }
+        let image_data = processor.load_from_file(path)?;
+        self.display_controller.set_image(image_data);
+        Ok(())
     }
 
     /// 设置显示模式
