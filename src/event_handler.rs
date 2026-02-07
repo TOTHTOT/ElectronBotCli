@@ -1,5 +1,4 @@
 use crate::app::App;
-use crate::device::cdc::CdcDevice;
 
 pub enum AppEvent {
     Quit,
@@ -44,13 +43,19 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
         AppEvent::MenuUp => app.prev_menu(),
         AppEvent::MenuDown => app.next_menu(),
         AppEvent::ConnectDevice => {
-            // 如果已连接则断开，否则连接
+            // 如果已连接则断开
             if app.device.is_connected() {
                 app.disconnect_device();
             } else {
-                // 尝试连接第一个可用设备
-                if let Some(port) = CdcDevice::list_ports().first() {
-                    app.connect_device(port);
+                // 如果端口选择弹窗已经打开，使用选中的端口
+                if app.port_select_popup.is_visible() {
+                    if let Some(port) = app.port_select_popup.selected_port() {
+                        let port_name = port.to_string();
+                        app.connect_device(&port_name);
+                    }
+                } else {
+                    // 否则打开端口选择弹窗
+                    app.port_select_popup.show();
                 }
             }
         }

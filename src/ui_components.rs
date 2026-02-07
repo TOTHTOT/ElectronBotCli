@@ -1,2 +1,2 @@
-pub mod log_popup;
-pub use log_popup::LogPopup;
+pub mod port_select_popup;
+pub use port_select_popup::PortSelectPopupWidget;

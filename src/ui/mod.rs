@@ -4,6 +4,7 @@ mod sidebar;
 
 use crate::app::{App, MenuItem};
 use ratatui::prelude::*;
+use crate::ui_components::port_select_popup::PortSelectPopupWidget;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::new(
@@ -22,4 +23,8 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         MenuItem::Settings => pages::settings::render(frame, chunks[1]),
         MenuItem::About => pages::about::render(frame, chunks[1]),
     }
+
+    // 渲染端口选择弹窗
+    let mut port_select_widget = PortSelectPopupWidget::new();
+    port_select_widget.render(frame, frame.area(), &mut app.port_select_popup);
 }

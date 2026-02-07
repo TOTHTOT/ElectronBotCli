@@ -1,3 +1,5 @@
+use crate::app::SERVO_COUNT;
+
 /// CDC 设备连接状态
 #[derive(Debug, Clone, PartialEq)]
 pub enum DeviceState {
@@ -10,16 +12,16 @@ pub enum DeviceState {
 #[repr(C, packed)]
 #[derive(Clone, Copy)]
 pub struct JointConfig {
-    pub enable: u8,       // 1: 使能, 0: 掉电
-    pub angles: [f32; 6], // 6个关节的角度
-    pub padding: [u8; 7], // 补齐到 32 字节
+    pub enable: u8,                 // 1: 使能, 0: 掉电
+    pub angles: [f32; SERVO_COUNT], // 6个关节的角度
+    pub padding: [u8; 7],           // 补齐到 32 字节
 }
 
 impl Default for JointConfig {
     fn default() -> Self {
         Self {
             enable: 0,
-            angles: [0.0; 6],
+            angles: [0.0; SERVO_COUNT],
             padding: [0u8; 7],
         }
     }
