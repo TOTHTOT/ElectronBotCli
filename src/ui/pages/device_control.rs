@@ -85,7 +85,7 @@ fn render_single_servo(frame: &mut Frame, area: Rect, app: &App, index: usize) {
     let servo = &app.servo_state;
     let is_selected = index == servo.selected && app.in_servo_mode;
     let value = servo.values[index];
-    let percent = ServoState::to_percent(value);
+    let percent = ServoState::percent(value);
     let name = ServoState::servo_name(index);
 
     let indicator = if is_selected {

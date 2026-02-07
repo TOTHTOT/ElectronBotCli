@@ -1,12 +1,12 @@
 use crate::app::SERVO_COUNT;
 
 /// 各个关节的运动角度
-#[repr(C, packed)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
 pub struct JointConfig {
-    pub enable: u8,                 // 1: 使能, 0: 掉电
-    pub angles: [f32; SERVO_COUNT], // 6个关节的角度
-    pub padding: [u8; 7],           // 补齐到 32 字节
+    pub enable: u8,
+    pub angles: [f32; SERVO_COUNT],
+    pub padding: [u8; 7],
 }
 
 impl Default for JointConfig {

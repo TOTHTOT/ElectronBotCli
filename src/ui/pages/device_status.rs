@@ -8,8 +8,16 @@ use ratatui::{
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_connected = app.is_connected();
 
-    let status_text = if is_connected { "已连接" } else { "未连接" };
-    let status_color = if is_connected { Color::Green } else { Color::Red };
+    let status_text = if is_connected {
+        "已连接"
+    } else {
+        "未连接"
+    };
+    let status_color = if is_connected {
+        Color::Green
+    } else {
+        Color::Red
+    };
 
     let text = vec![
         Line::raw(""),

@@ -3,8 +3,8 @@ mod pages;
 mod sidebar;
 
 use crate::app::{App, MenuItem};
-use ratatui::prelude::*;
 use crate::ui_components::port_select_popup::PortSelectPopupWidget;
+use ratatui::prelude::*;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
     let chunks = Layout::new(

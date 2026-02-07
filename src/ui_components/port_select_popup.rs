@@ -40,8 +40,7 @@ impl PortSelectPopupWidget {
 
             frame.render_widget(block, popup_area);
 
-            let content = Paragraph::new("未找到可用设备")
-                .style(Style::new().fg(Color::Gray));
+            let content = Paragraph::new("未找到可用设备").style(Style::new().fg(Color::Gray));
             frame.render_widget(
                 content,
                 Rect::new(popup_area.x + 1, popup_area.y + 1, width - 2, 1),
@@ -59,14 +58,18 @@ impl PortSelectPopupWidget {
         self.list_state.select(Some(popup.selected_index));
 
         // 创建列表项
-        let items: Vec<ListItem> = popup.ports.iter().map(|port| {
-            let port_type = if port.contains("USB") || port.contains("ACM") {
-                " [CDC]"
-            } else {
-                ""
-            };
-            ListItem::new(Span::raw(format!("{port}{port_type}")))
-        }).collect();
+        let items: Vec<ListItem> = popup
+            .ports
+            .iter()
+            .map(|port| {
+                let port_type = if port.contains("USB") || port.contains("ACM") {
+                    " [CDC]"
+                } else {
+                    ""
+                };
+                ListItem::new(Span::raw(format!("{port}{port_type}")))
+            })
+            .collect();
 
         // 创建块
         let block = Block::new()

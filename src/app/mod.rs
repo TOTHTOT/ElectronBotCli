@@ -10,7 +10,6 @@ pub mod menu;
 pub mod servo;
 
 // 导出类型
-pub use comm::{comm_thread_handler, SharedState};
 pub use constants::*;
 pub use display::*;
 pub use menu::*;
@@ -19,12 +18,13 @@ pub use servo::*;
 // 导出 eyes 模块的类型
 pub use eyes::{Expression, RobotEyes};
 
-use crate::device::{self, ImageProcessor};
+use crate::device::{self, ImageProcessor, JointConfig};
 use ratatui::widgets::ListState;
 use std::default::Default;
-use std::sync::atomic::Ordering;
-use std::sync::Arc;
+use std::sync::mpsc;
+use std::sync::mpsc::SyncSender;
 
+pub type BotRecvType = (Box<Vec<u8>>, JointConfig);
 /// 主应用
 pub struct App {
     pub menu_state: ListState,
@@ -34,7 +34,10 @@ pub struct App {
     pub in_servo_mode: bool,
     pub display_controller: DisplayController,
     pub port_select_popup: PortSelectPopup,
-    shared_state: Option<Arc<SharedState>>,
+    comm_state: Option<comm::CommState>,
+    comm_thread: Option<std::thread::JoinHandle<()>>,
+    // 使用 Vec<u8> 发送 config_bytes 确保所有权清晰
+    comm_tx: Option<SyncSender<BotRecvType>>,
 }
 
 #[allow(dead_code)]
@@ -51,7 +54,9 @@ impl App {
             in_servo_mode: false,
             display_controller: DisplayController::new(),
             port_select_popup: PortSelectPopup::new(),
-            shared_state: None,
+            comm_state: None,
+            comm_thread: None,
+            comm_tx: None,
         }
     }
 
@@ -61,35 +66,40 @@ impl App {
 
         log::info!("Connecting to {port_name}...");
 
-        let shared = Arc::new(SharedState::new(
-            vec![0u8; FRAME_SIZE],
-            self.servo_state.to_joint_config(),
-        ));
-
+        let (tx, rx) = mpsc::sync_channel(1);
         let port_name = port_name.to_string();
-        comm_thread_handler(port_name, shared.clone());
 
-        self.shared_state = Some(shared);
+        let (state, handle) = comm::start_comm_thread(port_name, rx);
+
+        self.comm_state = Some(state);
+        self.comm_thread = Some(handle);
+        self.comm_tx = Some(tx);
     }
 
     /// 停止后台通信线程
     pub fn stop_comm_thread(&mut self) {
-        if let Some(shared) = &self.shared_state {
-            shared.running.store(false, Ordering::Relaxed);
+        if let Some(tx) = self.comm_tx.take() {
+            drop(tx); // 关闭 sender 以唤醒 receiver
         }
-        self.shared_state = None;
+        if let Some(state) = &self.comm_state {
+            comm::stop_comm_thread(state);
+        }
+        if let Some(handle) = self.comm_thread.take() {
+            let _ = handle.join();
+        }
+        self.comm_state = None;
     }
 
-    /// 构建屏幕要显示的一帧数据并发送
-    pub fn build_send_frame(&mut self) {
-        if let Some(shared) = &self.shared_state {
-            if let Ok(mut p) = shared.pixels.lock() {
-                self.display_controller.generate_pixels(&mut p);
-            }
-            if let Ok(mut c) = shared.config.lock() {
-                *c = self.servo_state.to_joint_config();
-            }
+    /// 发送帧数据到通信线程
+    pub fn send_frame(&mut self) -> anyhow::Result<()> {
+        if let Some(tx) = &self.comm_tx {
+            let mut pixels = Box::new(vec![0u8; FRAME_SIZE]);
+            self.display_controller.generate_pixels(&mut pixels);
+            let config = self.servo_state.to_joint_config();
+            // usb发送较慢, 存在发送阻塞情况, 导致ui卡顿, 这里如果发送失败就继续发送原数据
+            tx.try_send((pixels, config))?;
         }
+        Ok(())
     }
 
     pub fn quit(&mut self) {
@@ -123,7 +133,7 @@ impl App {
 
     /// 检查是否已连接
     pub fn is_connected(&self) -> bool {
-        self.shared_state.is_some()
+        self.comm_state.is_some()
     }
 
     /// 从文件加载图片并设置为静态显示

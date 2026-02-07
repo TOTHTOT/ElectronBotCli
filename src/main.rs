@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
-            simplelog::LevelFilter::Info,
+            simplelog::LevelFilter::Trace,
             Config::default(),
             f,
         )])
@@ -42,13 +42,13 @@ fn main() -> anyhow::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let mut app = app::App::new();
-    app.load_image_from_file("./assets/images/test.png")?;
+    // app.load_image_from_file("./assets/images/test.png")?;
     let tick_rate = Duration::from_millis(20);
 
     while app.running {
-        // 如果已连接，更新帧数据到共享状态
+        // 如果已连接，发送帧数据
         if app.is_connected() {
-            app.build_send_frame();
+            let _ = app.send_frame();
         }
 
         render(terminal, &mut app)?;
