@@ -18,7 +18,7 @@ pub use servo::*;
 // 导出 eyes 模块的类型
 pub use eyes::{Expression, RobotEyes};
 
-use crate::device::{self, ImageProcessor, JointConfig};
+use crate::device::{ImageProcessor, JointConfig};
 use ratatui::widgets::ListState;
 use std::default::Default;
 use std::sync::mpsc;
@@ -61,15 +61,13 @@ impl App {
     }
 
     /// 启动后台通信线程
-    pub fn start_comm_thread(&mut self, port_name: &str) {
+    pub fn start_comm_thread(&mut self) {
         self.stop_comm_thread();
 
-        log::info!("Connecting to {port_name}...");
+        log::info!("Connecting to USB device...");
 
         let (tx, rx) = mpsc::sync_channel(1);
-        let port_name = port_name.to_string();
-
-        let (state, handle) = comm::start_comm_thread(port_name, rx);
+        let (state, handle) = comm::start_comm_thread(rx);
 
         self.comm_state = Some(state);
         self.comm_thread = Some(handle);
@@ -139,8 +137,8 @@ impl App {
     /// 从文件加载图片并设置为静态显示
     pub fn load_image_from_file(&mut self, path: &str) -> anyhow::Result<()> {
         let mut processor = ImageProcessor::new();
-        let image_data = processor.load_from_file(path)?;
-        self.display_controller.set_image(image_data);
+        let image_data = processor.load_from_file(path)?;  // 处理图片到 frame_buffer
+        self.display_controller.set_image(&image_data);
         Ok(())
     }
 
@@ -157,24 +155,18 @@ impl Default for App {
 }
 
 /// 端口选择弹窗
+#[allow(dead_code)]
 pub struct PortSelectPopup {
     pub visible: bool,
-    pub ports: Vec<String>,
-    pub selected_index: usize,
 }
 
 impl PortSelectPopup {
     pub fn new() -> Self {
-        Self {
-            visible: false,
-            ports: Vec::new(),
-            selected_index: 0,
-        }
+        Self { visible: false }
     }
 
+    #[allow(dead_code)]
     pub fn show(&mut self) {
-        self.ports = device::list_ports();
-        self.selected_index = 0;
         self.visible = true;
     }
 
@@ -186,25 +178,10 @@ impl PortSelectPopup {
         self.visible
     }
 
-    pub fn next(&mut self) {
-        if !self.ports.is_empty() {
-            self.selected_index = (self.selected_index + 1) % self.ports.len();
-        }
-    }
-
-    pub fn prev(&mut self) {
-        if !self.ports.is_empty() {
-            self.selected_index = self.selected_index.saturating_sub(1);
-        }
-    }
-
-    pub fn selected_port(&self) -> Option<&str> {
-        self.ports.get(self.selected_index).map(|s| s.as_str())
-    }
-
-    pub fn len(&self) -> usize {
-        self.ports.len()
-    }
+    #[allow(dead_code)]
+    pub fn next(&mut self) {}
+    #[allow(dead_code)]
+    pub fn prev(&mut self) {}
 }
 
 impl Default for PortSelectPopup {

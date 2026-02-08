@@ -42,18 +42,22 @@ fn main() -> anyhow::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let mut app = app::App::new();
-    // app.load_image_from_file("./assets/images/test.png")?;
+    app.load_image_from_file("./assets/images/test.png")?;
     let tick_rate = Duration::from_millis(20);
-
+    let mut loop_times = 0u64;
     while app.running {
-        // 如果已连接，发送帧数据
-        if app.is_connected() {
-            let _ = app.send_frame();
+        // 如果已连接，发送帧数据, 测试是渲染一次屏幕避免在发送时退出程序导致的渲染错误
+        if app.is_connected() && loop_times == 0 {
+            match app.send_frame() {
+                Ok(_) => {
+                    // loop_times = loop_times.wrapping_add(1);
+                }
+                Err(_) => {}
+            }
         }
 
         render(terminal, &mut app)?;
         handle_input(&mut app)?;
-
         std::thread::sleep(tick_rate);
     }
 
@@ -93,10 +97,7 @@ fn handle_port_select_input(code: KeyCode, app: &mut app::App) -> event_handler:
             event_handler::AppEvent::None
         }
         KeyCode::Enter => {
-            if let Some(port) = app.port_select_popup.selected_port() {
-                let port_name = port.to_string();
-                app.start_comm_thread(&port_name);
-            }
+            app.start_comm_thread();
             app.port_select_popup.hide();
             event_handler::AppEvent::None
         }

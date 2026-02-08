@@ -1,58 +1,73 @@
-import serial
-import struct
+import usb.core
+import usb.util
 import time
+import struct
 
 def run_test():
-    port = '/dev/ttyACM0'
-    baud = 115200
+    # 1. 发现设备
+    dev = usb.core.find(idVendor=0x1001, idProduct=0x8023)
+    if dev is None:
+        print("❌ 找不到 ElectronBot")
+        return
+
+    print(f"🔍 找到设备: {dev.idVendor:04x}:{dev.idProduct:04x}")
 
     try:
-        ser = serial.Serial(port, baud, timeout=0.1)
-        ser.dtr = True
-        ser.rts = True
-        time.sleep(0.5)
-        ser.rts = False
-        print(f"✅ 已打开串口 {port}，开始循环唤醒...")
+        # 2. 关键：重置设备，强制让它回到初始状态
+        print("🔄 正在重置设备...")
+        dev.reset()
+        time.sleep(1) # 必须等一下，重置会导致设备短暂断开
 
-        # 准备一个标准的 224 字节空包 (使能位=1, 目标角度全0)
+        # 3. 寻找并声明接口
+        # ElectronBot 可能是复合设备，尝试逐个接口声明
+        success = False
+        for i in [0, 1]:
+            try:
+                if dev.is_kernel_driver_active(i):
+                    dev.detach_kernel_driver(i)
+                usb.util.claim_interface(dev, i)
+                print(f"✅ 成功声明接口 (Interface): {i}")
+                success = True
+                break
+            except Exception as e:
+                print(f"⚠️ 尝试接口 {i} 失败: {e}")
+
+        if not success:
+            print("❌ 无法声明任何接口，请尝试 sudo 运行")
+            return
+
+        # 4. 数据交互
+        # 注意：如果 0x01 报错，请尝试 0x02，这取决于固件
+        ep_out = 0x01 
+        ep_in = 0x81
+        
         heartbeat = bytearray(224)
-        heartbeat[0] = 0 # isEnabled = True
+        heartbeat[0] = 0 # Enable 
 
+        print("🚀 开始发送数据...")
         count = 0
         while True:
-            # 1. 持续向机器人发送 224 字节指令包
-            ser.write(heartbeat)
+            try:
+                # 写入 224 字节
+                dev.write(ep_out, heartbeat, timeout=1000)
+                
+                # 读取 32 字节返回包
+                raw = dev.read(ep_in, 32, timeout=1000)
+                if len(raw) >= 32:
+                    # 解析角度 (6个float)
+                    angles = struct.unpack('<ffffff', raw[1:25])
+                    print(f"\r[收] 角度: {['%.2f' % a for a in angles]}", end="")
+                    count += 1
+            except usb.core.USBError as e:
+                print(f"\n⚠️ 传输错误: {e}")
+                break
+            
+            time.sleep(0.02)
 
-            # 2. 检查是否有数据返回
-            if ser.in_waiting >= 32:
-                raw_data = ser.read(32)
-                # 解析机器人发回的 32 字节包
-                # 字节 1-25 是 6 个 float 角度
-                try:
-                    # 使用 struct 解析 6 个 float (每个4字节)
-                    # '<' 代表小端模式 (STM32 通常是小端)
-                    print(f"raw_data: {['%d' % a for a in raw_data]}\n")
-                    angles = struct.unpack('<ffffff', raw_data[1:25])
-                    print(f"\r[收] 角度数据: {['%.2f' % a for a in angles]} | 包序: {count}", end="")
-                except Exception as parse_err:
-                    print(f"\n解析失败: {raw_data.hex()}")
-
-                count += 1
-
-            # 3. 稍微停顿，不要把串口堵死（机器人代码里有 HAL_Delay(1)）
-            time.sleep(0.01)
-
-            # 每发 50 次包提示一下
-            if count % 50 == 0 and count > 0:
-                print(f"\n[提示] 已稳定通信，正在持续接收...")
-
-    except KeyboardInterrupt:
-        print("\n用户手动停止")
     except Exception as e:
-        print(f"\n发生错误: {e}")
+        print(f"\n❌ 运行错误: {e}")
     finally:
-        if 'ser' in locals():
-            ser.close()
+        usb.util.dispose_resources(dev)
 
 if __name__ == "__main__":
     run_test()
