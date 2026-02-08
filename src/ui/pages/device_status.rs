@@ -1,5 +1,5 @@
-use crate::app::{App, FRAME_SIZE};
-use crate::device::BUFFER_COUNT;
+use crate::app::App;
+use crate::robot::{BUFFER_COUNT, FRAME_SIZE};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
@@ -55,8 +55,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             )])
         },
         Line::raw(""),
-        Line::from_iter([Span::styled("可用串口:", Style::new().fg(Color::Yellow))]),
-        Line::raw("  (请在设备控制页面连接)"),
+        Line::from_iter([Span::styled("通信方式:", Style::new().fg(Color::Yellow))]),
+        Line::raw("  USB (VID: 0x1001, PID: 0x8023)"),
     ];
 
     let widget = Paragraph::new(text).block(

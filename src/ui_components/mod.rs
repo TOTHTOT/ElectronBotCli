@@ -1,21 +1,20 @@
-use crate::app::PortSelectPopup;
+use crate::app::CommPopup;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 
-/// 端口选择弹窗组件
-impl PortSelectPopupWidget {
+/// 通信提示弹窗组件
+impl CommPopupWidget {
     pub fn new() -> Self {
         Self
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, popup: &mut PortSelectPopup) {
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, popup: &mut CommPopup) {
         if !popup.is_visible() {
             return;
         }
 
-        // 显示简单的连接提示
         let width = std::cmp::min(40, area.width.saturating_sub(4));
         let height = 5;
         let x = area.x + (area.width.saturating_sub(width)) / 2;
@@ -31,8 +30,8 @@ impl PortSelectPopupWidget {
 
         frame.render_widget(block, popup_area);
 
-        let content = Paragraph::new("正在通过 USB 连接设备...")
-            .style(Style::new().fg(Color::White));
+        let content =
+            Paragraph::new("正在通过 USB 连接设备...").style(Style::new().fg(Color::White));
         frame.render_widget(
             content,
             Rect::new(popup_area.x + 1, popup_area.y + 2, width - 2, 1),
@@ -40,9 +39,9 @@ impl PortSelectPopupWidget {
     }
 }
 
-pub struct PortSelectPopupWidget;
+pub struct CommPopupWidget;
 
-impl Default for PortSelectPopupWidget {
+impl Default for CommPopupWidget {
     fn default() -> Self {
         Self::new()
     }

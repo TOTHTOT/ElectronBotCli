@@ -1,8 +1,8 @@
 extern crate log;
 
 mod app;
-mod device;
 mod event_handler;
+mod robot;
 mod ui;
 mod ui_components;
 
@@ -18,7 +18,6 @@ use std::io::{self, Stdout};
 use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
-    // 初始化日志 (每次启动截断日志文件)
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
@@ -42,18 +41,14 @@ fn main() -> anyhow::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let mut app = app::App::new();
-    app.load_image_from_file("./assets/images/test.png")?;
+    let _ = app.load_image_from_file("./assets/images/test.png");
     let tick_rate = Duration::from_millis(20);
-    let mut loop_times = 0u64;
+
     while app.running {
-        // 如果已连接，发送帧数据, 测试是渲染一次屏幕避免在发送时退出程序导致的渲染错误
-        if app.is_connected() && loop_times == 0 {
-            match app.send_frame() {
-                Ok(_) => {
-                    // loop_times = loop_times.wrapping_add(1);
-                }
-                Err(_) => {}
-            }
+        // 如果已连接，隐藏连接弹窗
+        if app.is_connected() {
+            app.comm_popup.hide();
+            let _ = app.send_frame();
         }
 
         render(terminal, &mut app)?;
@@ -77,9 +72,9 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
                 let evt = if app.in_servo_mode {
-                    handle_servo_mode_input(key.code)
-                } else if app.port_select_popup.is_visible() {
-                    handle_port_select_input(key.code, app)
+                    handle_joint_mode_input(key.code)
+                } else if app.comm_popup.is_visible() {
+                    handle_comm_popup_input(key.code, app)
                 } else {
                     handle_menu_mode_input(key.code, app)
                 };
@@ -90,30 +85,17 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
     Ok(())
 }
 
-fn handle_port_select_input(code: KeyCode, app: &mut app::App) -> event_handler::AppEvent {
+fn handle_comm_popup_input(code: KeyCode, app: &mut app::App) -> event_handler::AppEvent {
     match code {
         KeyCode::Esc => {
-            app.port_select_popup.hide();
-            event_handler::AppEvent::None
-        }
-        KeyCode::Enter => {
-            app.start_comm_thread();
-            app.port_select_popup.hide();
-            event_handler::AppEvent::None
-        }
-        KeyCode::Up | KeyCode::Char('k') => {
-            app.port_select_popup.prev();
-            event_handler::AppEvent::None
-        }
-        KeyCode::Down | KeyCode::Char('j') => {
-            app.port_select_popup.next();
+            app.stop_comm_thread();
             event_handler::AppEvent::None
         }
         _ => event_handler::AppEvent::None,
     }
 }
 
-fn handle_servo_mode_input(code: KeyCode) -> event_handler::AppEvent {
+fn handle_joint_mode_input(code: KeyCode) -> event_handler::AppEvent {
     match code {
         KeyCode::Char('q') | KeyCode::Esc => event_handler::AppEvent::ExitServoMode,
         KeyCode::Up | KeyCode::Char('k') => event_handler::AppEvent::ServoIncrease,

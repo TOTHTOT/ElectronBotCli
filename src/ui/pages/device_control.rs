@@ -1,11 +1,11 @@
-use crate::app::{App, Expression, RobotEyes, ServoState, FRAME_WIDTH, SERVO_COUNT};
+use crate::app::App;
+use crate::robot::{ServoState, SERVO_COUNT};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    // 外层 Block（包含所有内容）
     let outer_block = Block::new()
         .title("ElectronBot 设备控制")
         .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
@@ -21,17 +21,15 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     )
     .split(inner_area);
 
-    // 操作说明（横向满）
     render_info_bar(frame, chunks[0]);
 
-    // 舵机控制和LCD缓冲区（左右各50%）
     let main_chunks = Layout::new(
         Direction::Horizontal,
         [Constraint::Percentage(50), Constraint::Percentage(50)],
     )
     .split(chunks[1]);
 
-    render_servo_gauges(frame, main_chunks[0], app);
+    render_joint_gauges(frame, main_chunks[0], app);
     render_lcd_preview(frame, main_chunks[1], app);
 }
 
@@ -53,16 +51,18 @@ fn render_info_bar(frame: &mut Frame, area: Rect) {
     frame.render_widget(widget, inner_area);
 }
 
-fn render_servo_gauges(frame: &mut Frame, area: Rect, app: &App) {
+fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App) {
     let outer_block = Block::new()
-        .title("舵机控制")
+        .title("关节控制")
         .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
+
     let servo_height = (area.height as usize) / SERVO_COUNT;
     let extra_rows = (area.height as usize) % SERVO_COUNT;
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
+
     for i in 0..SERVO_COUNT {
         let row_height = if i < extra_rows {
             servo_height + 1
@@ -77,16 +77,16 @@ fn render_servo_gauges(frame: &mut Frame, area: Rect, app: &App) {
             row_height as u16,
         );
 
-        render_single_servo(frame, row_area, app, i);
+        render_single_joint(frame, row_area, app, i);
     }
 }
 
-fn render_single_servo(frame: &mut Frame, area: Rect, app: &App, index: usize) {
-    let servo = &app.servo_state;
-    let is_selected = index == servo.selected && app.in_servo_mode;
-    let value = servo.values[index];
-    let percent = ServoState::percent(value);
-    let name = ServoState::servo_name(index);
+fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
+    let values = app.joint.values();
+    let is_selected = index == app.joint.selected() && app.in_servo_mode;
+    let value = values[index];
+    let percent = ((value + 125) * 100 / 250) as u16;
+    let name = ServoState::name(index);
 
     let indicator = if is_selected {
         if app.in_servo_mode {
@@ -129,34 +129,25 @@ fn render_single_servo(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 
 fn render_lcd_preview(frame: &mut Frame, area: Rect, _app: &App) {
     let outer_block = Block::new()
-        .title("RobotEyes")
+        .title("LCD 预览")
         .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .borders(Borders::ALL)
         .border_style(Style::new().fg(Color::Blue));
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    // 生成 RobotEyes 像素
-    let mut eyes = RobotEyes::new();
-    eyes.set_expression(Expression::Neutral);
-    eyes.random_blink();
-    let mut pixels = vec![0u8; FRAME_WIDTH * 240 * 3];
-    eyes.generate_frame(&mut pixels);
+    // 使用 Lcd 生成像素
+    let mut lcd = crate::robot::Lcd::new();
+    lcd.set_mode(crate::robot::lcd::DisplayMode::Eyes);
+    let pixels = lcd.frame_vec();
 
-    // 可用字符区域
     let avail_width = inner_area.width.saturating_sub(2) as usize;
     let avail_height = inner_area.height.saturating_sub(2) as usize;
 
-    // 终端字符宽高比约 2:1
-    // 240x240 像素，根据可用高度缩放
     let image_size = 240;
     let char_aspect = 2.0;
-
-    // 计算缩放比例（像素 -> 字符）
     let scale = image_size as f32 / avail_height as f32;
     let scaled_width = (image_size as f32 / scale / char_aspect) as usize;
-
-    // 居中偏移
     let offset_x = (avail_width.saturating_sub(scaled_width)) / 2;
 
     let chars = [' ', '░', '▒', '█'];
@@ -167,7 +158,6 @@ fn render_lcd_preview(frame: &mut Frame, area: Rect, _app: &App) {
         let mut line = String::new();
         for px in 0..avail_width {
             if pixel_y < image_size {
-                // 计算对应像素位置
                 let scaled_px = if px >= offset_x { px - offset_x } else { px };
                 let pixel_x = (scaled_px as f32 * char_aspect * scale) as usize;
 

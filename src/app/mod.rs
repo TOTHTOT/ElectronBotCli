@@ -1,46 +1,32 @@
 // app模块, 负责界面调度以及实际运行功能
 
-pub mod comm;
-pub mod constants;
-#[allow(dead_code)]
-pub mod display;
-#[allow(dead_code)]
-pub mod eyes;
 pub mod menu;
-pub mod servo;
 
-// 导出类型
-pub use constants::*;
-pub use display::*;
+use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
+
+// 导出菜单
 pub use menu::*;
-pub use servo::*;
 
-// 导出 eyes 模块的类型
-pub use eyes::{Expression, RobotEyes};
-
-use crate::device::{ImageProcessor, JointConfig};
 use ratatui::widgets::ListState;
-use std::default::Default;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
 
-pub type BotRecvType = (Box<Vec<u8>>, JointConfig);
+pub type BotRecvType = (Vec<u8>, JointConfig);
+
 /// 主应用
 pub struct App {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
     pub running: bool,
-    pub servo_state: ServoState,
+    pub joint: Joint,
     pub in_servo_mode: bool,
-    pub display_controller: DisplayController,
-    pub port_select_popup: PortSelectPopup,
-    comm_state: Option<comm::CommState>,
+    pub lcd: Lcd,
+    pub comm_popup: CommPopup,
+    comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
-    // 使用 Vec<u8> 发送 config_bytes 确保所有权清晰
     comm_tx: Option<SyncSender<BotRecvType>>,
 }
 
-#[allow(dead_code)]
 impl App {
     pub fn new() -> Self {
         let mut menu_state = ListState::default();
@@ -50,10 +36,10 @@ impl App {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
-            servo_state: ServoState::default(),
+            joint: Joint::new(),
             in_servo_mode: false,
-            display_controller: DisplayController::new(),
-            port_select_popup: PortSelectPopup::new(),
+            lcd: Lcd::new(),
+            comm_popup: CommPopup::new(),
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -63,11 +49,11 @@ impl App {
     /// 启动后台通信线程
     pub fn start_comm_thread(&mut self) {
         self.stop_comm_thread();
-
-        log::info!("Connecting to USB device...");
+        self.comm_popup.show();
+        log::info!("Connecting to robot...");
 
         let (tx, rx) = mpsc::sync_channel(1);
-        let (state, handle) = comm::start_comm_thread(rx);
+        let (state, handle) = robot::start_comm_thread(rx);
 
         self.comm_state = Some(state);
         self.comm_thread = Some(handle);
@@ -77,24 +63,23 @@ impl App {
     /// 停止后台通信线程
     pub fn stop_comm_thread(&mut self) {
         if let Some(tx) = self.comm_tx.take() {
-            drop(tx); // 关闭 sender 以唤醒 receiver
+            drop(tx);
         }
         if let Some(state) = &self.comm_state {
-            comm::stop_comm_thread(state);
+            robot::stop_comm_thread(state);
         }
         if let Some(handle) = self.comm_thread.take() {
             let _ = handle.join();
         }
         self.comm_state = None;
+        self.comm_popup.hide();
     }
 
-    /// 发送帧数据到通信线程
+    /// 发送帧数据
     pub fn send_frame(&mut self) -> anyhow::Result<()> {
         if let Some(tx) = &self.comm_tx {
-            let mut pixels = Box::new(vec![0u8; FRAME_SIZE]);
-            self.display_controller.generate_pixels(&mut pixels);
-            let config = self.servo_state.to_joint_config();
-            // usb发送较慢, 存在发送阻塞情况, 导致ui卡顿, 这里如果发送失败就继续发送原数据
+            let pixels = self.lcd.frame_vec();
+            let config = self.joint.config();
             tx.try_send((pixels, config))?;
         }
         Ok(())
@@ -124,27 +109,14 @@ impl App {
         self.selected_menu = items[i];
     }
 
-    pub fn disconnect_device(&mut self) {
-        self.stop_comm_thread();
-        log::info!("Device disconnected");
-    }
-
-    /// 检查是否已连接
     pub fn is_connected(&self) -> bool {
         self.comm_state.is_some()
     }
 
-    /// 从文件加载图片并设置为静态显示
     pub fn load_image_from_file(&mut self, path: &str) -> anyhow::Result<()> {
-        let mut processor = ImageProcessor::new();
-        let image_data = processor.load_from_file(path)?;  // 处理图片到 frame_buffer
-        self.display_controller.set_image(&image_data);
+        self.lcd.load_image(path)?;
+        self.lcd.set_mode(DisplayMode::Static);
         Ok(())
-    }
-
-    /// 设置显示模式
-    pub fn set_display_mode(&mut self, mode: DisplayMode) {
-        self.display_controller.set_mode(mode);
     }
 }
 
@@ -154,18 +126,17 @@ impl Default for App {
     }
 }
 
-/// 端口选择弹窗
-#[allow(dead_code)]
-pub struct PortSelectPopup {
+/// 通信提示弹窗
+#[derive(Debug, Default)]
+pub struct CommPopup {
     pub visible: bool,
 }
 
-impl PortSelectPopup {
+impl CommPopup {
     pub fn new() -> Self {
         Self { visible: false }
     }
 
-    #[allow(dead_code)]
     pub fn show(&mut self) {
         self.visible = true;
     }
@@ -176,16 +147,5 @@ impl PortSelectPopup {
 
     pub fn is_visible(&self) -> bool {
         self.visible
-    }
-
-    #[allow(dead_code)]
-    pub fn next(&mut self) {}
-    #[allow(dead_code)]
-    pub fn prev(&mut self) {}
-}
-
-impl Default for PortSelectPopup {
-    fn default() -> Self {
-        Self::new()
     }
 }
