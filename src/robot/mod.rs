@@ -18,7 +18,7 @@ pub mod joint;
 pub mod lcd;
 
 pub use joint::{Joint, JointConfig, ServoState, SERVO_COUNT};
-pub use lcd::{DisplayMode, Lcd, BUFFER_COUNT, FRAME_SIZE};
+pub use lcd::{DisplayMode, Lcd, BUFFER_COUNT, FRAME_SIZE, LCD_WIDTH};
 
 use rusb::{Device, DeviceHandle, GlobalContext};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -34,9 +34,8 @@ const USB_EP_IN: u8 = 0x81;
 const USB_TIMEOUT_MS: u64 = 1000;
 
 // ==================== 帧参数常量 ====================
-const FRAME_WIDTH: usize = 240;
 const BYTES_PER_PIXEL: usize = 3;
-const ROW_SIZE: usize = FRAME_WIDTH * BYTES_PER_PIXEL;
+const ROW_SIZE: usize = LCD_WIDTH * BYTES_PER_PIXEL;
 
 const ROWS_PER_ROUND: usize = 60;
 const BYTES_PER_ROUND: usize = ROWS_PER_ROUND * ROW_SIZE;
