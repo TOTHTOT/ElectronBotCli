@@ -43,12 +43,15 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> 
     let mut app = app::App::new();
     let _ = app.load_image_from_file("./assets/images/test.png");
     let tick_rate = Duration::from_millis(20);
-
+    let mut first_run = true;
     while app.running {
         // 如果已连接，隐藏连接弹窗
         if app.is_connected() {
             app.comm_popup.hide();
-            let _ = app.send_frame();
+            if first_run {
+                first_run = false;
+                let _ = app.send_frame();
+            }
         }
 
         render(terminal, &mut app)?;
