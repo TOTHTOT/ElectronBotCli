@@ -32,13 +32,16 @@ impl App {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
+        let mut lcd = Lcd::new();
+        lcd.set_mode(DisplayMode::TestPattern);
+
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
             joint: Joint::new(),
             in_servo_mode: false,
-            lcd: Lcd::new(),
+            lcd,
             comm_popup: CommPopup::new(),
             comm_state: None,
             comm_thread: None,
