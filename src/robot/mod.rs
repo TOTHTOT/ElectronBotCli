@@ -79,14 +79,9 @@ impl Robot {
     /// 发送一帧数据（像素 + 关节配置）
     pub fn send_frame(&mut self, pixels: &[u8], config: &[u8; 32]) -> Result<(), rusb::Error> {
         for round in 0..ROUND_COUNT {
-            // 1. 发送像素数据
             let round_start = round * BYTES_PER_ROUND;
             self.send_pixel_chunks(pixels, round_start)?;
-
-            // 2. 发送尾部（192 像素 + config）
             self.send_tail(pixels, config, round)?;
-
-            // 3. 读取响应
             let _request = self.receive_request();
             log::trace!("Round {}: received", round);
         }

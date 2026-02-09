@@ -4,6 +4,7 @@
 
 use anyhow::{Context, Result};
 use image::imageops::FilterType;
+use rand::Rng;
 
 // ==================== 常量 ====================
 
@@ -37,6 +38,7 @@ pub enum DisplayMode {
     #[default]
     Static,
     Eyes,
+    TestPattern,
 }
 
 // ==================== Lcd ====================
@@ -61,6 +63,7 @@ impl Lcd {
         match self.mode {
             DisplayMode::Static => self.render_static_image(),
             DisplayMode::Eyes => self.render_eyes(),
+            DisplayMode::TestPattern => self.render_test_pattern(),
         }
     }
 
@@ -97,6 +100,31 @@ impl Lcd {
         self.draw_rect(40, 80, 80, 40, [255, 255, 255]);
         // 右眼
         self.draw_rect(120, 80, 80, 40, [255, 255, 255]);
+    }
+
+    fn render_test_pattern(&mut self) {
+        // 生成 40x40 的随机色块平铺
+        let mut rng = rand::thread_rng();
+        let block_size = 40;
+
+        // 清空背景为黑色
+        self.pixels.fill(0);
+
+        let cols = LCD_WIDTH / block_size;
+        let rows = LCD_HEIGHT / block_size;
+
+        for row in 0..rows {
+            for col in 0..cols {
+                let color = [
+                    rng.gen_range(80..=255),
+                    rng.gen_range(80..=255),
+                    rng.gen_range(80..=255),
+                ];
+                let x = col * block_size;
+                let y = row * block_size;
+                self.draw_rect(x, y, block_size, block_size, color);
+            }
+        }
     }
 
     fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
