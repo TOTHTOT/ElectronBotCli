@@ -6,7 +6,7 @@ pub const SERVO_COUNT: usize = 6;
 const SERVO_MIN: i16 = -125;
 const SERVO_MAX: i16 = 125;
 
-const JOINT_NAME: [&str; SERVO_COUNT] = ["头部", "腰部", "左肩", "左臂", "右肩", "右臂"];
+const JOINT_NAME: [&str; SERVO_COUNT] = ["头部", "左肩", "左臂", "右肩", "右臂", "身体"];
 
 // ==================== JointConfig ====================
 

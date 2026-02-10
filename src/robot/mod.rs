@@ -101,7 +101,6 @@ pub fn start_comm_thread(
 
             // 更新扩展数据（关节角度）
             bot.extra_data().set_raw(&joint.as_bytes());
-
             // 同步到设备
             if let Err(e) = bot.sync() {
                 log::error!("Sync failed: {e}");
