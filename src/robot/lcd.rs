@@ -1,10 +1,11 @@
 //! LCD 显示模块
 //!
 //! 240x240 RGB LCD 显示控制
+//!
+//! 使用 [electron_bot::ImageBuffer] 实现底层图片操作
 
-use anyhow::{Context, Result};
-use image::imageops::FilterType;
-use rand::Rng;
+use anyhow::Result;
+use electron_bot::ImageBuffer;
 
 // ==================== 常量 ====================
 
@@ -13,27 +14,9 @@ pub const LCD_HEIGHT: usize = 240;
 pub const FRAME_SIZE: usize = LCD_WIDTH * LCD_HEIGHT * 3;
 pub const BUFFER_COUNT: usize = 2;
 
-// ==================== ImageProcessor ====================
-
-#[derive(Debug, Default)]
-pub struct ImageProcessor;
-
-impl ImageProcessor {
-    pub fn new() -> Self {
-        Self
-    }
-
-    pub fn load_from_file(&mut self, path: &str) -> Result<Vec<u8>> {
-        let img = image::open(path).context(format!("Could not load image {path}"))?;
-        let resized = img.resize_exact(LCD_WIDTH as u32, LCD_HEIGHT as u32, FilterType::Triangle);
-        let rgb_data = resized.to_rgb8();
-        Ok(rgb_data.to_vec())
-    }
-}
-
 // ==================== DisplayMode ====================
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum DisplayMode {
     #[default]
     Static,
@@ -43,9 +26,9 @@ pub enum DisplayMode {
 
 // ==================== Lcd ====================
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Lcd {
-    pixels: Vec<u8>,
+    buffer: ImageBuffer,
     mode: DisplayMode,
     image_data: Option<Vec<u8>>,
 }
@@ -53,7 +36,7 @@ pub struct Lcd {
 impl Lcd {
     pub fn new() -> Self {
         Self {
-            pixels: vec![0u8; FRAME_SIZE],
+            buffer: ImageBuffer::new(),
             mode: DisplayMode::default(),
             image_data: None,
         }
@@ -67,9 +50,10 @@ impl Lcd {
         }
     }
 
+    /// 获取帧数据向量
     pub fn frame_vec(&mut self) -> Vec<u8> {
         self.generate_pixels();
-        self.pixels.clone()
+        self.buffer.as_data().to_vec()
     }
 
     pub fn set_mode(&mut self, mode: DisplayMode) {
@@ -77,15 +61,17 @@ impl Lcd {
     }
 
     pub fn load_image(&mut self, path: &str) -> Result<()> {
-        let mut processor = ImageProcessor::new();
-        self.image_data = Some(processor.load_from_file(path)?);
+        self.buffer
+            .load_from_file(path)
+            .map_err(|e| anyhow::anyhow!("Failed to load image {}: {}", path, e))?;
+        self.image_data = Some(self.buffer.as_data().to_vec());
         Ok(())
     }
 
     fn render_static_image(&mut self) {
         if let Some(ref img) = self.image_data {
             if img.len() == FRAME_SIZE {
-                self.pixels.copy_from_slice(img);
+                self.buffer.as_mut_data().copy_from_slice(img);
             }
         } else {
             self.render_eyes();
@@ -93,52 +79,25 @@ impl Lcd {
     }
 
     fn render_eyes(&mut self) {
-        // 绘制眼睛
-        self.pixels.fill(0);
+        // 清空缓冲区
+        self.buffer.clear(electron_bot::Color::Black);
 
         // 左眼
-        self.draw_rect(40, 80, 80, 40, [255, 255, 255]);
+        self.buffer
+            .fill_rect(40, 80, 80, 40, electron_bot::Color::White);
         // 右眼
-        self.draw_rect(120, 80, 80, 40, [255, 255, 255]);
+        self.buffer
+            .fill_rect(120, 80, 80, 40, electron_bot::Color::White);
     }
 
     fn render_test_pattern(&mut self) {
-        // 生成 40x40 的随机色块平铺
         let mut rng = rand::thread_rng();
-        let block_size = 40;
-
-        // 清空背景为黑色
-        self.pixels.fill(0);
-
-        let cols = LCD_WIDTH / block_size;
-        let rows = LCD_HEIGHT / block_size;
-
-        for row in 0..rows {
-            for col in 0..cols {
-                let color = [
-                    rng.gen_range(80..=255),
-                    rng.gen_range(80..=255),
-                    rng.gen_range(80..=255),
-                ];
-                let x = col * block_size;
-                let y = row * block_size;
-                self.draw_rect(x, y, block_size, block_size, color);
-            }
-        }
+        self.buffer.render_test_pattern(&mut rng, 40);
     }
+}
 
-    fn draw_rect(&mut self, x: usize, y: usize, w: usize, h: usize, color: [u8; 3]) {
-        for dy in 0..h {
-            for dx in 0..w {
-                let px = x + dx;
-                let py = y + dy;
-                if px < LCD_WIDTH && py < LCD_HEIGHT {
-                    let idx = (py * LCD_WIDTH + px) * 3;
-                    self.pixels[idx] = color[0];
-                    self.pixels[idx + 1] = color[1];
-                    self.pixels[idx + 2] = color[2];
-                }
-            }
-        }
+impl Default for Lcd {
+    fn default() -> Self {
+        Self::new()
     }
 }
