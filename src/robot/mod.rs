@@ -13,7 +13,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
-
 // ==================== Robot 结构体 ====================
 
 /// ElectronBot 机器人（封装 electron_bot 库）
@@ -67,27 +66,22 @@ pub struct CommState {
 /// 启动后台通信线程
 pub fn start_comm_thread(
     rx: std::sync::mpsc::Receiver<(Vec<u8>, JointConfig)>,
-) -> (CommState, thread::JoinHandle<()>) {
+) -> anyhow::Result<(CommState, thread::JoinHandle<()>)> {
     let running = Arc::new(AtomicBool::new(true));
     let state = CommState {
         running: running.clone(),
     };
 
-    let handle = thread::spawn(move || {
-        let mut bot = ElectronBot::new();
-
-        // 尝试连接
-        match bot.connect() {
-            Ok(_) => {
-                log::info!("Robot connected");
-            }
-            Err(e) => {
-                log::error!("Failed to connect: {e}");
-                running.store(false, Ordering::Relaxed);
-                return;
-            }
+    let mut bot = ElectronBot::new();
+    match bot.connect() {
+        Ok(_) => {
+            log::info!("Robot connected");
         }
-
+        Err(e) => {
+            anyhow::bail!("Failed to connect: {e}");
+        }
+    }
+    let handle = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
 
         // 主循环
@@ -117,7 +111,7 @@ pub fn start_comm_thread(
         running.store(false, Ordering::Relaxed);
     });
 
-    (state, handle)
+    Ok((state, handle))
 }
 
 /// 停止通信线程

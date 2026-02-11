@@ -56,11 +56,17 @@ impl App {
         log::info!("Connecting to robot...");
 
         let (tx, rx) = mpsc::sync_channel(1);
-        let (state, handle) = robot::start_comm_thread(rx);
-
-        self.comm_state = Some(state);
-        self.comm_thread = Some(handle);
-        self.comm_tx = Some(tx);
+        match robot::start_comm_thread(rx) {
+            Ok((state, handle)) => {
+                self.comm_state = Some(state);
+                self.comm_thread = Some(handle);
+                self.comm_tx = Some(tx);
+            }
+            Err(e) => {
+                self.comm_popup.hide();
+                log::warn!("Failed to start comm thread: {e:?}");
+            }
+        }
     }
 
     /// 停止后台通信线程
