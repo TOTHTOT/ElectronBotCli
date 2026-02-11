@@ -5,7 +5,8 @@
       "Bash(cargo build)",
       "Bash(cargo clippy)",
       "Bash(cargo check)",
-      "Bash(cargo run)"
+      "Bash(cargo run)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)"
     ]
   }
 }

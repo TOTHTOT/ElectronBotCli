@@ -3,10 +3,47 @@
 //! 提供 6 个舵机的角度控制和数据序列化
 
 pub const SERVO_COUNT: usize = 6;
-const SERVO_MIN: i16 = -125;
-const SERVO_MAX: i16 = 125;
 
-const JOINT_NAME: [&str; SERVO_COUNT] = ["头部", "左肩", "左臂", "右肩", "右臂", "身体"];
+// 舵机配置结构体
+struct ServoConfig {
+    name: &'static str,
+    min: i16,
+    max: i16,
+}
+
+// 各舵机配置
+const SERVOS: [ServoConfig; SERVO_COUNT] = [
+    ServoConfig {
+        name: "头部",
+        min: -15,
+        max: 15,
+    },
+    ServoConfig {
+        name: "左肩",
+        min: -30,
+        max: 30,
+    },
+    ServoConfig {
+        name: "左臂",
+        min: -180,
+        max: 180,
+    },
+    ServoConfig {
+        name: "右肩",
+        min: -30,
+        max: 30,
+    },
+    ServoConfig {
+        name: "右臂",
+        min: -180,
+        max: 180,
+    },
+    ServoConfig {
+        name: "身体",
+        min: -90,
+        max: 90,
+    },
+];
 
 // ==================== JointConfig ====================
 
@@ -54,7 +91,23 @@ pub struct ServoState {
 impl ServoState {
     /// 获取舵机名称
     pub fn name(index: usize) -> &'static str {
-        JOINT_NAME.get(index).copied().unwrap_or("未知")
+        SERVOS.get(index).map(|s| s.name).unwrap_or("Unknown")
+    }
+
+    /// 获取舵机最小角度
+    pub fn min_angle(index: usize) -> i16 {
+        SERVOS.get(index).map(|s| s.min).unwrap_or(-125)
+    }
+
+    /// 获取舵机最大角度
+    pub fn max_angle(index: usize) -> i16 {
+        SERVOS.get(index).map(|s| s.max).unwrap_or(125)
+    }
+
+    /// 获取舵机范围字符串
+    pub fn range_str(index: usize) -> String {
+        let s = SERVOS.get(index).unwrap();
+        format!("{}° ~ {}°", s.min, s.max)
     }
 
     /// 选择下一个舵机
@@ -69,22 +122,14 @@ impl ServoState {
 
     /// 增加当前舵机角度
     pub fn increase(&mut self) {
-        self.values[self.selected] = (self.values[self.selected] + 1).min(SERVO_MAX);
+        let max = Self::max_angle(self.selected);
+        self.values[self.selected] = (self.values[self.selected] + 1).min(max);
     }
 
     /// 减少当前舵机角度
     pub fn decrease(&mut self) {
-        self.values[self.selected] = (self.values[self.selected] - 1).max(SERVO_MIN);
-    }
-
-    /// 大幅度增加当前舵机角度
-    pub fn increase_big(&mut self) {
-        self.values[self.selected] = (self.values[self.selected] + 5).min(SERVO_MAX);
-    }
-
-    /// 大幅度减少当前舵机角度
-    pub fn decrease_big(&mut self) {
-        self.values[self.selected] = (self.values[self.selected] - 5).max(SERVO_MIN);
+        let min = Self::min_angle(self.selected);
+        self.values[self.selected] = (self.values[self.selected] - 1).max(min);
     }
 
     /// 转换为 JointConfig
@@ -141,16 +186,6 @@ impl Joint {
     /// 减少当前舵机角度
     pub fn decrease(&mut self) {
         self.state.decrease();
-    }
-
-    /// 大幅度增加当前舵机角度
-    pub fn increase_big(&mut self) {
-        self.state.increase_big();
-    }
-
-    /// 大幅度减少当前舵机角度
-    pub fn decrease_big(&mut self) {
-        self.state.decrease_big();
     }
 
     /// 获取当前关节配置

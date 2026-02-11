@@ -79,8 +79,8 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
     let values = app.joint.values();
     let is_selected = index == app.joint.selected() && app.in_servo_mode;
     let value = values[index];
-    let percent = ((value + 125) * 100 / 250) as u16;
     let name = ServoState::name(index);
+    let range_str = ServoState::range_str(index);
 
     let indicator = if is_selected {
         if app.in_servo_mode {
@@ -98,7 +98,18 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
         Color::White
     };
 
-    let bar_width = (area.width as usize).saturating_sub(20);
+    // 计算进度条
+    let min = ServoState::min_angle(index);
+    let max = ServoState::max_angle(index);
+    let total_range = (max - min) as f32;
+    let value_offset = (value - min) as f32;
+    let percent = if total_range > 0.0 {
+        ((value_offset / total_range) * 100.0) as u16
+    } else {
+        0
+    };
+
+    let bar_width = (area.width as usize).saturating_sub(35);
     let filled = percent * bar_width as u16 / 100;
     let empty = bar_width as u16 - filled;
 
@@ -112,9 +123,10 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
             indicator.to_string(),
             Style::new().fg(color).add_modifier(Modifier::BOLD),
         ),
-        Span::styled(format!(" {}:", name), Style::new().fg(color)),
+        Span::styled(format!(" {name}:"), Style::new().fg(color)),
         Span::styled(bar, Style::new().fg(color)),
-        Span::styled(format!(" {:4}°", value), Style::new().fg(color)),
+        Span::styled(format!(" {value4}°"), Style::new().fg(color)),
+        Span::styled(format!(" [{range_str}]"), Style::new().fg(Color::DarkGray)),
     ])];
 
     let widget = Paragraph::new(text).style(Style::new().fg(Color::White));
