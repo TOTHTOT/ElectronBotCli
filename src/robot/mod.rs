@@ -72,15 +72,15 @@ pub fn start_comm_thread(
         running: running.clone(),
     };
 
-    let mut bot = ElectronBot::new();
-    match bot.connect() {
-        Ok(_) => {
-            log::info!("Robot connected");
-        }
-        Err(e) => {
+        let mut bot = ElectronBot::new();
+        match bot.connect() {
+            Ok(_) => {
+                log::info!("Robot connected");
+            }
+            Err(e) => {
             anyhow::bail!("Failed to connect: {e}");
+            }
         }
-    }
     let handle = thread::spawn(move || {
         thread::sleep(Duration::from_millis(100));
 
@@ -89,13 +89,8 @@ pub fn start_comm_thread(
             if !running.load(Ordering::Relaxed) {
                 break;
             }
-
-            // 更新图片缓冲区
             bot.image_buffer().as_mut_data().copy_from_slice(&pixels);
-
-            // 更新扩展数据（关节角度）
             bot.extra_data().set_raw(&joint.as_bytes());
-            // 同步到设备
             if let Err(e) = bot.sync() {
                 log::error!("Sync failed: {e}");
             }

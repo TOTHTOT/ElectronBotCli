@@ -41,7 +41,6 @@ fn main() -> anyhow::Result<()> {
 
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
     let mut app = app::App::new();
-    let _ = app.load_image_from_file("./assets/images/test.png");
     let tick_rate = Duration::from_millis(20);
     while app.running {
         // 如果已连接，隐藏连接弹窗

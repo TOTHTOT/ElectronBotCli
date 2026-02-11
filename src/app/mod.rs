@@ -33,9 +33,7 @@ impl App {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
-        let mut lcd = Lcd::new();
-        lcd.set_mode(DisplayMode::TestPattern);
-
+        let lcd = Lcd::new();
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
@@ -59,10 +57,10 @@ impl App {
         let (tx, rx) = mpsc::sync_channel(1);
         match robot::start_comm_thread(rx) {
             Ok((state, handle)) => {
-                self.comm_state = Some(state);
-                self.comm_thread = Some(handle);
-                self.comm_tx = Some(tx);
-                log::info!("Successfully connected to robot...");
+        self.comm_state = Some(state);
+        self.comm_thread = Some(handle);
+        self.comm_tx = Some(tx);
+        log::info!("Successfully connected to robot...");
             }
             Err(e) => {
                 log::warn!("Failed to start comm thread: {e:?}");

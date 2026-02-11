@@ -6,12 +6,10 @@ edition = "2021"
 [dependencies]
 ratatui = "0.30.0"
 crossterm = "0.29.0"
-rand = "0.10.0"
+image = "0.24"
+chrono = "0.4"
 anyhow = "1.0"
 log = "0.4"
 simplelog = "0.12"
-chrono = "0.4"
-image = "0.25.9"
-
-# ElectronBot library (GitHub)
 electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git" }
+boteyes = { path = "../BotEyes", package = "BotEyes" }
