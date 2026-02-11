@@ -91,8 +91,21 @@ impl Lcd {
     }
 
     fn render_test_pattern(&mut self) {
-        let mut rng = rand::thread_rng();
-        self.buffer.render_test_pattern(&mut rng, 40);
+        // 简单的颜色条测试图案
+        let colors = [
+            electron_bot::Color::Red,
+            electron_bot::Color::Green,
+            electron_bot::Color::Blue,
+            electron_bot::Color::Cyan,
+            electron_bot::Color::Magenta,
+            electron_bot::Color::Yellow,
+        ];
+
+        let block_height = LCD_HEIGHT / colors.len();
+        for (i, color) in colors.iter().enumerate() {
+            let y = i * block_height;
+            self.buffer.fill_rect(0, y, LCD_WIDTH, block_height, *color);
+        }
     }
 }
 
