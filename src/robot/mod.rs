@@ -6,7 +6,7 @@ pub mod joint;
 pub mod lcd;
 
 pub use joint::{Joint, JointConfig, ServoState, SERVO_COUNT};
-pub use lcd::{DisplayMode, Lcd, BUFFER_COUNT, FRAME_SIZE};
+pub use lcd::{DisplayMode, Lcd};
 
 use electron_bot::ElectronBot;
 use std::sync::atomic::{AtomicBool, Ordering};

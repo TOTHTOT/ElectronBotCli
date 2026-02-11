@@ -12,7 +12,6 @@ use electron_bot::ImageBuffer;
 pub const LCD_WIDTH: usize = 240;
 pub const LCD_HEIGHT: usize = 240;
 pub const FRAME_SIZE: usize = LCD_WIDTH * LCD_HEIGHT * 3;
-pub const BUFFER_COUNT: usize = 2;
 
 // ==================== DisplayMode ====================
 
@@ -74,6 +73,7 @@ impl Lcd {
                 self.buffer.as_mut_data().copy_from_slice(img);
             }
         } else {
+            log::info!("Failed to load static image, show eyes");
             self.render_eyes();
         }
     }

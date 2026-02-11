@@ -1,9 +1,20 @@
 use crate::app::App;
-use crate::robot::{BUFFER_COUNT, FRAME_SIZE};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
+
+/// 获取上位机电量
+fn get_pc_battery() -> u32 {
+    // TODO: 实际项目中可以从系统 API 获取
+    85 // 模拟返回 85%
+}
+
+/// 获取网络状态
+fn get_network_status() -> &'static str {
+    // TODO: 实际项目中可以从系统 API 获取
+    "已连接"
+}
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     let is_connected = app.is_connected();
@@ -19,6 +30,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         Color::Red
     };
 
+    let pc_battery = get_pc_battery();
+    let battery_color = if pc_battery > 50 {
+        Color::Green
+    } else if pc_battery > 20 {
+        Color::Yellow
+    } else {
+        Color::Red
+    };
+
+    let network_status = get_network_status();
+    let network_color = if network_status == "已连接" {
+        Color::Green
+    } else {
+        Color::Red
+    };
+
     let text = vec![
         Line::raw(""),
         Line::from_iter([Span::styled("连接状态: ", Style::new().fg(Color::Yellow))]),
@@ -27,36 +54,22 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
             Style::new().fg(status_color),
         )]),
         Line::raw(""),
-        Line::from_iter([Span::styled("设备信息:", Style::new().fg(Color::Yellow))]),
-        if is_connected {
-            Line::raw("  型号: ElectronBot")
-        } else {
-            Line::raw("  型号: -")
-        },
-        if is_connected {
-            Line::raw("  固件版本: v1.0.0")
-        } else {
-            Line::raw("  固件版本: -")
-        },
+        Line::from_iter([Span::styled(
+            "  按 [Enter] 连接设备",
+            Style::new().fg(Color::Gray),
+        )]),
         Line::raw(""),
-        Line::from_iter([Span::styled("帧数据:", Style::new().fg(Color::Yellow))]),
-        Line::raw(format!("  帧大小: {} bytes", FRAME_SIZE)),
-        Line::raw(format!("  缓冲区: {}", BUFFER_COUNT)),
+        Line::from_iter([Span::styled("上位机电量:", Style::new().fg(Color::Yellow))]),
+        Line::from_iter([Span::styled(
+            format!("  {}%", pc_battery),
+            Style::new().fg(battery_color),
+        )]),
         Line::raw(""),
-        if is_connected {
-            Line::from_iter([Span::styled(
-                "  已连接设备，数据传输中...",
-                Style::new().fg(Color::Green),
-            )])
-        } else {
-            Line::from_iter([Span::styled(
-                "  按 [Enter] 连接设备",
-                Style::new().fg(Color::Gray),
-            )])
-        },
-        Line::raw(""),
-        Line::from_iter([Span::styled("通信方式:", Style::new().fg(Color::Yellow))]),
-        Line::raw("  USB (VID: 0x1001, PID: 0x8023)"),
+        Line::from_iter([Span::styled("网络状态:", Style::new().fg(Color::Yellow))]),
+        Line::from_iter([Span::styled(
+            format!("  {}", network_status),
+            Style::new().fg(network_color),
+        )]),
     ];
 
     let widget = Paragraph::new(text).block(
