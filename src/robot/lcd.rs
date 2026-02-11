@@ -16,6 +16,7 @@ pub const FRAME_SIZE: usize = LCD_WIDTH * LCD_HEIGHT * 3;
 // ==================== DisplayMode ====================
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[allow(dead_code)]
 pub enum DisplayMode {
     #[default]
     Static,

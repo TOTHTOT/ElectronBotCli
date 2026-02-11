@@ -50,6 +50,7 @@ pub struct ServoState {
     pub selected: usize,
 }
 
+#[allow(dead_code)]
 impl ServoState {
     /// 获取舵机名称
     pub fn name(index: usize) -> &'static str {
@@ -105,6 +106,7 @@ pub struct Joint {
     state: ServoState,
 }
 
+#[allow(dead_code)]
 impl Joint {
     /// 创建新的关节控制器
     pub fn new() -> Self {

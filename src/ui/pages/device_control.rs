@@ -23,14 +23,8 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
 
     render_info_bar(frame, chunks[0]);
 
-    let main_chunks = Layout::new(
-        Direction::Horizontal,
-        [Constraint::Percentage(50), Constraint::Percentage(50)],
-    )
-    .split(chunks[1]);
-
-    render_joint_gauges(frame, main_chunks[0], app);
-    render_lcd_preview(frame, main_chunks[1], app);
+    // 只显示关节控制全屏
+    render_joint_gauges(frame, chunks[1], app);
 }
 
 fn render_info_bar(frame: &mut Frame, area: Rect) {
@@ -43,7 +37,7 @@ fn render_info_bar(frame: &mut Frame, area: Rect) {
     frame.render_widget(outer_block, area);
 
     let text = vec![Line::from_iter([Span::styled(
-        "操作: [↑/k] +1°  [↓/j] -1°  [a] -5°  [d] +5°  [h/l] 选择舵机  [Esc] 退出模式",
+        "操作: [↑] 上一舵机  [↓] 下一舵机  [←] -1°  [→] +1°  [s] 截图保存  [Esc] 返回",
         Style::new().fg(Color::White),
     )])];
 
@@ -125,64 +119,4 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
 
     let widget = Paragraph::new(text).style(Style::new().fg(Color::White));
     frame.render_widget(widget, area);
-}
-
-fn render_lcd_preview(frame: &mut Frame, area: Rect, _app: &App) {
-    let outer_block = Block::new()
-        .title("LCD 预览")
-        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Blue));
-    let inner_area = outer_block.inner(area);
-    frame.render_widget(outer_block, area);
-
-    // 使用 Lcd 生成像素
-    let mut lcd = crate::robot::Lcd::new();
-    lcd.set_mode(crate::robot::lcd::DisplayMode::Eyes);
-    let pixels = lcd.frame_vec();
-
-    let avail_width = inner_area.width.saturating_sub(2) as usize;
-    let avail_height = inner_area.height.saturating_sub(2) as usize;
-
-    let image_size = 240;
-    let char_aspect = 2.0;
-    let scale = image_size as f32 / avail_height as f32;
-    let scaled_width = (image_size as f32 / scale / char_aspect) as usize;
-    let offset_x = (avail_width.saturating_sub(scaled_width)) / 2;
-
-    let chars = [' ', '░', '▒', '█'];
-
-    let mut lines = Vec::new();
-    for py in 0..avail_height {
-        let pixel_y = (py as f32 * scale) as usize;
-        let mut line = String::new();
-        for px in 0..avail_width {
-            if pixel_y < image_size {
-                let scaled_px = if px >= offset_x { px - offset_x } else { px };
-                let pixel_x = (scaled_px as f32 * char_aspect * scale) as usize;
-
-                if pixel_x < image_size {
-                    let idx = (pixel_y * 240 + pixel_x) * 3;
-                    if idx + 2 < pixels.len() {
-                        let r = pixels[idx];
-                        let g = pixels[idx + 1];
-                        let b = pixels[idx + 2];
-                        let brightness = (r as u16 + g as u16 + b as u16) / 3;
-                        let char_idx = ((brightness / 64) as usize).min(3);
-                        line.push(chars[char_idx]);
-                    } else {
-                        line.push(' ');
-                    }
-                } else {
-                    line.push(' ');
-                }
-            } else {
-                line.push(' ');
-            }
-        }
-        lines.push(Line::raw(line));
-    }
-
-    let widget = Paragraph::new(lines).style(Style::new().fg(Color::Green));
-    frame.render_widget(widget, inner_area);
 }

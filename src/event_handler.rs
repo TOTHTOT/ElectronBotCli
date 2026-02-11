@@ -11,8 +11,7 @@ pub enum AppEvent {
     ServoPrev,
     ServoIncrease,
     ServoDecrease,
-    ServoIncreaseBig,
-    ServoDecreaseBig,
+    Screenshot,
     None,
 }
 
@@ -26,8 +25,11 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
             AppEvent::ServoPrev => app.joint.prev_servo(),
             AppEvent::ServoIncrease => app.joint.increase(),
             AppEvent::ServoDecrease => app.joint.decrease(),
-            AppEvent::ServoIncreaseBig => app.joint.increase_big(),
-            AppEvent::ServoDecreaseBig => app.joint.decrease_big(),
+            AppEvent::Screenshot => {
+                if let Err(e) = app.take_screenshot() {
+                    log::error!("Screenshot failed: {e}");
+                }
+            }
             _ => {}
         }
         return;

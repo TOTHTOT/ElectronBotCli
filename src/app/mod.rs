@@ -27,6 +27,7 @@ pub struct App {
     comm_tx: Option<SyncSender<BotRecvType>>,
 }
 
+#[allow(dead_code)]
 impl App {
     pub fn new() -> Self {
         let mut menu_state = ListState::default();
@@ -84,13 +85,29 @@ impl App {
         self.comm_popup.hide();
     }
 
-    /// 发送帧数据
+    /// 发送帧数据 (原始像素数据)
     pub fn send_frame(&mut self) -> anyhow::Result<()> {
         if let Some(tx) = &self.comm_tx {
             let pixels = self.lcd.frame_vec();
             let config = self.joint.config();
             tx.try_send((pixels, config))?;
         }
+        Ok(())
+    }
+
+    /// 截图并保存为 BMP 文件
+    pub fn take_screenshot(&mut self) -> anyhow::Result<()> {
+        let pixels = self.lcd.frame_vec();
+        let img = image::RgbImage::from_raw(240, 240, pixels)
+            .ok_or_else(|| anyhow::anyhow!("Invalid image dimensions"))?;
+
+        // 生成文件名: screenshot_YYYYMMDD_HHMMSS.bmp
+        let now = chrono::Local::now();
+        let filename = format!("screenshot_{}.bmp", now.format("%Y%m%d_%H%M%S"));
+
+        img.save(&filename)?;
+        log::info!("Screenshot saved to: {}", filename);
+
         Ok(())
     }
 

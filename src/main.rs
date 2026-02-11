@@ -96,13 +96,12 @@ fn handle_comm_popup_input(code: KeyCode, app: &mut app::App) -> event_handler::
 
 fn handle_joint_mode_input(code: KeyCode) -> event_handler::AppEvent {
     match code {
-        KeyCode::Char('q') | KeyCode::Esc => event_handler::AppEvent::ExitServoMode,
-        KeyCode::Up | KeyCode::Char('k') => event_handler::AppEvent::ServoIncrease,
-        KeyCode::Down | KeyCode::Char('j') => event_handler::AppEvent::ServoDecrease,
-        KeyCode::Char('h') => event_handler::AppEvent::ServoPrev,
-        KeyCode::Char('l') => event_handler::AppEvent::ServoNext,
-        KeyCode::Char('a') => event_handler::AppEvent::ServoDecreaseBig,
-        KeyCode::Char('d') => event_handler::AppEvent::ServoIncreaseBig,
+        KeyCode::Esc => event_handler::AppEvent::ExitServoMode,
+        KeyCode::Up => event_handler::AppEvent::ServoPrev,
+        KeyCode::Down => event_handler::AppEvent::ServoNext,
+        KeyCode::Left => event_handler::AppEvent::ServoDecrease,
+        KeyCode::Right => event_handler::AppEvent::ServoIncrease,
+        KeyCode::Char('s') => event_handler::AppEvent::Screenshot,
         _ => event_handler::AppEvent::None,
     }
 }
