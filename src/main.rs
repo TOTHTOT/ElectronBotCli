@@ -46,7 +46,6 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> 
     while app.running {
         // 如果已连接，隐藏连接弹窗
         if app.is_connected() {
-            app.comm_popup.hide();
             let _ = app.send_frame();
         }
 
@@ -72,7 +71,7 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
             if key.kind == KeyEventKind::Press {
                 let evt = if app.in_servo_mode {
                     handle_joint_mode_input(key.code)
-                } else if app.comm_popup.is_visible() {
+                } else if app.popup.is_visible() {
                     handle_comm_popup_input(key.code, app)
                 } else {
                     handle_menu_mode_input(key.code, app)

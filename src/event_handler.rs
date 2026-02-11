@@ -43,7 +43,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
             if app.is_connected() {
                 app.stop_comm_thread();
             } else {
-                app.start_comm_thread();
+                app.connect_robot();
             }
         }
         AppEvent::EnterServoMode => {

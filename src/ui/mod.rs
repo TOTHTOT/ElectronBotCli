@@ -2,7 +2,7 @@ mod pages;
 mod sidebar;
 
 use crate::app::{App, MenuItem};
-use crate::ui_components::CommPopupWidget;
+use crate::ui_components::PopupWidget;
 use ratatui::prelude::*;
 
 pub fn render(frame: &mut Frame, app: &mut App) {
@@ -21,7 +21,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         MenuItem::About => pages::about::render(frame, chunks[1]),
     }
 
-    // 渲染通信提示弹窗
-    let mut popup = CommPopupWidget::new();
-    popup.render(frame, frame.area(), &mut app.comm_popup);
+    // 渲染弹窗
+    let mut popup_widget = PopupWidget::new();
+    popup_widget.render(frame, frame.area(), &mut app.popup);
 }

@@ -125,7 +125,7 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
         ),
         Span::styled(format!(" {name}:"), Style::new().fg(color)),
         Span::styled(bar, Style::new().fg(color)),
-        Span::styled(format!(" {value4}°"), Style::new().fg(color)),
+        Span::styled(format!(" {value}°"), Style::new().fg(color)),
         Span::styled(format!(" [{range_str}]"), Style::new().fg(Color::DarkGray)),
     ])];
 
