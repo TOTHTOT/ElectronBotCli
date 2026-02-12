@@ -7,6 +7,7 @@ use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 // 导出菜单
 pub use menu::*;
 
+use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
@@ -57,10 +58,10 @@ impl App {
         let (tx, rx) = mpsc::sync_channel(1);
         match robot::start_comm_thread(rx) {
             Ok((state, handle)) => {
-        self.comm_state = Some(state);
-        self.comm_thread = Some(handle);
-        self.comm_tx = Some(tx);
-        log::info!("Successfully connected to robot...");
+                self.comm_state = Some(state);
+                self.comm_thread = Some(handle);
+                self.comm_tx = Some(tx);
+                log::info!("Successfully connected to robot...");
             }
             Err(e) => {
                 log::warn!("Failed to start comm thread: {e:?}");
@@ -97,15 +98,16 @@ impl App {
     /// 截图并保存为 BMP 文件
     pub fn take_screenshot(&mut self) -> anyhow::Result<()> {
         let pixels = self.lcd.frame_vec();
-        let img = image::RgbImage::from_raw(240, 240, pixels)
+        let img = image::RgbImage::from_raw(FRAME_WIDTH as u32, FRAME_HEIGHT as u32, pixels)
             .ok_or_else(|| anyhow::anyhow!("Invalid image dimensions"))?;
-
         // 生成文件名: screenshot_YYYYMMDD_HHMMSS.bmp
         let now = chrono::Local::now();
-        let filename = format!("screenshot_{}.bmp", now.format("%Y%m%d_%H%M%S"));
-
+        let filename = format!(
+            "./assets/images/screenshot/screenshot_{}.bmp",
+            now.format("%Y%m%d_%H%M%S")
+        );
         img.save(&filename)?;
-        log::info!("Screenshot saved to: {}", filename);
+        log::info!("Screenshot saved to: {filename}");
 
         Ok(())
     }

@@ -6,7 +6,8 @@
       "Bash(cargo clippy)",
       "WebFetch(domain:github.com)",
       "Bash(dir:*)",
-      "Bash(findstr:*)"
+      "Bash(findstr:*)",
+      "Bash(cargo check)"
     ]
   }
 }

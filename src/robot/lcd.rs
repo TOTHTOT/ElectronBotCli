@@ -6,20 +6,24 @@
 //! 使用 [boteyes] 库渲染机器人眼睛动画
 
 use anyhow::Result;
-use boteyes::RoboEyes;
+use boteyes::{Mood, Position, RoboEyes};
 use electron_bot::ImageBuffer;
-
+use image::GrayImage;
 // ==================== 常量 ====================
 
 pub const LCD_WIDTH: usize = 240;
 pub const LCD_HEIGHT: usize = 240;
 pub const FRAME_SIZE: usize = LCD_WIDTH * LCD_HEIGHT * 3;
 
-// 眼睛画布大小 (BotEyes 默认输出)
-const EYE_CANVAS_WIDTH: usize = 128;
-const EYE_CANVAS_HEIGHT: usize = 128;
-
-// 导出 BotEyes 类型
+/// 计算数据的 FNV-1a 哈希值（用于检测内容变化）
+fn compute_hash(data: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325;
+    for &byte in data {
+        hash ^= byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
 
 // ==================== DisplayMode ====================
 
@@ -40,16 +44,24 @@ pub struct Lcd {
     image_data: Option<Vec<u8>>,
     eyes: RoboEyes,
     eyes_timer: u64,
+    last_eyes_hash: Option<u64>, // 缓存上一帧的哈希值
 }
 
 #[allow(dead_code)]
 impl Lcd {
     pub fn new() -> Self {
-        let mut eyes = RoboEyes::new(128, 168);
-        eyes.set_mood(boteyes::Mood::Default);
+        let mut eyes = RoboEyes::new(240, 240);
+        let mut buffer = GrayImage::new(240, 240);
+        eyes.set_mood(Mood::Default);
+        eyes.set_position(Position::Center);
+        eyes.set_autoblinker(true, 3, 2);
+        eyes.set_idle_mode(true, 2, 2);
         eyes.open();
-        eyes.set_autoblinker(true, 4000, 2000);
-        eyes.set_size(EYE_CANVAS_WIDTH as u32, EYE_CANVAS_HEIGHT as u32); // 眼睛大小
+        for i in 0..20 {
+            eyes.draw_into(&mut buffer, i as u64 * 20);
+        }
+        eyes.set_mood(Mood::Default);
+        eyes.draw_into(&mut buffer, 1000);
 
         Self {
             buffer: ImageBuffer::new(),
@@ -57,6 +69,7 @@ impl Lcd {
             image_data: None,
             eyes,
             eyes_timer: 0,
+            last_eyes_hash: None,
         }
     }
 
@@ -98,29 +111,19 @@ impl Lcd {
     }
 
     fn render_eyes(&mut self) {
-        // 使用 BotEyes 库渲染眼睛动画 (返回 128x64 灰度图)
-        let eye_img = self.eyes.draw_eyes(self.eyes_timer);
-        self.eyes_timer += 16; // ~60fps
+        let mut gray_buffer = GrayImage::new(LCD_WIDTH as u32, LCD_HEIGHT as u32);
+        self.eyes.draw_into(&mut gray_buffer, self.eyes_timer);
+        self.eyes_timer = self.eyes_timer.wrapping_add(50);
 
-        // 清空缓冲区
-        self.buffer.clear(electron_bot::Color::Black);
-
-        // 居中显示在 LCD 上
-        let eye_offset_x =(LCD_WIDTH - EYE_CANVAS_WIDTH) / 2 -20;
-        let eye_offset_y = (LCD_HEIGHT - EYE_CANVAS_HEIGHT) / 2 -20;
-        // let eye_offset_x = 0;
-        // let eye_offset_y = 0;
-        // 遍历整个眼睛画布，复制非黑色像素
-        for y in 0..EYE_CANVAS_HEIGHT {
-            for x in 0..EYE_CANVAS_WIDTH {
-                let pixel = eye_img.get_pixel(x as u32, y as u32);
-                let gray = pixel[0];
-
-                if gray > 0 {
-                    let screen_x = eye_offset_x + x;
-                    let screen_y = eye_offset_y + y;
-                    self.buffer.set_pixel(screen_x, screen_y, electron_bot::Color::Red);
-                }
+        let current_hash = compute_hash(gray_buffer.as_raw());
+        if Some(current_hash) != self.last_eyes_hash {
+            self.last_eyes_hash = Some(current_hash);
+            for (i, pixel) in gray_buffer.pixels().enumerate() {
+                let gray = pixel.0[0];
+                let rgb_idx = i * 3;
+                self.buffer.as_mut_data()[rgb_idx] = gray; // R
+                self.buffer.as_mut_data()[rgb_idx + 1] = gray; // G
+                self.buffer.as_mut_data()[rgb_idx + 2] = gray; // B
             }
         }
     }
