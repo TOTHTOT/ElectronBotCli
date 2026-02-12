@@ -51,21 +51,17 @@ pub struct Lcd {
 impl Lcd {
     pub fn new() -> Self {
         let eyes_config = RoboEyesConfig {
-            eye_width: 60,
+            eye_width: 50,
             eye_height: 80,
             border_radius: 26,
             space_between: 20,
         };
         let mut eyes = RoboEyes::new_with_config(LCD_WIDTH as u32, LCD_HEIGHT as u32, eyes_config);
         let mut buffer = GrayImage::new(LCD_WIDTH as u32, LCD_HEIGHT as u32);
-        eyes.set_mood(Mood::Default);
         eyes.set_position(Position::Center);
         eyes.set_autoblinker(true, 3, 4);
-        eyes.set_idle_mode(true, 2, 4);
+        eyes.set_idle_mode(true, 2, 4, 50, 50);
         eyes.open();
-        for i in 0..20 {
-            eyes.draw_into(&mut buffer, i as u64 * 20);
-        }
         eyes.set_mood(Mood::Default);
         eyes.draw_into(&mut buffer, 1000);
 

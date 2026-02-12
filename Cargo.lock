@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "BotEyes"
 version = "0.1.0"
-source = "git+https://github.com/TOTHTOT/BotEyes#42472a3450132b2da628a3892baaf11055ae5daa"
+source = "git+https://github.com/TOTHTOT/BotEyes#691f1464abf1fda79397b8c67d5fac1e7d2ff32e"
 dependencies = [
  "image",
  "rand 0.8.5",
