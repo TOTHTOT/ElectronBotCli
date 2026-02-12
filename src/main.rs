@@ -5,6 +5,7 @@ mod event_handler;
 mod robot;
 mod ui;
 mod ui_components;
+mod voice;
 
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -15,6 +16,7 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
+use std::sync::mpsc;
 use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
@@ -27,7 +29,13 @@ fn main() -> anyhow::Result<()> {
         )])
         .ok();
     }
-
+    let (audio_result_tx, _audio_result_rx) = mpsc::channel();
+    if let Err(e) = voice::start_thread(
+        audio_result_tx,
+        "assets/module/vosk-model-small-cn-0.22",
+    ) {
+        log::warn!("Error starting voice audio thread: {e}");
+    }
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;

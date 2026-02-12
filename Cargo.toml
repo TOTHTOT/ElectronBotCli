@@ -13,3 +13,5 @@ log = "0.4"
 simplelog = "0.12"
 electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git" }
 BotEyes = { git = "https://github.com/TOTHTOT/BotEyes.git"}
+vosk = "0.3"
+cpal = "0.15"
