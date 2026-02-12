@@ -171,14 +171,14 @@ fn list_devices() -> Vec<(String, Device)> {
 /// * `model_path` - Vosk 模型文件所在目录路径
 ///
 /// # 返回
-/// 成功返回线程句柄，失败返回错误信息
+/// 成功返回 `()`，失败返回错误信息
 ///
 /// # 使用示例
 /// ```ignore
 /// use std::sync::mpsc;
 ///
 /// let (tx, rx) = mpsc::channel::<voice::VoiceState>();
-/// let _handle = voice::start_thread(tx, "model")?;
+/// voice::start_thread(tx, "model")?;
 ///
 /// // 在主线程中接收状态
 /// for state in rx {
@@ -195,7 +195,7 @@ fn list_devices() -> Vec<(String, Device)> {
 ///     }
 /// }
 /// ```
-pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<thread::JoinHandle<()>> {
+pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
     // 获取音频设备列表
     let devices = list_devices();
 
@@ -207,10 +207,20 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<thread::
 
     log::info!("Using audio device: {device_name}");
 
-    // 配置音频参数：16kHz 单声道
+    // 获取设备的默认配置
+    let default_config = device.default_input_config()?;
+    let actual_sample_rate = default_config.sample_rate().0;
+    let actual_channels = default_config.channels();
+
+    log::info!("Device sample rate: {actual_sample_rate} Hz, channels: {actual_channels}");
+
+    // Vosk 需要 16kHz，如果不同需要重采样
+    let need_resample = actual_sample_rate != 16000;
+
+    // 配置音频流
     let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
+        channels: actual_channels,
+        sample_rate: default_config.sample_rate(),
         buffer_size: cpal::BufferSize::Default,
     };
 
@@ -227,11 +237,17 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<thread::
     let stream = device.build_input_stream(
         &config,
         move |data: &[f32], _: &_| {
-            // 将 f32 音频数据转换为 i16
-            let samples: Vec<i16> = data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
+            let samples: Vec<i16> =
+                data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
 
-            // 发送到处理线程
-            let _ = audio_tx.send(samples);
+            // 如果需要重采样，进行简单的降采样
+            let final_samples = if need_resample {
+                resample_to_16k(&samples, actual_sample_rate)
+            } else {
+                samples
+            };
+
+            let _ = audio_tx.send(final_samples);
         },
         error_handler,
         None,
@@ -239,14 +255,30 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<thread::
 
     // 启动音频流
     stream.play()?;
-    log::info!("Voice recognition thread started");
+    log::info!("Voice recognition thread started (sample rate: {actual_sample_rate} Hz)");
 
     // 启动音频处理线程
-    let handle = thread::spawn(move || {
+    thread::spawn(move || {
         audio_analysis_thread(tx, recognizer, audio_rx);
     });
 
-    Ok(handle)
+    Ok(())
+}
+
+/// 将音频重采样到 16kHz
+fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
+    let ratio = from_rate as f64 / 16000.0;
+    let new_len = (samples.len() as f64 / ratio) as usize;
+    let mut result = Vec::with_capacity(new_len);
+
+    for i in 0..new_len {
+        let src_idx = (i as f64 * ratio) as usize;
+        if src_idx < samples.len() {
+            result.push(samples[src_idx]);
+        }
+    }
+
+    result
 }
 
 /// 音频分析线程
