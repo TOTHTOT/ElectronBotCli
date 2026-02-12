@@ -5,17 +5,15 @@
 pub mod joint;
 pub mod lcd;
 
+use electron_bot::ElectronBot;
 pub use joint::{Joint, JointConfig, ServoState, SERVO_COUNT};
 pub use lcd::{DisplayMode, Lcd};
-
-use electron_bot::ElectronBot;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 // ==================== Robot 结构体 ====================
 
-/// ElectronBot 机器人（封装 electron_bot 库）
 #[allow(dead_code)]
 pub struct Robot {
     bot: ElectronBot,
@@ -35,23 +33,24 @@ impl Robot {
         self.bot.is_connected()
     }
 
-    /// 发送一帧数据（像素 + 关节配置）
+    /// 发送一帧数据
     pub fn send_frame(
         &mut self,
         pixels: &[u8],
         config: &[u8; 32],
     ) -> Result<(), electron_bot::BotError> {
-        // 更新图片缓冲区
         self.bot
             .image_buffer()
             .as_mut_data()
             .copy_from_slice(pixels);
 
-        // 更新扩展数据（关节角度）
         self.bot.extra_data().set_raw(config);
-
-        // 同步到设备
+        let start_time = Instant::now();
         self.bot.sync()?;
+        let elapsed = start_time.elapsed();
+        if elapsed > Duration::from_millis(60) {
+            log::warn!("Refresh screen took too long, used time: {elapsed:?}");
+        }
         Ok(())
     }
 }

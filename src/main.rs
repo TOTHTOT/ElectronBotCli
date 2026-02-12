@@ -30,10 +30,7 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
     let (audio_result_tx, _audio_result_rx) = mpsc::channel();
-    if let Err(e) = voice::start_thread(
-        audio_result_tx,
-        "assets/module/vosk-model-small-cn-0.22",
-    ) {
+    if let Err(e) = voice::start_thread(audio_result_tx, "assets/module/vosk-model-small-cn-0.22") {
         log::warn!("Error starting voice audio thread: {e}");
     }
     let mut stdout = io::stdout();

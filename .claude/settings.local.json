@@ -8,7 +8,10 @@
       "Bash(dir:*)",
       "Bash(findstr:*)",
       "Bash(cargo check)",
-      "Bash(cargo tree:*)"
+      "Bash(cargo tree:*)",
+      "Bash(gh repo clone:*)",
+      "Bash(where:*)",
+      "Bash(ls:*)"
     ]
   }
 }

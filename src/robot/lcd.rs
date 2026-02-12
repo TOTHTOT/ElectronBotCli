@@ -2,11 +2,11 @@
 //!
 //! 240x240 RGB LCD 显示控制
 //!
-//! 使用 [electron_bot::ImageBuffer] 实现底层图片操作
+//! 使用 [ImageBuffer] 实现底层图片操作
 //! 使用 [boteyes] 库渲染机器人眼睛动画
 
 use anyhow::Result;
-use boteyes::{Mood, Position, RoboEyes};
+use boteyes::{Mood, Position, RoboEyes, RoboEyesConfig};
 use electron_bot::ImageBuffer;
 use image::GrayImage;
 // ==================== 常量 ====================
@@ -50,12 +50,18 @@ pub struct Lcd {
 #[allow(dead_code)]
 impl Lcd {
     pub fn new() -> Self {
-        let mut eyes = RoboEyes::new(240, 240);
-        let mut buffer = GrayImage::new(240, 240);
+        let eyes_config = RoboEyesConfig {
+            eye_width: 60,
+            eye_height: 80,
+            border_radius: 26,
+            space_between: 20,
+        };
+        let mut eyes = RoboEyes::new_with_config(LCD_WIDTH as u32, LCD_HEIGHT as u32, eyes_config);
+        let mut buffer = GrayImage::new(LCD_WIDTH as u32, LCD_HEIGHT as u32);
         eyes.set_mood(Mood::Default);
         eyes.set_position(Position::Center);
-        eyes.set_autoblinker(true, 3, 2);
-        eyes.set_idle_mode(true, 2, 2);
+        eyes.set_autoblinker(true, 3, 4);
+        eyes.set_idle_mode(true, 2, 4);
         eyes.open();
         for i in 0..20 {
             eyes.draw_into(&mut buffer, i as u64 * 20);
@@ -129,12 +135,12 @@ impl Lcd {
     }
 
     /// 设置眼睛表情
-    pub fn set_eyes_mood(&mut self, mood: boteyes::Mood) {
+    pub fn set_eyes_mood(&mut self, mood: Mood) {
         self.eyes.set_mood(mood);
     }
 
     /// 设置眼睛注视方向
-    pub fn set_eyes_position(&mut self, position: boteyes::Position) {
+    pub fn set_eyes_position(&mut self, position: Position) {
         self.eyes.set_position(position);
     }
 

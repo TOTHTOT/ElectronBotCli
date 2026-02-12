@@ -198,11 +198,13 @@ fn list_devices() -> Vec<(String, Device)> {
 pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
     // 获取音频设备列表
     let devices = list_devices();
-
-    // 选择第一个设备
+    devices.iter().for_each(|(info, _)| {
+        log::info!("find speech: {info:?}");
+    });
+    // 查找指定麦克风, "麦克风 (DroidCam Audio)"
     let (device_name, device) = devices
         .into_iter()
-        .next()
+        .find(|(name, _)| name == "麦克风 (DroidCam Audio)")
         .ok_or_else(|| anyhow!("No audio input device found"))?;
 
     log::info!("Using audio device: {device_name}");
@@ -214,31 +216,20 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
 
     log::info!("Device sample rate: {actual_sample_rate} Hz, channels: {actual_channels}");
 
-    // Vosk 需要 16kHz，如果不同需要重采样
     let need_resample = actual_sample_rate != 16000;
 
-    // 配置音频流
     let config = cpal::StreamConfig {
         channels: actual_channels,
         sample_rate: default_config.sample_rate(),
         buffer_size: cpal::BufferSize::Default,
     };
-
-    // 创建语音识别器
     let recognizer = SpeechRecognizer::new(model_path)?;
-
-    // 创建音频数据传输通道
     let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<i16>>(4);
-
-    // 音频流错误处理回调
     let error_handler = |e| log::error!("Audio stream error: {e}");
-
-    // 创建音频输入流
     let stream = device.build_input_stream(
         &config,
         move |data: &[f32], _: &_| {
-            let samples: Vec<i16> =
-                data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
+            let samples: Vec<i16> = data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
 
             // 如果需要重采样，进行简单的降采样
             let final_samples = if need_resample {
@@ -253,11 +244,9 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
         None,
     )?;
 
-    // 启动音频流
     stream.play()?;
     log::info!("Voice recognition thread started (sample rate: {actual_sample_rate} Hz)");
 
-    // 启动音频处理线程
     thread::spawn(move || {
         audio_analysis_thread(tx, recognizer, audio_rx);
     });

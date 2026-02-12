@@ -7,7 +7,7 @@
 ## 包含功能
 
 1. [x] 移植原上位机功能, 包含: usb的cdc通信, 舵机控制, 屏幕控制, 目前屏幕刷新能做到20fps.
-2. [ ] 支持表情显示, 采用[RoboEyes](https://github.com/FluxGarage/RoboEyes/tree/main)的实现方式, 动态生成表情.
+2. [x] 支持表情显示, 采用[RoboEyes](https://github.com/FluxGarage/RoboEyes/tree/main)的实现方式, 动态生成表情.
 3. [ ] 使用vosk调用usb麦克风实现语音唤醒.
 4. [ ] 人脸表情识别并将结果转为机器人表情.
 5. [ ] 人脸位置识别, 控制身体旋转保持人脸居中.
