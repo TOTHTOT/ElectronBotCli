@@ -75,6 +75,7 @@ impl VoiceManager {
 
         let volume_clone = volume.clone();
         let state_clone = state.clone();
+        let actual_channels = actual_channels; // 复制一下供闭包使用
         let error_handler = |e| log::error!("Audio stream error: {e}");
         let stream = device.build_input_stream(
             &config,
@@ -85,8 +86,22 @@ impl VoiceManager {
                 let volume = (rms * 100.0).min(100.0) as i32;
                 volume_clone.store(volume, Ordering::Relaxed);
 
-                let samples: Vec<i16> =
-                    data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
+                // 双声道混合成单声道
+                let mono_samples: Vec<f32> = if actual_channels == 2 {
+                    data.chunks(2)
+                        .map(|chunk| (chunk[0] + chunk[1]) / 2.0)
+                        .collect()
+                } else {
+                    data.to_vec()
+                };
+
+                // 转换为 i16
+                let samples: Vec<i16> = mono_samples
+                    .iter()
+                    .map(|&s| (s * i16::MAX as f32) as i16)
+                    .collect();
+
+                // 重采样到 16kHz
                 let final_samples = if need_resample {
                     resample_to_16k(&samples, actual_sample_rate)
                 } else {
@@ -177,14 +192,12 @@ fn audio_analysis_thread(
         while buffer.len() >= chunk_size {
             let frame = &buffer[0..chunk_size];
             recognizer.process(frame);
-
             let cur_state = recognizer.state().clone();
             if matches!(cur_state, VoiceState::Detected(_)) {
                 if let Err(e) = tx.send(cur_state) {
                     log::warn!("Failed to send voice state: {e}");
                 }
             }
-
             buffer.drain(..chunk_size);
         }
     }
@@ -194,9 +207,9 @@ fn audio_analysis_thread(
 fn update_state_thread(rx: Receiver<VoiceState>, state: Arc<Mutex<VoiceState>>) {
     for new_state in rx {
         let mut current = state.lock().unwrap();
-        if matches!(new_state, VoiceState::Detected(_)) {
-            log::info!("Wake word detected");
-            *current = VoiceState::Detected(String::new());
+        if let VoiceState::Detected(text) = &new_state {
+            log::info!("Wake word detected: {text}");
+            *current = VoiceState::Detected(text.clone());
             // 1秒后重置
             thread::sleep(std::time::Duration::from_secs(1));
             *current = VoiceState::Idle;
@@ -229,18 +242,62 @@ impl SpeechRecognizer {
             self.state = VoiceState::Listening;
         }
 
-        let _ = self.recognizer.accept_waveform(audio_data);
+        match self.recognizer.accept_waveform(audio_data) {
+            Ok(state) => {
+                if matches!(state, vosk::DecodingState::Finalized) {
+                    let result = self.recognizer.final_result();
+                    // 提取完整结果文本
+                    if let Some(text) = result.single().map(|s| s.text) {
+                        log::trace!("Final result: {text}");
+                        if Self::is_wake_word(text) {
+                            self.state = VoiceState::Detected(text.to_lowercase());
+                            log::info!("Wake word detected: {text}");
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                log::warn!("Audio processing error: {e}");
+            }
+        }
 
+        // 处理中间结果
         let partial = self.recognizer.partial_result();
         if !partial.partial.is_empty() {
             let text = partial.partial.to_string();
-            let lower = text.to_lowercase();
-
-            if lower.contains("bd") || lower.contains("b d") {
-                self.state = VoiceState::Detected(text.clone());
-                log::info!("Wake word detected: {text}");
+            if Self::is_wake_word(&text) {
+                self.state = VoiceState::Detected(text.to_lowercase());
+                log::info!("Wake word detected (partial): {text}");
             }
         }
+    }
+
+    /// 检查是否是唤醒词 "BD"
+    /// 由于是中文模型，需要接受更多变体：
+    /// - "bd", "b d", "B D" (英文)
+    /// - "比地", "必地", "贝德", "b'd" (中文拼音)
+    fn is_wake_word(text: &str) -> bool {
+        let lower = text.to_lowercase();
+
+        // 直接匹配
+        if lower.contains("bd") || lower.contains("b d") {
+            return true;
+        }
+
+        // 检查是否以"b"开头且长度很短（Vosk识别"BD"时首字母通常是B）
+        if lower.starts_with('b') && lower.len() <= 4 {
+            return true;
+        }
+
+        // 中文拼音变体
+        let variants = ["比地", "必地", "贝德", "比的", "逼地", "波特", "博特"];
+        for v in &variants {
+            if lower.contains(v) {
+                return true;
+            }
+        }
+
+        false
     }
 
     pub fn state(&self) -> &VoiceState {
