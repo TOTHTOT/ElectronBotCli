@@ -11,7 +11,6 @@ pub fn render(
     edit_buffer: &str,
 ) {
     let outer_block = create_block("设置".to_string(), Color::Green, Color::Green);
-
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 

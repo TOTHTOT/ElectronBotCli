@@ -1,7 +1,5 @@
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, Paragraph},
-};
+use crate::ui_components::create_block;
+use ratatui::{prelude::*, widgets::Paragraph};
 
 fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
@@ -37,13 +35,10 @@ pub fn render(frame: &mut Frame, area: Rect) {
         Line::raw("    ↓/j   向下"),
         Line::raw("    Esc/q 退出"),
     ];
+    let outer_block = create_block("关于".to_string(), Color::Green, Color::Green);
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
 
-    let widget = Paragraph::new(text).block(
-        Block::new()
-            .title("关于")
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(Color::Green)),
-    );
-
-    frame.render_widget(widget, area);
+    let widget = Paragraph::new(text);
+    frame.render_widget(widget, inner_area);
 }

@@ -1,17 +1,10 @@
 use crate::app::App;
 use crate::robot::{ServoState, SERVO_COUNT};
-use crate::ui_components::get_indicator;
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, Paragraph},
-};
+use crate::ui_components::{create_block, get_indicator};
+use ratatui::{prelude::*, widgets::Paragraph};
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let outer_block = Block::new()
-        .title("ElectronBot 设备控制")
-        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Blue));
+    let outer_block = create_block("设备控制".to_string(), Color::Green, Color::Green);
 
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
@@ -23,17 +16,11 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     .split(inner_area);
 
     render_info_bar(frame, chunks[0]);
-
-    // 只显示关节控制全屏
     render_joint_gauges(frame, chunks[1], app);
 }
 
 fn render_info_bar(frame: &mut Frame, area: Rect) {
-    let outer_block = Block::new()
-        .title("操作说明")
-        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Blue));
+    let outer_block = create_block("操作说明".to_string(), Color::Green, Color::Green);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
@@ -47,11 +34,7 @@ fn render_info_bar(frame: &mut Frame, area: Rect) {
 }
 
 fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App) {
-    let outer_block = Block::new()
-        .title("关节控制")
-        .title_style(Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .borders(Borders::ALL)
-        .border_style(Style::new().fg(Color::Blue));
+    let outer_block = create_block("关节控制".to_string(), Color::Green, Color::Green);
 
     let servo_height = (area.height as usize) / SERVO_COUNT;
     let extra_rows = (area.height as usize) % SERVO_COUNT;

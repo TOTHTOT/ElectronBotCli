@@ -1,7 +1,8 @@
 use crate::app::MenuItem;
+use crate::ui_components::create_block;
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, ListState},
+    widgets::{List, ListItem, ListState},
 };
 
 pub fn render(frame: &mut Frame, area: Rect, menu_state: &mut ListState) {
@@ -11,12 +12,6 @@ pub fn render(frame: &mut Frame, area: Rect, menu_state: &mut ListState) {
         .collect();
 
     let menu = List::new(menu_items)
-        .block(
-            Block::new()
-                .title("菜单")
-                .borders(Borders::ALL)
-                .border_style(Style::new().fg(Color::Cyan)),
-        )
         .highlight_style(
             Style::new()
                 .bg(Color::Cyan)
@@ -24,6 +19,8 @@ pub fn render(frame: &mut Frame, area: Rect, menu_state: &mut ListState) {
                 .add_modifier(Modifier::BOLD),
         )
         .highlight_symbol("▶ ");
-
-    frame.render_stateful_widget(menu, area, menu_state);
+    let outer_block = create_block("菜单".to_string(), Color::LightBlue, Color::LightBlue);
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
+    frame.render_stateful_widget(menu, inner_area, menu_state);
 }

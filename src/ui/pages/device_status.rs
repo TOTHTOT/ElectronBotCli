@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::ui_components::create_block;
 use ratatui::{prelude::*, widgets::*};
 
 fn get_pc_battery() -> u32 {
@@ -71,14 +72,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         &[Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
     )
     .column_spacing(2);
+    let outer_block = create_block("操作说明".to_string(), Color::Green, Color::Green);
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
 
-    let widget = Paragraph::new(Line::raw(""))
-        .block(Block::new().title("设备状态").borders(Borders::ALL))
-        .alignment(Alignment::Left);
+    let widget = Paragraph::new(Line::raw("")).alignment(Alignment::Left);
+    frame.render_widget(widget, inner_area);
 
-    frame.render_widget(widget, area);
-
-    // 在内容区域渲染 Table
     let inner = area.inner(Margin {
         horizontal: 1,
         vertical: 1,
