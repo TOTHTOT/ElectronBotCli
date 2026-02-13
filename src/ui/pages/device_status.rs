@@ -1,83 +1,87 @@
 use crate::app::App;
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, Paragraph},
-};
+use crate::ui_components::create_block;
+use ratatui::{prelude::*, widgets::*};
 
-/// 获取上位机电量
 fn get_pc_battery() -> u32 {
-    // TODO: 实际项目中可以从系统 API 获取
-    85 // 模拟返回 85%
+    85
 }
 
-/// 获取网络状态
 fn get_network_status() -> &'static str {
-    // TODO: 实际项目中可以从系统 API 获取
     "已连接"
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+fn status_color(ok: bool) -> Color {
+    if ok {
+        Color::Green
+    } else {
+        Color::Red
+    }
+}
+
+pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
     let is_connected = app.is_connected();
+    let volume = app.voice_manager.volume();
 
-    let status_text = if is_connected {
-        "已连接"
-    } else {
-        "未连接"
-    };
-    let status_color = if is_connected {
-        Color::Green
-    } else {
-        Color::Red
-    };
+    // 使用 Table 实现网格布局
+    let table = Table::new(
+        vec![
+            Row::new(vec![
+                Cell::from(Span::styled("连接状态", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(
+                    if is_connected {
+                        "已连接"
+                    } else {
+                        "未连接"
+                    },
+                    Style::new().fg(status_color(is_connected)).bold(),
+                )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("上位机电量", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(
+                    format!("{}%", get_pc_battery()),
+                    Style::new().fg(status_color(get_pc_battery() > 50)),
+                )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("网络状态", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(
+                    get_network_status(),
+                    Style::new().fg(status_color(get_network_status() == "已连接")),
+                )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("输入音量", Style::new().fg(Color::Yellow))),
+                // 音量条
+                Cell::from(Span::styled(
+                    format!("{:─<20}", "│".repeat((volume / 5) as usize)),
+                    Style::new().fg(Color::Cyan),
+                )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled(
+                    "按 [Enter] 连接设备",
+                    Style::new().fg(Color::Gray),
+                )),
+                Cell::from(Span::styled(
+                    format!("{}", volume),
+                    Style::new().fg(Color::Cyan),
+                )),
+            ]),
+        ],
+        &[Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
+    )
+    .column_spacing(2);
+    let outer_block = create_block("操作说明".to_string(), border_color, border_color);
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
 
-    let pc_battery = get_pc_battery();
-    let battery_color = if pc_battery > 50 {
-        Color::Green
-    } else if pc_battery > 20 {
-        Color::Yellow
-    } else {
-        Color::Red
-    };
+    let widget = Paragraph::new(Line::raw("")).alignment(Alignment::Left);
+    frame.render_widget(widget, inner_area);
 
-    let network_status = get_network_status();
-    let network_color = if network_status == "已连接" {
-        Color::Green
-    } else {
-        Color::Red
-    };
-
-    let text = vec![
-        Line::raw(""),
-        Line::from_iter([Span::styled("连接状态: ", Style::new().fg(Color::Yellow))]),
-        Line::from_iter([Span::styled(
-            format!("  {}", status_text),
-            Style::new().fg(status_color),
-        )]),
-        Line::raw(""),
-        Line::from_iter([Span::styled(
-            "  按 [Enter] 连接设备",
-            Style::new().fg(Color::Gray),
-        )]),
-        Line::raw(""),
-        Line::from_iter([Span::styled("上位机电量:", Style::new().fg(Color::Yellow))]),
-        Line::from_iter([Span::styled(
-            format!("  {}%", pc_battery),
-            Style::new().fg(battery_color),
-        )]),
-        Line::raw(""),
-        Line::from_iter([Span::styled("网络状态:", Style::new().fg(Color::Yellow))]),
-        Line::from_iter([Span::styled(
-            format!("  {}", network_status),
-            Style::new().fg(network_color),
-        )]),
-    ];
-
-    let widget = Paragraph::new(text).block(
-        Block::new()
-            .title("设备状态")
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(Color::Green)),
-    );
-
-    frame.render_widget(widget, area);
+    let inner = area.inner(Margin {
+        horizontal: 1,
+        vertical: 1,
+    });
+    frame.render_widget(table, inner);
 }

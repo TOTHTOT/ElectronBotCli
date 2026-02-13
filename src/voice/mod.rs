@@ -2,37 +2,17 @@
 //!
 //! 使用 Vosk 库实现离线语音识别功能
 //! 唤醒词: "BD"
-//!
-//! # 架构
-//! - `SpeechRecognizer`: 语音识别器，处理音频流并检测唤醒词
-//! - `start_thread()`: 启动语音识别线程
-//!
-//! # 使用示例
-//! ```ignore
-//! let (tx, rx) = mpsc::channel::<voice::VoiceState>();
-//! let _handle = voice::start_thread(tx, "model")?;
-//!
-//! for state in rx {
-//!     match state {
-//!         voice::VoiceState::Detected(w) => println!("唤醒: {w}"),
-//!         _ => {}
-//!     }
-//! }
-//! ```
 
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use cpal::Device;
-use std::sync::mpsc;
-use std::sync::mpsc::{Receiver, Sender};
+use cpal::{Device, Stream};
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use vosk::{Model, Recognizer};
 
 /// 语音识别状态
-///
-/// - `Idle`: 空闲状态，等待唤醒
-/// - `Listening`: 正在监听
-/// - `Detected(text)`: 检测到唤醒词 "BD"
 #[derive(Clone, Debug, PartialEq)]
 pub enum VoiceState {
     Idle,
@@ -40,218 +20,128 @@ pub enum VoiceState {
     Detected(String),
 }
 
-/// 语音识别器
+/// 语音管理器
 ///
-/// 使用 Vosk 库进行流式语音识别，自动检测唤醒词 "BD"。
-pub struct SpeechRecognizer {
-    /// Vosk 识别器实例
-    recognizer: Recognizer,
-    /// 当前识别状态
-    state: VoiceState,
+/// 封装音频流和状态，支持 UI 实时查询音量。
+#[allow(dead_code)]
+pub struct VoiceManager {
+    /// 音频流，保持存活
+    _stream: Stream,
+    /// 当前音量 (0-100)
+    volume: Arc<AtomicI32>,
+    /// 当前语音状态
+    state: Arc<Mutex<VoiceState>>,
 }
 
 #[allow(dead_code)]
-impl SpeechRecognizer {
-    /// 创建语音识别器
-    ///
-    /// # 参数
-    /// * `model_path` - Vosk 模型文件所在目录路径
-    ///
-    /// # 返回
-    /// 成功返回识别器实例，失败返回错误信息
-    ///
-    /// # 示例
-    /// ```ignore
-    /// let recognizer = SpeechRecognizer::new("model")?;
-    /// ```
-    pub fn new(model_path: &str) -> Result<Self> {
-        let model =
-            Model::new(model_path).ok_or_else(|| anyhow!("Failed to load model: {model_path}"))?;
+impl VoiceManager {
+    /// 创建语音管理器
+    pub fn new(model_path: &str, speech_name: &str) -> Result<Self> {
+        // 获取音频设备列表
+        let devices = list_devices();
+        for (name, _) in &devices {
+            log::info!("find speech: {name}");
+        }
 
-        let recognizer = Recognizer::new(&model, 16000.0)
-            .ok_or_else(|| anyhow!("Failed to create recognizer"))?;
+        // 查找指定麦克风
+        let (device_name, device) = devices
+            .into_iter()
+            .find(|(name, _)| name == speech_name)
+            .ok_or_else(|| anyhow!("No audio input device found: {speech_name}"))?;
+
+        log::info!("Using audio device: {device_name}");
+
+        // 获取设备的默认配置
+        let default_config = device.default_input_config()?;
+        let actual_sample_rate = default_config.sample_rate();
+        let actual_channels = default_config.channels();
+        log::info!("Device sample rate: {actual_sample_rate} Hz, channels: {actual_channels}");
+
+        let need_resample = actual_sample_rate != 16000;
+
+        let config = cpal::StreamConfig {
+            channels: actual_channels,
+            sample_rate: default_config.sample_rate(),
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        // 共享状态
+        let volume = Arc::new(AtomicI32::new(0));
+        let state = Arc::new(Mutex::new(VoiceState::Idle));
+        let (state_tx, state_rx) = mpsc::sync_channel::<VoiceState>(4);
+
+        let recognizer = SpeechRecognizer::new(model_path)?;
+        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<i16>>(4);
+
+        let volume_clone = volume.clone();
+        let state_clone = state.clone();
+        let error_handler = |e| log::error!("Audio stream error: {e}");
+        let stream = device.build_input_stream(
+            &config,
+            move |data: &[f32], _: &_| {
+                // 计算音量
+                let sum: f32 = data.iter().map(|&s| s * s).sum();
+                let rms = (sum / data.len() as f32).sqrt();
+                let volume = (rms * 100.0).min(100.0) as i32;
+                volume_clone.store(volume, Ordering::Relaxed);
+
+                let samples: Vec<i16> =
+                    data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
+                let final_samples = if need_resample {
+                    resample_to_16k(&samples, actual_sample_rate)
+                } else {
+                    samples
+                };
+                let _ = audio_tx.send(final_samples);
+            },
+            error_handler,
+            None,
+        )?;
+        stream.play()?;
+        log::info!("Voice recognition thread started");
+
+        // 状态更新线程
+        thread::spawn(move || {
+            update_state_thread(state_rx, state_clone);
+        });
+
+        // 音频分析线程
+        thread::spawn(move || {
+            audio_analysis_thread(state_tx, recognizer, audio_rx);
+        });
 
         Ok(Self {
-            recognizer,
-            state: VoiceState::Idle,
+            _stream: stream,
+            volume,
+            state,
         })
     }
 
-    /// 使用默认模型创建识别器
-    ///
-    /// 尝试按以下顺序查找模型：
-    /// 1. `model` 目录
-    /// 2. `vosk-model-cn-0.22` 目录
-    /// 3. `vosk-model-en-us-0.22` 目录
-    pub fn with_default_model() -> Result<Self> {
-        for path in ["model", "vosk-model-cn-0.22", "vosk-model-en-us-0.22"] {
-            if let Ok(recognizer) = Self::new(path) {
-                log::info!("Loaded model: {path}");
-                return Ok(recognizer);
-            }
-        }
-        Err(anyhow!("Model not found"))
+    /// 获取当前音量 (0-100)
+    pub fn volume(&self) -> i32 {
+        self.volume.load(Ordering::Relaxed)
     }
 
-    /// 处理一帧音频数据
-    ///
-    /// 将音频数据送入识别器进行流式识别，
-    /// 如果检测到唤醒词 "BD" 或 "B D"，状态会变为 `Detected`。
-    ///
-    /// # 参数
-    /// * `audio_data` - PCM 16kHz 单声道音频数据
-    pub fn process(&mut self, audio_data: &[i16]) {
-        // 首次调用时切换到监听状态
-        if self.state == VoiceState::Idle {
-            self.state = VoiceState::Listening;
-        }
-
-        // 将音频数据送入识别器
-        let _ = self.recognizer.accept_waveform(audio_data);
-
-        // 获取部分识别结果
-        let partial = self.recognizer.partial_result();
-        if !partial.partial.is_empty() {
-            let text = partial.partial.to_string();
-            let lower = text.to_lowercase();
-
-            // 检测唤醒词 "BD" 或 "B D"
-            if lower.contains("bd") || lower.contains("b d") {
-                self.state = VoiceState::Detected(text.clone());
-                log::info!("Wake word detected: {text}");
-            }
-        }
-    }
-
-    /// 获取当前识别状态
-    ///
-    /// # 返回
-    /// 当前的 `VoiceState`
-    pub fn state(&self) -> &VoiceState {
-        &self.state
-    }
-
-    /// 重置识别状态
-    ///
-    /// 将状态重置为 `Idle`，下次检测到音频时会重新开始监听
-    pub fn reset(&mut self) {
-        self.state = VoiceState::Idle;
+    /// 获取当前语音状态
+    pub fn state(&self) -> std::sync::MutexGuard<'_, VoiceState> {
+        self.state.lock().unwrap()
     }
 }
 
 /// 列出所有可用的音频输入设备
-///
-/// # 返回
-/// 返回包含设备名称和设备实例的向量
 fn list_devices() -> Vec<(String, Device)> {
     let host = cpal::default_host();
     let mut devices = Vec::new();
 
     if let Ok(iter) = host.input_devices() {
         for device in iter {
-            if let Ok(name) = device.name() {
-                devices.push((name, device));
+            if let Ok(desc) = device.description() {
+                devices.push((desc.name().to_string(), device));
             }
         }
     }
 
     devices
-}
-
-/// 启动语音识别线程
-///
-/// 创建一个新线程，用于：
-/// 1. 从麦克风采集音频数据
-/// 2. 使用 Vosk 进行实时语音识别
-/// 3. 检测唤醒词 "BD"
-/// 4. 通过通道发送识别状态
-///
-/// # 参数
-/// * `tx` - 用于发送识别状态的通道发送端
-/// * `model_path` - Vosk 模型文件所在目录路径
-///
-/// # 返回
-/// 成功返回 `()`，失败返回错误信息
-///
-/// # 使用示例
-/// ```ignore
-/// use std::sync::mpsc;
-///
-/// let (tx, rx) = mpsc::channel::<voice::VoiceState>();
-/// voice::start_thread(tx, "model")?;
-///
-/// // 在主线程中接收状态
-/// for state in rx {
-///     match state {
-///         voice::VoiceState::Detected(text) => {
-///             println!("唤醒: {}", text);
-///         }
-///         voice::VoiceState::Listening => {
-///             println!("正在监听...");
-///         }
-///         voice::VoiceState::Idle => {
-///             println!("空闲");
-///         }
-///     }
-/// }
-/// ```
-pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
-    // 获取音频设备列表
-    let devices = list_devices();
-    devices.iter().for_each(|(info, _)| {
-        log::info!("find speech: {info:?}");
-    });
-    // 查找指定麦克风, "麦克风 (DroidCam Audio)"
-    let (device_name, device) = devices
-        .into_iter()
-        .find(|(name, _)| name == "麦克风 (DroidCam Audio)")
-        .ok_or_else(|| anyhow!("No audio input device found"))?;
-
-    log::info!("Using audio device: {device_name}");
-
-    // 获取设备的默认配置
-    let default_config = device.default_input_config()?;
-    let actual_sample_rate = default_config.sample_rate().0;
-    let actual_channels = default_config.channels();
-
-    log::info!("Device sample rate: {actual_sample_rate} Hz, channels: {actual_channels}");
-
-    let need_resample = actual_sample_rate != 16000;
-
-    let config = cpal::StreamConfig {
-        channels: actual_channels,
-        sample_rate: default_config.sample_rate(),
-        buffer_size: cpal::BufferSize::Default,
-    };
-    let recognizer = SpeechRecognizer::new(model_path)?;
-    let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<i16>>(4);
-    let error_handler = |e| log::error!("Audio stream error: {e}");
-    let stream = device.build_input_stream(
-        &config,
-        move |data: &[f32], _: &_| {
-            let samples: Vec<i16> = data.iter().map(|&s| (s * i16::MAX as f32) as i16).collect();
-
-            // 如果需要重采样，进行简单的降采样
-            let final_samples = if need_resample {
-                resample_to_16k(&samples, actual_sample_rate)
-            } else {
-                samples
-            };
-
-            let _ = audio_tx.send(final_samples);
-        },
-        error_handler,
-        None,
-    )?;
-
-    stream.play()?;
-    log::info!("Voice recognition thread started (sample rate: {actual_sample_rate} Hz)");
-
-    thread::spawn(move || {
-        audio_analysis_thread(tx, recognizer, audio_rx);
-    });
-
-    Ok(())
 }
 
 /// 将音频重采样到 16kHz
@@ -271,36 +161,23 @@ fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
 }
 
 /// 音频分析线程
-///
-/// 从音频通道接收数据，分帧处理，检测唤醒词。
-///
-/// # 参数
-/// * `tx` - 状态发送通道
-/// * `recognizer` - 语音识别器实例
-/// * `audio_rx` - 音频数据接收通道
 fn audio_analysis_thread(
-    tx: Sender<VoiceState>,
+    tx: SyncSender<VoiceState>,
     mut recognizer: SpeechRecognizer,
     audio_rx: Receiver<Vec<i16>>,
 ) {
-    // Vosk 每帧需要约 1600 样本 (100ms @ 16kHz)
     let chunk_size = 1600;
     let mut buffer = Vec::new();
 
-    // 发送初始状态
     let _ = tx.send(VoiceState::Idle);
 
-    // 持续接收音频数据
     for samples in audio_rx {
         buffer.extend(samples);
 
-        // 处理完整帧
         while buffer.len() >= chunk_size {
-            // 取出一帧数据
             let frame = &buffer[0..chunk_size];
             recognizer.process(frame);
 
-            // 如果检测到唤醒词，发送状态
             let cur_state = recognizer.state().clone();
             if matches!(cur_state, VoiceState::Detected(_)) {
                 if let Err(e) = tx.send(cur_state) {
@@ -308,8 +185,65 @@ fn audio_analysis_thread(
                 }
             }
 
-            // 移除已处理的帧
             buffer.drain(..chunk_size);
         }
+    }
+}
+
+/// 语音状态更新线程
+fn update_state_thread(rx: Receiver<VoiceState>, state: Arc<Mutex<VoiceState>>) {
+    for new_state in rx {
+        let mut current = state.lock().unwrap();
+        if matches!(new_state, VoiceState::Detected(_)) {
+            log::info!("Wake word detected");
+            *current = VoiceState::Detected(String::new());
+            // 1秒后重置
+            thread::sleep(std::time::Duration::from_secs(1));
+            *current = VoiceState::Idle;
+        }
+    }
+}
+
+/// 语音识别器
+pub struct SpeechRecognizer {
+    recognizer: Recognizer,
+    state: VoiceState,
+}
+
+impl SpeechRecognizer {
+    pub fn new(model_path: &str) -> Result<Self> {
+        let model =
+            Model::new(model_path).ok_or_else(|| anyhow!("Failed to load model: {model_path}"))?;
+
+        let recognizer = Recognizer::new(&model, 16000.0)
+            .ok_or_else(|| anyhow!("Failed to create recognizer"))?;
+
+        Ok(Self {
+            recognizer,
+            state: VoiceState::Idle,
+        })
+    }
+
+    pub fn process(&mut self, audio_data: &[i16]) {
+        if self.state == VoiceState::Idle {
+            self.state = VoiceState::Listening;
+        }
+
+        let _ = self.recognizer.accept_waveform(audio_data);
+
+        let partial = self.recognizer.partial_result();
+        if !partial.partial.is_empty() {
+            let text = partial.partial.to_string();
+            let lower = text.to_lowercase();
+
+            if lower.contains("bd") || lower.contains("b d") {
+                self.state = VoiceState::Detected(text.clone());
+                log::info!("Wake word detected: {text}");
+            }
+        }
+    }
+
+    pub fn state(&self) -> &VoiceState {
+        &self.state
     }
 }

@@ -1,5 +1,5 @@
-// app模块, 负责界面调度以及实际运行功能
-
+pub mod config;
+/// app模块, 负责界面调度以及实际运行功能
 pub mod menu;
 
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
@@ -7,6 +7,7 @@ use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 // 导出菜单
 pub use menu::*;
 
+use crate::voice::VoiceManager;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
@@ -21,8 +22,15 @@ pub struct App {
     pub running: bool,
     pub joint: Joint,
     pub in_servo_mode: bool,
+    pub in_settings: bool,
+    pub settings_selected: usize,
+    pub in_edit_mode: bool,
+    pub edit_buffer: String,
+    pub config: config::AppConfig,
     pub lcd: Lcd,
     pub popup: Popup,
+    pub voice_manager: VoiceManager,
+    pub left_focused: bool, // true=侧边栏有焦点，false=右侧内容有焦点
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -30,19 +38,27 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new() -> Self {
+    pub fn new(voice_manager: VoiceManager) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
         let lcd = Lcd::new();
+        let config = config::AppConfig::load();
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
             joint: Joint::new(),
             in_servo_mode: false,
+            in_settings: false,
+            settings_selected: 0,
+            in_edit_mode: false,
+            edit_buffer: String::new(),
+            config,
             lcd,
             popup: Popup::new(),
+            voice_manager,
+            left_focused: true, // 默认侧边栏有焦点
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -136,6 +152,49 @@ impl App {
         self.selected_menu = items[i];
     }
 
+    /// 切换左右窗口焦点
+    pub fn toggle_focus(&mut self) {
+        self.left_focused = !self.left_focused;
+    }
+
+    /// 设置项数量
+    pub fn settings_item_count(&self) -> usize {
+        3 // Wifi名称, Wifi密码, 麦克风名称
+    }
+
+    /// 设置模式: 上一项
+    pub fn settings_prev(&mut self) {
+        let count = self.settings_item_count();
+        self.settings_selected = (self.settings_selected + count - 1) % count;
+    }
+
+    /// 设置模式: 下一项
+    pub fn settings_next(&mut self) {
+        let count = self.settings_item_count();
+        self.settings_selected = (self.settings_selected + 1) % count;
+    }
+
+    /// 保存设置项编辑内容
+    pub fn save_settings_edit(&mut self) {
+        match self.settings_selected {
+            0 => self.config.wifi_ssid = self.edit_buffer.clone(),
+            1 => self.config.wifi_password = self.edit_buffer.clone(),
+            2 => self.config.speech_name = self.edit_buffer.clone(),
+            _ => {}
+        }
+        if let Err(e) = self.config.save() {
+            log::error!("Failed to save settings: {e}");
+        }
+        self.in_edit_mode = false;
+        self.edit_buffer.clear();
+    }
+
+    /// 取消设置项编辑
+    pub fn cancel_settings_edit(&mut self) {
+        self.in_edit_mode = false;
+        self.edit_buffer.clear();
+    }
+
     pub fn is_connected(&self) -> bool {
         self.comm_state.is_some()
     }
@@ -144,12 +203,6 @@ impl App {
         self.lcd.load_image(path)?;
         self.lcd.set_mode(DisplayMode::Static);
         Ok(())
-    }
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

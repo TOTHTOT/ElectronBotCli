@@ -1,13 +1,11 @@
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, Paragraph},
-};
+use crate::ui_components::create_block;
+use ratatui::{prelude::*, widgets::Paragraph};
 
 fn get_app_version() -> &'static str {
     env!("CARGO_PKG_VERSION")
 }
 
-pub fn render(frame: &mut Frame, area: Rect) {
+pub fn render(frame: &mut Frame, area: Rect, border_color: Color) {
     let version = get_app_version();
 
     let text = vec![
@@ -33,17 +31,15 @@ pub fn render(frame: &mut Frame, area: Rect) {
         )]),
         Line::raw(""),
         Line::raw("  快捷键:"),
-        Line::raw("    ↑/k   向上"),
-        Line::raw("    ↓/j   向下"),
-        Line::raw("    Esc/q 退出"),
+        Line::raw("    Enter   进入/切换焦点"),
+        Line::raw("    ↑/↓    选择菜单/设置项"),
+        Line::raw("    ←/→    调整舵机角度"),
+        Line::raw("    Esc/q   退出"),
     ];
+    let outer_block = create_block("关于".to_string(), border_color, border_color);
+    let inner_area = outer_block.inner(area);
+    frame.render_widget(outer_block, area);
 
-    let widget = Paragraph::new(text).block(
-        Block::new()
-            .title("关于")
-            .borders(Borders::ALL)
-            .border_style(Style::new().fg(Color::Green)),
-    );
-
-    frame.render_widget(widget, area);
+    let widget = Paragraph::new(text);
+    frame.render_widget(widget, inner_area);
 }
