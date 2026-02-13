@@ -149,8 +149,8 @@ fn list_devices() -> Vec<(String, Device)> {
 
     if let Ok(iter) = host.input_devices() {
         for device in iter {
-            if let Ok(name) = device.name() {
-                devices.push((name, device));
+            if let Ok(desc) = device.description() {
+                devices.push((desc.name().to_string(), device));
             }
         }
     }
@@ -211,7 +211,7 @@ pub fn start_thread(tx: Sender<VoiceState>, model_path: &str) -> Result<()> {
 
     // 获取设备的默认配置
     let default_config = device.default_input_config()?;
-    let actual_sample_rate = default_config.sample_rate().0;
+    let actual_sample_rate = default_config.sample_rate();
     let actual_channels = default_config.channels();
 
     log::info!("Device sample rate: {actual_sample_rate} Hz, channels: {actual_channels}");
