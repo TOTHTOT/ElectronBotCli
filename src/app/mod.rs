@@ -7,6 +7,7 @@ use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 // 导出菜单
 pub use menu::*;
 
+use crate::voice::VoiceManager;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
@@ -23,6 +24,7 @@ pub struct App {
     pub in_servo_mode: bool,
     pub lcd: Lcd,
     pub popup: Popup,
+    pub voice_manager: VoiceManager,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -30,7 +32,7 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new() -> Self {
+    pub fn new(voice_manager: VoiceManager) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
@@ -43,6 +45,7 @@ impl App {
             in_servo_mode: false,
             lcd,
             popup: Popup::new(),
+            voice_manager,
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -144,12 +147,6 @@ impl App {
         self.lcd.load_image(path)?;
         self.lcd.set_mode(DisplayMode::Static);
         Ok(())
-    }
-}
-
-impl Default for App {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

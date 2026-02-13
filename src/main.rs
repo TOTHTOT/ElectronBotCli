@@ -7,6 +7,7 @@ mod ui;
 mod ui_components;
 mod voice;
 
+use crate::voice::VoiceManager;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
@@ -16,7 +17,6 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
-use std::sync::mpsc;
 use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
@@ -29,23 +29,23 @@ fn main() -> anyhow::Result<()> {
         )])
         .ok();
     }
-    let (audio_result_tx, _audio_result_rx) = mpsc::channel();
-    if let Err(e) = voice::start_thread(audio_result_tx, "assets/module/vosk-model-small-cn-0.22") {
-        log::warn!("Error starting voice audio thread: {e}");
-    }
+    let voice_manager = VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列")?;
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    run(&mut terminal)?;
+    run(&mut terminal, voice_manager)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
 }
 
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
-    let mut app = app::App::new();
+fn run(
+    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
+    voice_manager: VoiceManager,
+) -> anyhow::Result<()> {
+    let mut app = app::App::new(voice_manager);
     let tick_rate = Duration::from_millis(20);
     while app.running {
         // 如果已连接，隐藏连接弹窗
