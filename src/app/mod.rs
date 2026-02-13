@@ -24,7 +24,7 @@ pub struct App {
     pub in_servo_mode: bool,
     pub in_settings: bool,
     pub settings_selected: usize,
-    pub in_edit_mode: bool,
+    pub in_edit_settings_mode: bool,
     pub edit_buffer: String,
     pub config: config::AppConfig,
     pub lcd: Lcd,
@@ -52,7 +52,7 @@ impl App {
             in_servo_mode: false,
             in_settings: false,
             settings_selected: 0,
-            in_edit_mode: false,
+            in_edit_settings_mode: false,
             edit_buffer: String::new(),
             config,
             lcd,
@@ -185,13 +185,13 @@ impl App {
         if let Err(e) = self.config.save() {
             log::error!("Failed to save settings: {e}");
         }
-        self.in_edit_mode = false;
+        self.in_edit_settings_mode = false;
         self.edit_buffer.clear();
     }
 
     /// 取消设置项编辑
     pub fn cancel_settings_edit(&mut self) {
-        self.in_edit_mode = false;
+        self.in_edit_settings_mode = false;
         self.edit_buffer.clear();
     }
 

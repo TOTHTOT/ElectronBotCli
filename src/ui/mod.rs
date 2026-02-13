@@ -34,7 +34,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             chunks[1],
             app.settings_selected,
             &app.config,
-            app.in_edit_mode,
+            app.in_edit_settings_mode,
             &app.edit_buffer,
             right_border_color,
         ),

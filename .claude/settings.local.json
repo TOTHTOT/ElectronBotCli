@@ -11,7 +11,9 @@
       "Bash(cargo tree:*)",
       "Bash(gh repo clone:*)",
       "Bash(where:*)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "WebSearch",
+      "WebFetch(domain:crates.io)"
     ]
   }
 }

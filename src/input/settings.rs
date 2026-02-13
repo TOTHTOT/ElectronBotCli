@@ -18,8 +18,7 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
         return;
     }
 
-    // 编辑模式在 main.rs 中直接处理
-    if app.in_edit_mode {
+    if app.in_edit_settings_mode {
         return;
     }
 
@@ -30,7 +29,7 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
         SettingsEvent::Up => app.settings_prev(),
         SettingsEvent::Down => app.settings_next(),
         SettingsEvent::EnterEdit => {
-            app.in_edit_mode = true;
+            app.in_edit_settings_mode = true;
             app.edit_buffer = match app.settings_selected {
                 0 => app.config.wifi_ssid.clone(),
                 1 => app.config.wifi_password.clone(),
