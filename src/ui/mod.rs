@@ -17,7 +17,14 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     match app.selected_menu {
         MenuItem::DeviceStatus => pages::device_status::render(frame, chunks[1], app),
         MenuItem::DeviceControl => pages::device_control::render(frame, chunks[1], app),
-        MenuItem::Settings => pages::settings::render(frame, chunks[1]),
+        MenuItem::Settings => pages::settings::render(
+            frame,
+            chunks[1],
+            app.settings_selected,
+            &app.config,
+            app.in_edit_mode,
+            &app.edit_buffer,
+        ),
         MenuItem::About => pages::about::render(frame, chunks[1]),
     }
 

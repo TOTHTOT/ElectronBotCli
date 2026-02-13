@@ -4,6 +4,37 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 
+/// 创建带标题的 Block
+///
+/// # Arguments
+///
+/// * `title` - 标题
+/// * `border_color` - 边框颜色
+/// * `title_color` - 标题颜色
+pub fn create_block(title: String, border_color: Color, title_color: Color) -> Block<'static> {
+    Block::new()
+        .title(title)
+        .title_style(Style::new().fg(title_color).add_modifier(Modifier::BOLD))
+        .borders(Borders::ALL)
+        .border_style(Style::new().fg(border_color))
+}
+
+/// 获取选中指示器
+/// - 未选中: " "
+/// - 选中: "○"
+/// - 选中并编辑: "▶"
+pub fn get_indicator(is_selected: bool, is_editing: bool) -> &'static str {
+    if is_selected {
+        if is_editing {
+            "▶"
+        } else {
+            "○"
+        }
+    } else {
+        " "
+    }
+}
+
 /// 通用弹窗组件
 pub struct PopupWidget;
 

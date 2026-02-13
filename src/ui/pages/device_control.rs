@@ -1,5 +1,6 @@
 use crate::app::App;
 use crate::robot::{ServoState, SERVO_COUNT};
+use crate::ui_components::get_indicator;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
@@ -82,15 +83,7 @@ fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
     let name = ServoState::name(index);
     let range_str = ServoState::range_str(index);
 
-    let indicator = if is_selected {
-        if app.in_servo_mode {
-            "▶"
-        } else {
-            "○"
-        }
-    } else {
-        " "
-    };
+    let indicator = get_indicator(is_selected, is_selected); // 选中时作为编辑状态显示 ▶
 
     let color = if is_selected && app.in_servo_mode {
         Color::Cyan

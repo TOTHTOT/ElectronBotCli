@@ -1,5 +1,5 @@
-// app模块, 负责界面调度以及实际运行功能
-
+pub mod config;
+/// app模块, 负责界面调度以及实际运行功能
 pub mod menu;
 
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
@@ -22,6 +22,11 @@ pub struct App {
     pub running: bool,
     pub joint: Joint,
     pub in_servo_mode: bool,
+    pub in_settings: bool,
+    pub settings_selected: usize,
+    pub in_edit_mode: bool,
+    pub edit_buffer: String,
+    pub config: config::AppConfig,
     pub lcd: Lcd,
     pub popup: Popup,
     pub voice_manager: VoiceManager,
@@ -37,12 +42,18 @@ impl App {
         menu_state.select(Some(0));
 
         let lcd = Lcd::new();
+        let config = config::AppConfig::load();
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
             joint: Joint::new(),
             in_servo_mode: false,
+            in_settings: false,
+            settings_selected: 0,
+            in_edit_mode: false,
+            edit_buffer: String::new(),
+            config,
             lcd,
             popup: Popup::new(),
             voice_manager,
@@ -137,6 +148,23 @@ impl App {
         };
         self.menu_state.select(Some(i));
         self.selected_menu = items[i];
+    }
+
+    /// 设置项数量
+    pub fn settings_item_count(&self) -> usize {
+        3 // Wifi名称, Wifi密码, 麦克风名称
+    }
+
+    /// 设置模式: 上一项
+    pub fn settings_prev(&mut self) {
+        let count = self.settings_item_count();
+        self.settings_selected = (self.settings_selected + count - 1) % count;
+    }
+
+    /// 设置模式: 下一项
+    pub fn settings_next(&mut self) {
+        let count = self.settings_item_count();
+        self.settings_selected = (self.settings_selected + 1) % count;
     }
 
     pub fn is_connected(&self) -> bool {
