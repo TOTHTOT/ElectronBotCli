@@ -30,6 +30,7 @@ pub struct App {
     pub lcd: Lcd,
     pub popup: Popup,
     pub voice_manager: VoiceManager,
+    pub left_focused: bool, // true=侧边栏有焦点，false=右侧内容有焦点
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -57,6 +58,7 @@ impl App {
             lcd,
             popup: Popup::new(),
             voice_manager,
+            left_focused: true, // 默认侧边栏有焦点
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -150,6 +152,11 @@ impl App {
         self.selected_menu = items[i];
     }
 
+    /// 切换左右窗口焦点
+    pub fn toggle_focus(&mut self) {
+        self.left_focused = !self.left_focused;
+    }
+
     /// 设置项数量
     pub fn settings_item_count(&self) -> usize {
         3 // Wifi名称, Wifi密码, 麦克风名称
@@ -165,6 +172,27 @@ impl App {
     pub fn settings_next(&mut self) {
         let count = self.settings_item_count();
         self.settings_selected = (self.settings_selected + 1) % count;
+    }
+
+    /// 保存设置项编辑内容
+    pub fn save_settings_edit(&mut self) {
+        match self.settings_selected {
+            0 => self.config.wifi_ssid = self.edit_buffer.clone(),
+            1 => self.config.wifi_password = self.edit_buffer.clone(),
+            2 => self.config.speech_name = self.edit_buffer.clone(),
+            _ => {}
+        }
+        if let Err(e) = self.config.save() {
+            log::error!("Failed to save settings: {e}");
+        }
+        self.in_edit_mode = false;
+        self.edit_buffer.clear();
+    }
+
+    /// 取消设置项编辑
+    pub fn cancel_settings_edit(&mut self) {
+        self.in_edit_mode = false;
+        self.edit_buffer.clear();
     }
 
     pub fn is_connected(&self) -> bool {

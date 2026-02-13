@@ -3,8 +3,8 @@ use crate::robot::{ServoState, SERVO_COUNT};
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Paragraph};
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
-    let outer_block = create_block("设备控制".to_string(), Color::Green, Color::Green);
+pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
+    let outer_block = create_block("设备控制".to_string(), border_color, border_color);
 
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
@@ -15,12 +15,12 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
     )
     .split(inner_area);
 
-    render_info_bar(frame, chunks[0]);
-    render_joint_gauges(frame, chunks[1], app);
+    render_info_bar(frame, chunks[0], border_color);
+    render_joint_gauges(frame, chunks[1], app, border_color);
 }
 
-fn render_info_bar(frame: &mut Frame, area: Rect) {
-    let outer_block = create_block("操作说明".to_string(), Color::Green, Color::Green);
+fn render_info_bar(frame: &mut Frame, area: Rect, border_color: Color) {
+    let outer_block = create_block("操作说明".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
@@ -33,8 +33,8 @@ fn render_info_bar(frame: &mut Frame, area: Rect) {
     frame.render_widget(widget, inner_area);
 }
 
-fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App) {
-    let outer_block = create_block("关节控制".to_string(), Color::Green, Color::Green);
+fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
+    let outer_block = create_block("关节控制".to_string(), border_color, border_color);
 
     let servo_height = (area.height as usize) / SERVO_COUNT;
     let extra_rows = (area.height as usize) % SERVO_COUNT;

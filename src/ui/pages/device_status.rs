@@ -18,7 +18,7 @@ fn status_color(ok: bool) -> Color {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App) {
+pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
     let is_connected = app.is_connected();
     let volume = app.voice_manager.volume();
 
@@ -72,7 +72,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App) {
         &[Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],
     )
     .column_spacing(2);
-    let outer_block = create_block("操作说明".to_string(), Color::Green, Color::Green);
+    let outer_block = create_block("操作说明".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 

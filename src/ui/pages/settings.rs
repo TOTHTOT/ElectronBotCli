@@ -9,8 +9,9 @@ pub fn render(
     config: &AppConfig,
     in_edit: bool,
     edit_buffer: &str,
+    border_color: Color,
 ) {
-    let outer_block = create_block("设置".to_string(), Color::Green, Color::Green);
+    let outer_block = create_block("设置".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
@@ -20,12 +21,20 @@ pub fn render(
     )
     .split(inner_area);
 
-    render_info_bar(frame, chunks[0], in_edit);
-    render_settings_list(frame, chunks[1], selected, config, in_edit, edit_buffer);
+    render_info_bar(frame, chunks[0], in_edit, border_color);
+    render_settings_list(
+        frame,
+        chunks[1],
+        selected,
+        config,
+        in_edit,
+        edit_buffer,
+        border_color,
+    );
 }
 
-fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool) {
-    let outer_block = create_block("操作说明".to_string(), Color::Green, Color::Cyan);
+fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: Color) {
+    let outer_block = create_block("操作说明".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
@@ -51,8 +60,9 @@ fn render_settings_list(
     config: &AppConfig,
     in_edit: bool,
     edit_buffer: &str,
+    border_color: Color,
 ) {
-    let outer_block = create_block("配置项".to_string(), Color::Green, Color::Cyan);
+    let outer_block = create_block("配置项".to_string(), border_color, Color::Cyan);
 
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);

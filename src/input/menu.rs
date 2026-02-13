@@ -32,11 +32,15 @@ pub fn handle(app: &mut App, event: MenuEvent) {
         MenuEvent::EnterServoMode => {
             if matches!(app.selected_menu, crate::app::MenuItem::DeviceControl) {
                 app.in_servo_mode = true;
+                // 进入设备控制页面时，焦点切换到右侧
+                app.left_focused = false;
             }
         }
         MenuEvent::EnterSettingMode => {
             if app.selected_menu == crate::app::MenuItem::Settings {
                 app.in_settings = true;
+                // 进入设置页面时，焦点切换到右侧
+                app.left_focused = false;
             }
         }
     }

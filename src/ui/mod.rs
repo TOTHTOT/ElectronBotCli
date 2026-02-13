@@ -12,11 +12,23 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     )
     .split(frame.area());
 
-    sidebar::render(frame, chunks[0], &mut app.menu_state);
+    // 渲染侧边栏，传入焦点状态
+    sidebar::render(frame, chunks[0], &mut app.menu_state, app.left_focused);
+
+    // 根据焦点状态选择右侧内容的边框颜色
+    let right_border_color = if app.left_focused {
+        Color::LightBlue
+    } else {
+        Color::Green
+    };
 
     match app.selected_menu {
-        MenuItem::DeviceStatus => pages::device_status::render(frame, chunks[1], app),
-        MenuItem::DeviceControl => pages::device_control::render(frame, chunks[1], app),
+        MenuItem::DeviceStatus => {
+            pages::device_status::render(frame, chunks[1], app, right_border_color)
+        }
+        MenuItem::DeviceControl => {
+            pages::device_control::render(frame, chunks[1], app, right_border_color)
+        }
         MenuItem::Settings => pages::settings::render(
             frame,
             chunks[1],
@@ -24,8 +36,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             &app.config,
             app.in_edit_mode,
             &app.edit_buffer,
+            right_border_color,
         ),
-        MenuItem::About => pages::about::render(frame, chunks[1]),
+        MenuItem::About => pages::about::render(frame, chunks[1], right_border_color),
     }
 
     // 渲染弹窗

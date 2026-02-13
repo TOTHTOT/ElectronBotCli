@@ -92,21 +92,76 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
     if event::poll(Duration::from_millis(10))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
-                // 编辑模式优先处理
-                if app.in_edit_mode {
-                    handle_edit_mode_input(app, &key);
-                } else if app.in_servo_mode {
-                    let evt = handle_joint_mode_input(key.code);
-                    input::handle_event(app, evt);
-                } else if app.in_settings {
-                    let evt = handle_settings_mode_input(key.code);
-                    input::handle_event(app, evt);
-                } else if app.popup.is_visible() {
-                    let evt = handle_comm_popup_input(key.code, app);
-                    input::handle_event(app, evt);
+                if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('q') {
+                    app.quit();
+                } else if key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('s') {
+                    if let Err(e) = app.config.save() {
+                        log::error!("Failed to save settings: {e}");
+                    }
+                } else if key.code == KeyCode::Enter {
+                    if app.in_edit_mode {
+                        // 编辑模式下：保存并退出
+                        app.save_settings_edit();
+                    } else if app.in_servo_mode {
+                        // 设备控制模式下：回车切换焦点，同时退出伺服模式
+                        app.toggle_focus();
+                        app.in_servo_mode = false;
+                    } else if app.in_settings {
+                        // 设置模式下（非编辑状态）：回车进入编辑模式
+                        let evt = handle_settings_mode_input(key.code);
+                        input::handle_event(app, evt);
+                    } else {
+                        // 菜单模式下：进入选中页面
+                        let evt = handle_menu_mode_input(key.code, key.modifiers, app);
+                        input::handle_event(app, evt);
+                    }
+                } else if key.code == KeyCode::Esc {
+                    // ESC 键处理
+                    if app.in_edit_mode {
+                        // 编辑模式下：取消编辑
+                        app.cancel_settings_edit();
+                    } else if app.in_servo_mode {
+                        // 设备控制模式下：退出设备控制
+                        app.in_servo_mode = false;
+                        app.left_focused = true; // 焦点回到侧边栏
+                    } else if app.in_settings {
+                        // 设置模式下：退出设置
+                        app.in_settings = false;
+                        app.left_focused = true; // 焦点回到侧边栏
+                    } else {
+                        // 菜单模式下：退出程序
+                        let evt = handle_menu_mode_input(key.code, key.modifiers, app);
+                        input::handle_event(app, evt);
+                    }
                 } else {
-                    let evt = handle_menu_mode_input(key.code, key.modifiers, app);
-                    input::handle_event(app, evt);
+                    if app.in_edit_mode {
+                        // 编辑模式：处理输入
+                        handle_edit_mode_input(app, &key);
+                    } else if app.in_servo_mode {
+                        // 设备控制模式：只有在右侧有焦点时才处理
+                        if !app.left_focused {
+                            let evt = handle_joint_mode_input(key.code);
+                            input::handle_event(app, evt);
+                        } else {
+                            // 焦点在左侧时，退出设备控制模式
+                            app.in_servo_mode = false;
+                        }
+                    } else if app.in_settings {
+                        // 设置模式：只有在右侧有焦点时才处理
+                        if !app.left_focused {
+                            let evt = handle_settings_mode_input(key.code);
+                            input::handle_event(app, evt);
+                        } else {
+                            // 焦点在左侧时，退出设置模式
+                            app.in_settings = false;
+                        }
+                    } else if app.popup.is_visible() {
+                        let evt = handle_comm_popup_input(key.code, app);
+                        input::handle_event(app, evt);
+                    } else {
+                        let evt = handle_menu_mode_input(key.code, key.modifiers, app);
+                        input::handle_event(app, evt);
+                    }
                 }
             }
         }
@@ -186,22 +241,10 @@ fn handle_settings_mode_input(code: KeyCode) -> input::AppEvent {
 fn handle_edit_mode_input(app: &mut app::App, key: &event::KeyEvent) {
     match key.code {
         KeyCode::Esc => {
-            app.in_edit_mode = false;
-            app.edit_buffer.clear();
+            app.cancel_settings_edit();
         }
         KeyCode::Enter => {
-            // 保存
-            match app.settings_selected {
-                0 => app.config.wifi_ssid = app.edit_buffer.clone(),
-                1 => app.config.wifi_password = app.edit_buffer.clone(),
-                2 => app.config.speech_name = app.edit_buffer.clone(),
-                _ => {}
-            }
-            if let Err(e) = app.config.save() {
-                log::error!("Failed to save settings: {e}");
-            }
-            app.in_edit_mode = false;
-            app.edit_buffer.clear();
+            app.save_settings_edit();
         }
         KeyCode::Backspace => {
             app.edit_buffer.pop();
@@ -242,6 +285,7 @@ fn handle_menu_mode_input(
                 CommonEvent::None.into()
             }
         }
+        // 回车键用于焦点切换和进入页面
         KeyCode::Enter => {
             if matches!(app.selected_menu, app::MenuItem::DeviceControl) {
                 MenuEvent::EnterServoMode.into()
