@@ -20,7 +20,7 @@ fn status_color(ok: bool) -> Color {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
     let is_connected = app.is_connected();
-    let volume = app.voice_manager.volume();
+    let volume = app.voice_manager.as_ref().map(|v| v.volume()).unwrap_or(0);
 
     // 使用 Table 实现网格布局
     let table = Table::new(

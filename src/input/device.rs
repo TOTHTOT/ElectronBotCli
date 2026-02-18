@@ -4,6 +4,7 @@ use crate::app::App;
 
 /// 设备控制事件
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum DeviceEvent {
     Exit,
     Next,

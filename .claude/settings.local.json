@@ -14,7 +14,23 @@
       "Bash(ls:*)",
       "WebSearch",
       "WebFetch(domain:crates.io)",
-      "Bash(cargo doc:*)"
+      "Bash(cargo doc:*)",
+      "Bash(dpkg:*)",
+      "Bash(apt-get:*)",
+      "Bash(sudo dpkg:*)",
+      "Bash(sudo apt-get:*)",
+      "Bash(ldd:*)",
+      "Bash(aarch64-linux-gnu-ldd:*)",
+      "Bash(aarch64-linux-gnu-readelf:*)",
+      "Bash(ssh radxa@192.168.1.28:*)",
+      "Bash(rustup:*)",
+      "Bash(RUSTFLAGS=\"-C target-feature=+crt-static\" cargo build --target aarch64-unknown-linux-musl:*)",
+      "Bash(sshpass -p 'radxa' scp target/aarch64-unknown-linux-gnu/release/ele_bot radxa@192.168.1.28:~/)",
+      "Bash(sshpass:*)",
+      "Bash(apt-cache search:*)",
+      "Bash(CC=aarch64-linux-gnu-gcc cargo:*)",
+      "Bash(cargo install:*)",
+      "Bash(cross build:*)"
     ]
   }
 }

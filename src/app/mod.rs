@@ -29,7 +29,7 @@ pub struct App {
     pub config: config::AppConfig,
     pub lcd: Lcd,
     pub popup: Popup,
-    pub voice_manager: VoiceManager,
+    pub voice_manager: Option<VoiceManager>,
     pub left_focused: bool, // true=侧边栏有焦点，false=右侧内容有焦点
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
@@ -38,7 +38,7 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(voice_manager: VoiceManager) -> Self {
+    pub fn new(voice_manager: Option<VoiceManager>) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 

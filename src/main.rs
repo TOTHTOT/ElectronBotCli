@@ -30,7 +30,7 @@ fn main() -> anyhow::Result<()> {
         )])
         .ok();
     }
-    let voice_manager = VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列")?;
+    let voice_manager = VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列").ok();
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
@@ -45,13 +45,9 @@ fn main() -> anyhow::Result<()> {
 /// 主运行循环，负责应用的生命周期管理
 ///
 /// 循环执行以下步骤：
-/// 1. 如果已连接机器人，发送当前帧数据
-/// 2. 渲染UI界面
-/// 3. 处理用户输入
-/// 4. 休眠一个tick周期
 fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    voice_manager: VoiceManager,
+    voice_manager: Option<VoiceManager>,
 ) -> anyhow::Result<()> {
     let mut app = app::App::new(voice_manager);
     let tick_rate = Duration::from_millis(20);

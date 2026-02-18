@@ -75,7 +75,6 @@ impl VoiceManager {
 
         let volume_clone = volume.clone();
         let state_clone = state.clone();
-        let actual_channels = actual_channels; // 复制一下供闭包使用
         let error_handler = |e| log::error!("Audio stream error: {e}");
         let stream = device.build_input_stream(
             &config,
