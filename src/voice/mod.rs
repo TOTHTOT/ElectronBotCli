@@ -1,36 +1,25 @@
-//! 语音识别模块
-//!
-//! 使用 Vosk 库实现离线语音识别功能
-//! 唤醒词: "BD"
-
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::mpsc::SyncSender;
+use std::sync::{mpsc, Arc};
 use std::thread;
 use vosk::{Model, Recognizer};
 
-/// 语音识别状态
-#[derive(Clone, Debug, PartialEq)]
-pub enum VoiceState {
-    Idle,
-    Listening,
-    Detected(String),
+/// 语音唤醒事件
+#[derive(Clone, Debug)]
+pub struct WakeEvent {
+    pub text: String,
 }
 
 /// 语音管理器
 ///
-/// 封装音频流和状态，支持 UI 实时查询音量。
+/// 封装音频流和 Vosk 识别器
 #[allow(dead_code)]
 pub struct VoiceManager {
-    /// 音频流，保持存活
     _stream: Stream,
-    /// 当前音量 (0-100)
     volume: Arc<AtomicI32>,
-    /// 当前语音状态
-    state: Arc<Mutex<VoiceState>>,
 }
 
 #[allow(dead_code)]
@@ -67,14 +56,12 @@ impl VoiceManager {
 
         // 共享状态
         let volume = Arc::new(AtomicI32::new(0));
-        let state = Arc::new(Mutex::new(VoiceState::Idle));
-        let (state_tx, state_rx) = mpsc::sync_channel::<VoiceState>(4);
+        let (wake_tx, wake_rx) = mpsc::sync_channel::<WakeEvent>(4);
 
         let recognizer = SpeechRecognizer::new(model_path)?;
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<i16>>(4);
 
         let volume_clone = volume.clone();
-        let state_clone = state.clone();
         let error_handler = |e| log::error!("Audio stream error: {e}");
         let stream = device.build_input_stream(
             &config,
@@ -114,31 +101,28 @@ impl VoiceManager {
         stream.play()?;
         log::info!("Voice recognition thread started");
 
-        // 状态更新线程
         thread::spawn(move || {
-            update_state_thread(state_rx, state_clone);
+            audio_analysis_thread(wake_tx, recognizer, audio_rx);
         });
 
-        // 音频分析线程
         thread::spawn(move || {
-            audio_analysis_thread(state_tx, recognizer, audio_rx);
+            for event in wake_rx {
+                log::trace!("Wake event: {:?}", event);
+                if SpeechRecognizer::is_wake_word(&event.text) {
+                    log::info!("Wake word detected");
+                }
+            }
         });
 
         Ok(Self {
             _stream: stream,
             volume,
-            state,
         })
     }
 
     /// 获取当前音量 (0-100)
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
-    }
-
-    /// 获取当前语音状态
-    pub fn state(&self) -> std::sync::MutexGuard<'_, VoiceState> {
-        self.state.lock().unwrap()
     }
 }
 
@@ -159,6 +143,19 @@ fn list_devices() -> Vec<(String, Device)> {
 }
 
 /// 将音频重采样到 16kHz
+///
+/// # Arguments
+///
+/// * `samples`:
+/// * `from_rate`:
+///
+/// returns: Vec<i16, Global>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
     let ratio = from_rate as f64 / 16000.0;
     let new_len = (samples.len() as f64 / ratio) as usize;
@@ -175,26 +172,40 @@ fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
 }
 
 /// 音频分析线程
+///
+/// # Arguments
+///
+/// * `wake_tx`:
+/// * `recognizer`:
+/// * `audio_rx`:
+///
+/// returns: ()
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn audio_analysis_thread(
-    tx: SyncSender<VoiceState>,
+    wake_tx: SyncSender<WakeEvent>,
     mut recognizer: SpeechRecognizer,
-    audio_rx: Receiver<Vec<i16>>,
+    audio_rx: mpsc::Receiver<Vec<i16>>,
 ) {
     let chunk_size = 1600;
     let mut buffer = Vec::new();
-
-    let _ = tx.send(VoiceState::Idle);
 
     for samples in audio_rx {
         buffer.extend(samples);
 
         while buffer.len() >= chunk_size {
             let frame = &buffer[0..chunk_size];
-            recognizer.process(frame);
-            let cur_state = recognizer.state().clone();
-            if matches!(cur_state, VoiceState::Detected(_)) {
-                if let Err(e) = tx.send(cur_state) {
-                    log::warn!("Failed to send voice state: {e}");
+            if let Some(text) = recognizer.process(frame) {
+                if text.is_empty() {
+                    continue;
+                }
+                let event = WakeEvent { text };
+                if let Err(e) = wake_tx.send(event) {
+                    log::warn!("Failed to send wake event: {e}");
                 }
             }
             buffer.drain(..chunk_size);
@@ -202,24 +213,9 @@ fn audio_analysis_thread(
     }
 }
 
-/// 语音状态更新线程
-fn update_state_thread(rx: Receiver<VoiceState>, state: Arc<Mutex<VoiceState>>) {
-    for new_state in rx {
-        let mut current = state.lock().unwrap();
-        if let VoiceState::Detected(text) = &new_state {
-            log::info!("Wake word detected: {text}");
-            *current = VoiceState::Detected(text.clone());
-            // 1秒后重置
-            thread::sleep(std::time::Duration::from_secs(1));
-            *current = VoiceState::Idle;
-        }
-    }
-}
-
 /// 语音识别器
 pub struct SpeechRecognizer {
     recognizer: Recognizer,
-    state: VoiceState,
 }
 
 impl SpeechRecognizer {
@@ -230,66 +226,58 @@ impl SpeechRecognizer {
         let recognizer = Recognizer::new(&model, 16000.0)
             .ok_or_else(|| anyhow!("Failed to create recognizer"))?;
 
-        Ok(Self {
-            recognizer,
-            state: VoiceState::Idle,
-        })
+        Ok(Self { recognizer })
     }
 
-    pub fn process(&mut self, audio_data: &[i16]) {
-        if self.state == VoiceState::Idle {
-            self.state = VoiceState::Listening;
-        }
-
-        match self.recognizer.accept_waveform(audio_data) {
-            Ok(state) => {
-                if matches!(state, vosk::DecodingState::Finalized) {
-                    let result = self.recognizer.final_result();
-                    // 提取完整结果文本
-                    if let Some(text) = result.single().map(|s| s.text) {
-                        log::trace!("Final result: {text}");
-                        if Self::is_wake_word(text) {
-                            self.state = VoiceState::Detected(text.to_lowercase());
-                            log::info!("Wake word detected: {text}");
-                        }
-                    }
+    /// 处理音频数据，返回识别到的文本
+    ///
+    /// # Arguments
+    ///
+    /// * `audio_data`:
+    ///
+    /// returns: Option<String>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn process(&mut self, audio_data: &[i16]) -> Option<String> {
+        let state = self.recognizer.accept_waveform(audio_data).ok()?;
+        if matches!(state, vosk::DecodingState::Finalized) {
+            let result = self.recognizer.final_result();
+            if let Some(single) = result.single() {
+                let text = single.text.trim().to_string();
+                if !text.is_empty() {
+                    return Some(text);
                 }
             }
-            Err(e) => {
-                log::warn!("Audio processing error: {e}");
-            }
         }
-
-        // 处理中间结果
-        let partial = self.recognizer.partial_result();
-        if !partial.partial.is_empty() {
-            let text = partial.partial.to_string();
-            if Self::is_wake_word(&text) {
-                self.state = VoiceState::Detected(text.to_lowercase());
-                log::info!("Wake word detected (partial): {text}");
-            }
-        }
+        None
     }
 
-    /// 检查是否是唤醒词 "BD"
-    /// 由于是中文模型，需要接受更多变体：
-    /// - "bd", "b d", "B D" (英文)
-    /// - "比地", "必地", "贝德", "b'd" (中文拼音)
-    fn is_wake_word(text: &str) -> bool {
+    /// 检测是否包含唤醒词
+    ///
+    /// # Arguments
+    ///
+    /// * `text`:
+    ///
+    /// returns: bool
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn is_wake_word(text: &str) -> bool {
         let lower = text.to_lowercase();
 
-        // 直接匹配
-        if lower.contains("bd") || lower.contains("b d") {
+        if lower.contains("小波") {
             return true;
         }
 
-        // 检查是否以"b"开头且长度很短（Vosk识别"BD"时首字母通常是B）
-        if lower.starts_with('b') && lower.len() <= 4 {
-            return true;
-        }
-
-        // 中文拼音变体
-        let variants = ["比地", "必地", "贝德", "比的", "逼地", "波特", "博特"];
+        // 常见误识别变体
+        let variants = ["晓波", "小博", "笑波", "晓博"];
         for v in &variants {
             if lower.contains(v) {
                 return true;
@@ -297,9 +285,5 @@ impl SpeechRecognizer {
         }
 
         false
-    }
-
-    pub fn state(&self) -> &VoiceState {
-        &self.state
     }
 }

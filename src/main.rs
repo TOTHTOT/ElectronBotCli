@@ -30,7 +30,8 @@ fn main() -> anyhow::Result<()> {
         )])
         .ok();
     }
-    let voice_manager = VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列").ok();
+    let voice_manager =
+        VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列").ok();
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;

@@ -30,7 +30,8 @@
       "Bash(apt-cache search:*)",
       "Bash(CC=aarch64-linux-gnu-gcc cargo:*)",
       "Bash(cargo install:*)",
-      "Bash(cross build:*)"
+      "Bash(cross build:*)",
+      "Bash(cargo check:*)"
     ]
   }
 }
