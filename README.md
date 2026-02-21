@@ -23,6 +23,19 @@
 
 - 在wsl中通过这个命令`cross build --target aarch64-unknown-linux-gnu --release`就能编译出rk3566的程序, 需要先安装docker, 解决glibc版本问题. 在Windows和wsl下直接编译就能在终端显示了.
 
+- 使用`rsycn`
+
+### 运行
+1. 配置usb的udev规则
+    ```shell
+    sudo vim /etc/udev/rules.d/99-electronbot.rules
+    # 文件内输入
+    SUBSYSTEM=="usb", ATTR{idVendor}=="xxxx", ATTR{idProduct}=="yyyy", MODE="0666"
+    
+    #保存后重新加载规则
+    sudo udevadm control --reload-rules
+    sudo udevadm trigger
+    ```
 
 ## 备注
 1. 使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.
