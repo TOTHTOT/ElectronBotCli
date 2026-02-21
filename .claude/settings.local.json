@@ -31,7 +31,9 @@
       "Bash(CC=aarch64-linux-gnu-gcc cargo:*)",
       "Bash(cargo install:*)",
       "Bash(cross build:*)",
-      "Bash(cargo check:*)"
+      "Bash(cargo check:*)",
+      "WebFetch(domain:docs.rs)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }
