@@ -50,8 +50,10 @@ impl QwenLlm {
     }
 
     pub fn analyze_mood(&mut self, user_input: &str) -> Result<Mood> {
+        let start = Instant::now();
         let prompt = build_emotion_prompt(user_input);
         let response = self.generate(&prompt, 8)?;
+        log::info!("Response: {:?}, used time: {:?}", response, start.elapsed());
         let mood = parse_mood(&response);
         Ok(mood)
     }

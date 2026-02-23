@@ -12,8 +12,9 @@ use crate::voice::VoiceManager;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
-use std::sync::mpsc;
-use std::sync::mpsc::SyncSender;
+use std::sync::atomic::AtomicBool;
+use std::sync::mpsc::{Sender, SyncSender};
+use std::sync::{mpsc, Arc};
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -31,10 +32,10 @@ pub struct App {
     pub config: config::AppConfig,
     pub lcd: Lcd,
     pub popup: Popup,
-    pub voice_manager: Option<VoiceManager>,
+    pub voice_manager: Option<Arc<VoiceManager>>,
+    voice_result_rx: Option<mpsc::Receiver<Mood>>,
     pub left_focused: bool,
-    llm_tx: Option<mpsc::Sender<(String, mpsc::Sender<Mood>)>>,
-    pub is_processing: bool,
+    pub is_processing: Arc<AtomicBool>,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -42,30 +43,22 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(voice_manager: Option<VoiceManager>, llm: Option<QwenLlm>) -> Self {
+    pub fn new(voice_manager: Option<VoiceManager>, llm: QwenLlm) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
         let lcd = Lcd::new();
         let config = config::AppConfig::load();
 
-        // 创建 LLM 处理线程
-        let llm_arc = std::sync::Arc::new(std::sync::Mutex::new(llm));
-        let (llm_tx, llm_rx): (
-            mpsc::Sender<(String, mpsc::Sender<Mood>)>,
-            _,
-        ) = mpsc::channel();
-        let llm_for_thread = llm_arc.clone();
-        std::thread::spawn(move || {
-            let mut llm = llm_for_thread.lock().unwrap();
-            for (text, response_tx) in llm_rx {
-                let mood = match llm.as_mut() {
-                    Some(l) => l.analyze_mood(&text).unwrap_or(Mood::Default),
-                    None => Mood::Default,
-                };
-                let _ = response_tx.send(mood);
-            }
-        });
+        let voice_arc = voice_manager.map(Arc::new);
+        let is_processing = Arc::new(AtomicBool::new(false));
+        let is_processing_clone = is_processing.clone();
+        let (result_tx, result_rx) = mpsc::channel();
+        if let Some(vm) = voice_arc.clone() {
+            std::thread::spawn(move || {
+                Self::llm_analysis_thread(llm, result_tx, vm, is_processing_clone);
+            });
+        }
 
         Self {
             menu_state,
@@ -80,13 +73,49 @@ impl App {
             config,
             lcd,
             popup: Popup::new(),
-            voice_manager,
+            voice_manager: voice_arc,
+            voice_result_rx: Some(result_rx),
             left_focused: true,
-            llm_tx: Some(llm_tx),
-            is_processing: false,
+            is_processing,
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
+        }
+    }
+
+    /// 大语言模型线程, vosk返回的语音消息会丢入此线程解析, 当没联网时使用本地的qwen模型
+    /// 如果是联网的模型只要实现`analyze_mood()`方法就好了
+    ///
+    /// # Arguments
+    ///
+    /// * `llm`:
+    /// * `result_tx`:
+    /// * `vm`:
+    ///
+    /// returns: ()
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    fn llm_analysis_thread(
+        llm: QwenLlm,
+        result_tx: Sender<Mood>,
+        vm: Arc<VoiceManager>,
+        is_processing: Arc<AtomicBool>,
+    ) {
+        let mut llm = llm;
+        loop {
+            if let Some(text) = vm.take_last_text() {
+                if !text.is_empty() {
+                    is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
+                    let mood = llm.analyze_mood(&text).unwrap_or(Mood::Default);
+                    is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
+                    let _ = result_tx.send(mood);
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
@@ -230,45 +259,6 @@ impl App {
         Ok(())
     }
 
-    /// 处理语音输入：调用 LLM 分析情感并设置表情 (在线程中处理)
-    pub fn process_voice_input(&mut self, text: &str) {
-        if self.is_processing {
-            return;
-        }
-
-        let llm_tx = match &self.llm_tx {
-            Some(tx) => tx,
-            None => {
-                log::warn!("LLM thread not initialized");
-                return;
-            }
-        };
-
-        self.is_processing = true;
-        log::info!("Processing voice input: {}", text);
-
-        // LLM 开始解析时眼睛进入 Loading 状态
-        self.lcd.set_eyes_mood(Mood::Loading);
-
-        let (response_tx, response_rx) = mpsc::channel();
-        let _ = llm_tx.send((text.to_string(), response_tx));
-
-        // 等待 LLM 响应 (短超时)
-        match response_rx.recv_timeout(std::time::Duration::from_secs(10)) {
-            Ok(mood) => {
-                log::info!("Mood: {:?}", mood);
-                self.lcd.set_eyes_mood(mood);
-                Self::play_beep_for_mood(mood);
-            }
-            Err(_) => {
-                log::error!("LLM timeout or error");
-                self.lcd.set_eyes_mood(Mood::Angry);
-            }
-        }
-
-        self.is_processing = false;
-    }
-
     /// 根据 Mood 播放对应的 bibi 声
     fn play_beep_for_mood(mood: Mood) {
         use crate::voice::play_beep;
@@ -279,14 +269,19 @@ impl App {
         }
     }
 
-    /// 轮询语音输入并处理
     pub fn poll_voice_input(&mut self) {
-        if let Some(vm) = &self.voice_manager {
-            if let Some(text) = vm.take_last_text() {
-                if !text.is_empty() {
-                    self.process_voice_input(&text);
-                }
+        if let Some(rx) = &self.voice_result_rx {
+            while let Ok(mood) = rx.try_recv() {
+                log::info!("Mood: {mood:?}");
+                self.lcd.set_eyes_mood(mood);
+                Self::play_beep_for_mood(mood);
             }
+        }
+        if self
+            .is_processing
+            .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            self.lcd.set_eyes_mood(Mood::Loading);
         }
     }
 }

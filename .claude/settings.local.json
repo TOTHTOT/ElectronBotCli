@@ -46,7 +46,9 @@
       "Bash(git checkout:*)",
       "mcp__filesystem__create_directory",
       "Bash(cargo search:*)",
-      "mcp__filesystem__edit_file"
+      "mcp__filesystem__edit_file",
+      "mcp__filesystem__list_directory",
+      "mcp__filesystem__move_file"
     ]
   }
 }

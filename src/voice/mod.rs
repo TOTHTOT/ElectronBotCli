@@ -1,10 +1,11 @@
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::mpsc::SyncSender;
+use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 use vosk::{Model, Recognizer};
 
 #[derive(Clone, Debug)]
@@ -17,7 +18,6 @@ pub struct VoiceManager {
     _stream: Stream,
     volume: Arc<AtomicI32>,
     last_text: Arc<Mutex<Option<String>>>,
-    is_awake: Arc<AtomicBool>,
 }
 
 #[allow(dead_code)]
@@ -28,7 +28,6 @@ impl VoiceManager {
         let need_resample = config.sample_rate() != 16000;
 
         let volume = Arc::new(AtomicI32::new(0));
-        let (wake_tx, wake_rx) = mpsc::sync_channel::<WakeEvent>(4);
         let recognizer = SpeechRecognizer::new(model_path)?;
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<i16>>(4);
 
@@ -36,22 +35,15 @@ impl VoiceManager {
         stream.play()?;
 
         let last_text = Arc::new(Mutex::new(None));
-        let is_awake = Arc::new(AtomicBool::new(false));
-
-        spawn_audio_threads(
-            wake_tx,
-            wake_rx,
-            recognizer,
-            audio_rx,
-            last_text.clone(),
-            is_awake.clone(),
-        );
+        let last_text_clone = last_text.clone();
+        thread::spawn(move || {
+            audio_analysis_thread(recognizer, audio_rx, last_text_clone);
+        });
 
         Ok(Self {
             _stream: stream,
             volume,
             last_text,
-            is_awake,
         })
     }
 
@@ -128,35 +120,36 @@ fn build_audio_stream(
         .map_err(|e| anyhow!("Failed to build input stream: {}", e))
 }
 
-fn spawn_audio_threads(
-    wake_tx: SyncSender<WakeEvent>,
-    wake_rx: mpsc::Receiver<WakeEvent>,
-    recognizer: SpeechRecognizer,
-    audio_rx: mpsc::Receiver<Vec<i16>>,
+/// 将解析后语音派发个别的任务
+///
+/// # Arguments
+///
+/// * `event`: 解析成功的语音内容
+/// * `last_text`: 最新的一条语音信息, 处理好后发送给llm线程
+/// * `audio_interval`: 收到语音消息的间隔, 超时的话就必须使用关键字唤醒, 以实现连续对话
+///
+/// returns: ()
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
+fn audio_distribute(
+    event: WakeEvent,
     last_text: Arc<Mutex<Option<String>>>,
-    is_awake: Arc<AtomicBool>,
+    audio_interval: &mut Instant,
 ) {
-    let last_text_clone = last_text.clone();
-    let is_awake_clone = is_awake.clone();
-
-    thread::spawn(move || {
-        audio_analysis_thread(wake_tx, recognizer, audio_rx);
-    });
-
-    thread::spawn(move || {
-        for event in wake_rx {
-            if SpeechRecognizer::is_wake_word(&event.text) {
-                log::info!("Wake word detected");
-                is_awake_clone.store(true, Ordering::Relaxed);
-            }
-            if is_awake_clone.load(Ordering::Relaxed) && !event.text.is_empty() {
-                if let Ok(mut txt) = last_text_clone.lock() {
-                    *txt = Some(event.text.clone());
-                }
-                is_awake_clone.store(false, Ordering::Relaxed);
-            }
+    if SpeechRecognizer::is_wake_word(&event.text) {
+        log::info!("Wake word detected");
+        *audio_interval = Instant::now();
+    }
+    if audio_interval.elapsed().as_secs() < 60 && !event.text.is_empty() {
+        if let Ok(mut txt) = last_text.lock() {
+            *txt = Some(event.text.clone());
         }
-    });
+        *audio_interval = Instant::now();
+    }
 }
 
 fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
@@ -167,21 +160,37 @@ fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
         .collect()
 }
 
+/// 音频解析线程
+///
+/// # Arguments
+///
+/// * `recognizer`: 解析器
+/// * `audio_rx`: 原始音频数据
+/// * `last_text`: 解析结果
+///
+/// returns: ()
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn audio_analysis_thread(
-    wake_tx: SyncSender<WakeEvent>,
     mut recognizer: SpeechRecognizer,
-    audio_rx: mpsc::Receiver<Vec<i16>>,
+    audio_rx: Receiver<Vec<i16>>,
+    last_text: Arc<Mutex<Option<String>>>,
 ) {
     let chunk_size = 1600;
     let mut buffer = Vec::new();
-
+    let mut audio_interval = Instant::now();
     for samples in audio_rx {
         buffer.extend(samples);
         while buffer.len() >= chunk_size {
             let frame = &buffer[..chunk_size];
             if let Some(text) = recognizer.process(frame) {
                 if !text.is_empty() {
-                    let _ = wake_tx.send(WakeEvent { text });
+                    log::info!("Audio analysis processing text: {text}");
+                    audio_distribute(WakeEvent { text }, last_text.clone(), &mut audio_interval);
                 }
             }
             buffer.drain(..chunk_size);

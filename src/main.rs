@@ -34,22 +34,11 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
 
-    // 初始化 LLM
-    let llm = init_llm();
-    if llm.is_some() {
-        log::info!("LLM initialized successfully");
-    } else {
-        log::warn!("LLM init failed, running without LLM");
-    }
-
-    let voice_manager =
-        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
-
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    run(&mut terminal, voice_manager, llm)?;
+    run(&mut terminal, init_llm()?)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
@@ -57,28 +46,23 @@ fn main() -> anyhow::Result<()> {
 }
 
 /// 初始化 LLM
-fn init_llm() -> Option<QwenLlm> {
-    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf").ok()?;
-    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")
-        .ok()?;
-    llm.preload().ok()?;
-    Some(llm)
+fn init_llm() -> anyhow::Result<QwenLlm> {
+    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
+    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
+    llm.preload()?;
+    Ok(llm)
 }
 
 /// 主运行循环，负责应用的生命周期管理
-fn run(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    voice_manager: Option<VoiceManager>,
-    llm: Option<QwenLlm>,
-) -> anyhow::Result<()> {
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, llm: QwenLlm) -> anyhow::Result<()> {
+    let voice_manager =
+        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
     let mut app = app::App::new(voice_manager, llm);
 
     let tick_rate = Duration::from_millis(20);
     while app.running {
-        // 处理语音输入
-        app.poll_voice_input();
-
         if app.is_connected() {
+            app.poll_voice_input();
             let _ = app.send_frame();
         }
 
