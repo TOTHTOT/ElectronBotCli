@@ -2,6 +2,7 @@ pub mod config;
 /// app模块, 负责界面调度以及实际运行功能
 pub mod menu;
 
+use crate::llm::QwenLlm;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 
 // 导出菜单
@@ -12,6 +13,7 @@ use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
+use boteyes::Mood;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -31,6 +33,10 @@ pub struct App {
     pub popup: Popup,
     pub voice_manager: Option<VoiceManager>,
     pub left_focused: bool, // true=侧边栏有焦点，false=右侧内容有焦点
+    /// LLM 对话模型
+    pub llm: Option<QwenLlm>,
+    /// 等待 LLM 响应中
+    pub is_processing: bool,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -38,7 +44,7 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(voice_manager: Option<VoiceManager>) -> Self {
+    pub fn new(voice_manager: Option<VoiceManager>, llm: Option<QwenLlm>) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
@@ -59,6 +65,8 @@ impl App {
             popup: Popup::new(),
             voice_manager,
             left_focused: true, // 默认侧边栏有焦点
+            llm,
+            is_processing: false,
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -203,6 +211,56 @@ impl App {
         self.lcd.load_image(path)?;
         self.lcd.set_mode(DisplayMode::Static);
         Ok(())
+    }
+
+    /// 处理语音输入：调用 LLM 并根据回复设置表情
+    pub fn process_voice_input(&mut self, text: &str) {
+        if self.is_processing {
+            return;
+        }
+
+        let llm = match &mut self.llm {
+            Some(l) => l,
+            None => {
+                log::warn!("LLM not initialized");
+                return;
+            }
+        };
+
+        self.is_processing = true;
+        log::info!("Processing voice input: {}", text);
+
+        // 只分析情感，不生成回复
+        match llm.analyze_emotion(text) {
+            Ok(emotion) => {
+                log::info!("Emotion: {}", emotion.description());
+                // 设置眼睛表情
+                self.lcd.set_eyes_mood(emotion.to_mood());
+
+                // 播放 bibi 声
+                let sound = emotion.sound();
+                use crate::voice::play_beep;
+                play_beep(sound.beep_count, sound.frequency, sound.duration_ms, sound.interval_ms);
+            }
+            Err(e) => {
+                log::error!("LLM error: {}", e);
+                // 出错时显示愤怒表情
+                self.lcd.set_eyes_mood(Mood::Angry);
+            }
+        }
+
+        self.is_processing = false;
+    }
+
+    /// 轮询语音输入并处理
+    pub fn poll_voice_input(&mut self) {
+        if let Some(vm) = &self.voice_manager {
+            if let Some(text) = vm.take_last_text() {
+                if !text.is_empty() {
+                    self.process_voice_input(&text);
+                }
+            }
+        }
     }
 }
 

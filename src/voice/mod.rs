@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::SyncSender;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use vosk::{Model, Recognizer};
 
@@ -20,6 +20,10 @@ pub struct WakeEvent {
 pub struct VoiceManager {
     _stream: Stream,
     volume: Arc<AtomicI32>,
+    /// 最后一次识别的文本（唤醒词后的有效输入）
+    last_text: Arc<Mutex<Option<String>>>,
+    /// 是否检测到唤醒词
+    is_awake: Arc<AtomicBool>,
 }
 
 #[allow(dead_code)]
@@ -101,6 +105,14 @@ impl VoiceManager {
         stream.play()?;
         log::info!("Voice recognition thread started");
 
+        // 保存最后一次识别的文本
+        let last_text = Arc::new(Mutex::new(None));
+        let last_text_clone = last_text.clone();
+
+        // 唤醒状态
+        let is_awake = Arc::new(AtomicBool::new(false));
+        let is_awake_clone = is_awake.clone();
+
         thread::spawn(move || {
             audio_analysis_thread(wake_tx, recognizer, audio_rx);
         });
@@ -110,6 +122,15 @@ impl VoiceManager {
                 log::trace!("Wake event: {:?}", event);
                 if SpeechRecognizer::is_wake_word(&event.text) {
                     log::info!("Wake word detected");
+                    is_awake_clone.store(true, Ordering::Relaxed);
+                }
+
+                if is_awake_clone.load(Ordering::Relaxed) && !event.text.is_empty() {
+                    if let Ok(mut txt) = last_text_clone.lock() {
+                        *txt = Some(event.text.clone());
+                        log::info!("Valid input after wake: {}", event.text);
+                    }
+                    is_awake_clone.store(false, Ordering::Relaxed);
                 }
             }
         });
@@ -117,12 +138,23 @@ impl VoiceManager {
         Ok(Self {
             _stream: stream,
             volume,
+            last_text,
+            is_awake,
         })
     }
 
     /// 获取当前音量 (0-100)
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
+    }
+
+    /// 获取最后一次识别的文本（会清空）
+    pub fn take_last_text(&self) -> Option<String> {
+        if let Ok(mut txt) = self.last_text.lock() {
+            txt.take()
+        } else {
+            None
+        }
     }
 }
 
@@ -286,4 +318,95 @@ impl SpeechRecognizer {
 
         false
     }
+}
+
+/// 播放 bibi 声
+///
+/// # Arguments
+/// * `count` - 声音次数
+/// * `frequency` - 音调 (Hz)
+/// * `duration_ms` - 每次声音时长 (ms)
+/// * `interval_ms` - 声音间隔 (ms)
+pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32) {
+    let host = cpal::default_host();
+    let device = match host.default_output_device() {
+        Some(d) => d,
+        None => {
+            log::warn!("No output device found for beep");
+            return;
+        }
+    };
+
+    let config = match device.default_output_config() {
+        Ok(c) => c,
+        Err(e) => {
+            log::warn!("Failed to get default output config: {}", e);
+            return;
+        }
+    };
+
+    log::info!("Playing beep: count={}, freq={}Hz, duration={}ms", count, frequency, duration_ms);
+
+    let sr: u32 = config.sample_rate();
+    let sample_rate = sr as f32;
+    let channels = config.channels() as usize;
+
+    let total_duration_ms = (count * duration_ms) + ((count.saturating_sub(1)) * interval_ms);
+    let total_samples = ((sample_rate * total_duration_ms as f32) / 1000.0) as usize * channels;
+
+    let mut samples = vec![0.0f32; total_samples];
+
+    // 生成正弦波
+    for i in 0..count {
+        let start_time = i * (duration_ms + interval_ms);
+        let start_sample = ((sample_rate * start_time as f32) / 1000.0) as usize * channels;
+        let sample_count = ((sample_rate * duration_ms as f32) / 1000.0) as usize * channels;
+
+        for j in 0..sample_count {
+            let t = (j / channels) as f32 / sample_rate;
+            let sine = (2.0 * std::f32::consts::PI * frequency * t).sin();
+            // 添加淡入淡出
+            let envelope = if j < sample_count / 4 {
+                j as f32 / (sample_count / 4) as f32
+            } else if j > sample_count * 3 / 4 {
+                (sample_count - j) as f32 / (sample_count / 4) as f32
+            } else {
+                1.0
+            };
+            samples[start_sample + j] = sine * envelope * 0.5;
+        }
+    }
+
+    let samples = samples;
+    let channels_out = channels;
+    let sample_rate_out = config.sample_rate();
+
+    let stream = match device.build_output_stream(
+        &cpal::StreamConfig {
+            channels: channels_out as cpal::ChannelCount,
+            sample_rate: sample_rate_out,
+            buffer_size: cpal::BufferSize::Default,
+        },
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            for (i, sample) in data.iter_mut().enumerate() {
+                *sample = samples.get(i).copied().unwrap_or(0.0);
+            }
+        },
+        |err| log::error!("Beep stream error: {}", err),
+        None,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            log::warn!("Failed to build beep stream: {}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = stream.play() {
+        log::warn!("Failed to play beep: {}", e);
+        return;
+    }
+
+    // 等待播放完成
+    std::thread::sleep(std::time::Duration::from_millis(total_duration_ms as u64 + 50));
 }

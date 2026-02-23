@@ -43,7 +43,9 @@
       "Bash(curl:*)",
       "Bash(taskkill:*)",
       "Bash(del:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "mcp__filesystem__create_directory",
+      "Bash(cargo search:*)"
     ]
   }
 }

@@ -1,6 +1,7 @@
 extern crate log;
 
 mod app;
+mod emotion;
 mod input;
 mod llm;
 mod robot;
@@ -8,6 +9,7 @@ mod ui;
 mod ui_components;
 mod voice;
 
+use crate::emotion::Emotion;
 use crate::llm::QwenLlm;
 use crate::voice::VoiceManager;
 use crossterm::event::KeyModifiers;
@@ -33,37 +35,49 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
 
-    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
-    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
-    llm.preload()?;
-    let response = llm.chat("你好，我叫tothtot", 32)?;
-    log::info!("Response 1: {response}");
-    let response = llm.chat("你还记得我是谁吗？", 64)?;
-    log::info!("Response 2: {response}");
+    // 初始化 LLM
+    let llm = init_llm();
+    if llm.is_some() {
+        log::info!("LLM initialized successfully");
+    } else {
+        log::warn!("LLM init failed, running without LLM");
+    }
 
     let voice_manager =
         VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
+
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    run(&mut terminal, voice_manager)?;
+    run(&mut terminal, voice_manager, llm)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
 }
 
+/// 初始化 LLM
+fn init_llm() -> Option<QwenLlm> {
+    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf").ok()?;
+    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json").ok()?;
+    llm.preload().ok()?;
+    Some(llm)
+}
+
 /// 主运行循环，负责应用的生命周期管理
-///
-/// 循环执行以下步骤：
 fn run(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     voice_manager: Option<VoiceManager>,
+    llm: Option<QwenLlm>,
 ) -> anyhow::Result<()> {
-    let mut app = app::App::new(voice_manager);
+    let mut app = app::App::new(voice_manager, llm);
+
     let tick_rate = Duration::from_millis(20);
     while app.running {
+        // 处理语音输入（在 app 内部处理）
+        app.poll_voice_input();
+
         if app.is_connected() {
             let _ = app.send_frame();
         }
@@ -111,4 +125,24 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
         input::handle_by_mode(app, key.code, key.modifiers);
     }
     Ok(())
+}
+
+/// 测试情感模块
+fn test_emotion_module() {
+    log::info!("=== 情感模块测试 ===");
+
+    let test_texts = [
+        "你好，我很高兴认识你",
+        "我今天很生气",
+        "我好难过啊",
+        "哇，真的吗？",
+        "我好害怕",
+        "今天天气不错",
+    ];
+
+    for text in test_texts {
+        let emotion = Emotion::from_text(text);
+        let sound = emotion.sound();
+        log::info!("文本: \"{}\" -> 情感: {} (beep: {}次, {}Hz)", text, emotion.description(), sound.beep_count, sound.frequency as i32);
+    }
 }
