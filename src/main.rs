@@ -59,7 +59,8 @@ fn main() -> anyhow::Result<()> {
 /// 初始化 LLM
 fn init_llm() -> Option<QwenLlm> {
     let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf").ok()?;
-    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json").ok()?;
+    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")
+        .ok()?;
     llm.preload().ok()?;
     Some(llm)
 }
@@ -74,7 +75,7 @@ fn run(
 
     let tick_rate = Duration::from_millis(20);
     while app.running {
-        // 处理语音输入（在 app 内部处理）
+        // 处理语音输入
         app.poll_voice_input();
 
         if app.is_connected() {

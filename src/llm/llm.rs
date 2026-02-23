@@ -1,10 +1,10 @@
-use anyhow::Result;
-use candle_core::{Device, Tensor};
-use candle_core::quantized::gguf_file::Content;
 use crate::emotion::parse_mood;
+use anyhow::Result;
 use boteyes::Mood;
-use std::path::Path;
+use candle_core::quantized::gguf_file::Content;
+use candle_core::{Device, Tensor};
 use std::fs::File;
+use std::path::Path;
 use std::time::Instant;
 
 pub mod quantized_qwen2 {
@@ -57,10 +57,17 @@ impl QwenLlm {
     }
 
     pub fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
-        let tokenizer = self.tokenizer.as_ref().ok_or_else(|| anyhow::anyhow!("Tokenizer not loaded"))?;
-        let model = self.model.as_mut().ok_or_else(|| anyhow::anyhow!("Model not preloaded"))?;
+        let tokenizer = self
+            .tokenizer
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Tokenizer not loaded"))?;
+        let model = self
+            .model
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("Model not preloaded"))?;
 
-        let encoding = tokenizer.encode(prompt, true)
+        let encoding = tokenizer
+            .encode(prompt, true)
             .map_err(|e| anyhow::anyhow!("Encode error: {}", e))?;
         let mut all_tokens: Vec<u32> = encoding.get_ids().to_vec();
         let prompt_len = all_tokens.len();
@@ -73,14 +80,18 @@ impl QwenLlm {
         all_tokens.push(next_token);
 
         for i in 0..max_tokens {
-            if next_token == eos_token { break; }
+            if next_token == eos_token {
+                break;
+            }
             let input = Tensor::new(&[next_token], &self.device)?.unsqueeze(0)?;
             let logits = model.forward(&input, prompt_len + i)?;
             next_token = logits.squeeze(0)?.argmax(0)?.to_scalar::<u32>()?;
             all_tokens.push(next_token);
         }
 
-        Ok(tokenizer.decode(&all_tokens[prompt_len..], true).unwrap_or_default())
+        Ok(tokenizer
+            .decode(&all_tokens[prompt_len..], true)
+            .unwrap_or_default())
     }
 }
 

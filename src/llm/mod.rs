@@ -21,7 +21,7 @@
 //! ## 文件要求
 //!
 //! - 模型: `assets/module/llm/Qwen3-0.6B-Q3_K_M.gguf`
-//! - 分词器: `assets/module/llm/tokenizer.json` 
+//! - 分词器: `assets/module/llm/tokenizer.json`
 
 pub mod llm;
 

@@ -9,11 +9,11 @@ use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 pub use menu::*;
 
 use crate::voice::VoiceManager;
+use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::mpsc;
 use std::sync::mpsc::SyncSender;
-use boteyes::Mood;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -32,10 +32,8 @@ pub struct App {
     pub lcd: Lcd,
     pub popup: Popup,
     pub voice_manager: Option<VoiceManager>,
-    pub left_focused: bool, // true=侧边栏有焦点，false=右侧内容有焦点
-    /// LLM 对话模型
-    pub llm: Option<QwenLlm>,
-    /// 等待 LLM 响应中
+    pub left_focused: bool,
+    llm_tx: Option<mpsc::Sender<(String, mpsc::Sender<Mood>)>>,
     pub is_processing: bool,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
@@ -50,6 +48,25 @@ impl App {
 
         let lcd = Lcd::new();
         let config = config::AppConfig::load();
+
+        // 创建 LLM 处理线程
+        let llm_arc = std::sync::Arc::new(std::sync::Mutex::new(llm));
+        let (llm_tx, llm_rx): (
+            mpsc::Sender<(String, mpsc::Sender<Mood>)>,
+            _,
+        ) = mpsc::channel();
+        let llm_for_thread = llm_arc.clone();
+        std::thread::spawn(move || {
+            let mut llm = llm_for_thread.lock().unwrap();
+            for (text, response_tx) in llm_rx {
+                let mood = match llm.as_mut() {
+                    Some(l) => l.analyze_mood(&text).unwrap_or(Mood::Default),
+                    None => Mood::Default,
+                };
+                let _ = response_tx.send(mood);
+            }
+        });
+
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
@@ -64,8 +81,8 @@ impl App {
             lcd,
             popup: Popup::new(),
             voice_manager,
-            left_focused: true, // 默认侧边栏有焦点
-            llm,
+            left_focused: true,
+            llm_tx: Some(llm_tx),
             is_processing: false,
             comm_state: None,
             comm_thread: None,
@@ -213,16 +230,16 @@ impl App {
         Ok(())
     }
 
-    /// 处理语音输入：调用 LLM 分析情感并设置表情
+    /// 处理语音输入：调用 LLM 分析情感并设置表情 (在线程中处理)
     pub fn process_voice_input(&mut self, text: &str) {
         if self.is_processing {
             return;
         }
 
-        let llm = match &mut self.llm {
-            Some(l) => l,
+        let llm_tx = match &self.llm_tx {
+            Some(tx) => tx,
             None => {
-                log::warn!("LLM not initialized");
+                log::warn!("LLM thread not initialized");
                 return;
             }
         };
@@ -230,14 +247,21 @@ impl App {
         self.is_processing = true;
         log::info!("Processing voice input: {}", text);
 
-        match llm.analyze_mood(text) {
+        // LLM 开始解析时眼睛进入 Loading 状态
+        self.lcd.set_eyes_mood(Mood::Loading);
+
+        let (response_tx, response_rx) = mpsc::channel();
+        let _ = llm_tx.send((text.to_string(), response_tx));
+
+        // 等待 LLM 响应 (短超时)
+        match response_rx.recv_timeout(std::time::Duration::from_secs(10)) {
             Ok(mood) => {
                 log::info!("Mood: {:?}", mood);
                 self.lcd.set_eyes_mood(mood);
                 Self::play_beep_for_mood(mood);
             }
-            Err(e) => {
-                log::error!("LLM error: {}", e);
+            Err(_) => {
+                log::error!("LLM timeout or error");
                 self.lcd.set_eyes_mood(Mood::Angry);
             }
         }
