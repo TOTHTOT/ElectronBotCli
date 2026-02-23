@@ -213,7 +213,7 @@ impl App {
         Ok(())
     }
 
-    /// 处理语音输入：调用 LLM 并根据回复设置表情
+    /// 处理语音输入：调用 LLM 分析情感并设置表情
     pub fn process_voice_input(&mut self, text: &str) {
         if self.is_processing {
             return;
@@ -230,26 +230,29 @@ impl App {
         self.is_processing = true;
         log::info!("Processing voice input: {}", text);
 
-        // 只分析情感，不生成回复
-        match llm.analyze_emotion(text) {
-            Ok(emotion) => {
-                log::info!("Emotion: {}", emotion.description());
-                // 设置眼睛表情
-                self.lcd.set_eyes_mood(emotion.to_mood());
-
-                // 播放 bibi 声
-                let sound = emotion.sound();
-                use crate::voice::play_beep;
-                play_beep(sound.beep_count, sound.frequency, sound.duration_ms, sound.interval_ms);
+        match llm.analyze_mood(text) {
+            Ok(mood) => {
+                log::info!("Mood: {:?}", mood);
+                self.lcd.set_eyes_mood(mood);
+                Self::play_beep_for_mood(mood);
             }
             Err(e) => {
                 log::error!("LLM error: {}", e);
-                // 出错时显示愤怒表情
                 self.lcd.set_eyes_mood(Mood::Angry);
             }
         }
 
         self.is_processing = false;
+    }
+
+    /// 根据 Mood 播放对应的 bibi 声
+    fn play_beep_for_mood(mood: Mood) {
+        use crate::voice::play_beep;
+        match mood {
+            Mood::Happy | Mood::Surprise => play_beep(2, 800.0, 100, 150),
+            Mood::Angry | Mood::Sad | Mood::Confuse => play_beep(3, 500.0, 80, 100),
+            Mood::Default | Mood::Loading => play_beep(1, 440.0, 150, 0),
+        }
     }
 
     /// 轮询语音输入并处理

@@ -1,7 +1,8 @@
 use anyhow::Result;
 use candle_core::{Device, Tensor};
 use candle_core::quantized::gguf_file::Content;
-use crate::emotion::Emotion;
+use crate::emotion::parse_mood;
+use boteyes::Mood;
 use std::path::Path;
 use std::fs::File;
 use std::time::Instant;
@@ -48,11 +49,11 @@ impl QwenLlm {
         Ok(())
     }
 
-    pub fn analyze_emotion(&mut self, user_input: &str) -> Result<Emotion> {
+    pub fn analyze_mood(&mut self, user_input: &str) -> Result<Mood> {
         let prompt = build_emotion_prompt(user_input);
         let response = self.generate(&prompt, 8)?;
-        let emotion = parse_emotion(&response);
-        Ok(emotion)
+        let mood = parse_mood(&response);
+        Ok(mood)
     }
 
     pub fn generate(&mut self, prompt: &str, max_tokens: usize) -> Result<String> {
@@ -88,20 +89,4 @@ fn build_emotion_prompt(user_input: &str) -> String {
         "<|im_start|>system\n分析用户输入的情感，只输出情感标签。\n情感选项：开心、难过、生气、惊讶、害怕、中性\n输出格式：[情感]<|im_end|>\n<|im_start|>user\n{}\n<|im_end|>\n<|im_start|>assistant\n",
         user_input
     )
-}
-
-fn parse_emotion(response: &str) -> Emotion {
-    for emotion in ["开心", "难过", "生气", "惊讶", "害怕", "中性"] {
-        if response.starts_with(&format!("[{}]", emotion)) {
-            return match emotion {
-                "开心" => Emotion::Happy,
-                "难过" => Emotion::Sad,
-                "生气" => Emotion::Angry,
-                "惊讶" => Emotion::Surprise,
-                "害怕" => Emotion::Fear,
-                _ => Emotion::Neutral,
-            };
-        }
-    }
-    Emotion::from_text(response)
 }
