@@ -128,7 +128,6 @@ impl VoiceManager {
                 if is_awake_clone.load(Ordering::Relaxed) && !event.text.is_empty() {
                     if let Ok(mut txt) = last_text_clone.lock() {
                         *txt = Some(event.text.clone());
-                        log::info!("Valid input after wake: {}", event.text);
                     }
                     is_awake_clone.store(false, Ordering::Relaxed);
                 }
@@ -320,43 +319,40 @@ impl SpeechRecognizer {
     }
 }
 
-/// 播放 bibi 声
-///
-/// # Arguments
-/// * `count` - 声音次数
-/// * `frequency` - 音调 (Hz)
-/// * `duration_ms` - 每次声音时长 (ms)
-/// * `interval_ms` - 声音间隔 (ms)
 pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32) {
-    let host = cpal::default_host();
-    let device = match host.default_output_device() {
+    let device = match get_output_device() {
         Some(d) => d,
-        None => {
-            log::warn!("No output device found for beep");
-            return;
-        }
+        None => return,
     };
 
-    let config = match device.default_output_config() {
-        Ok(c) => c,
-        Err(e) => {
-            log::warn!("Failed to get default output config: {}", e);
-            return;
-        }
+    let config = match get_output_config(&device) {
+        Some(c) => c,
+        None => return,
     };
-
-    log::info!("Playing beep: count={}, freq={}Hz, duration={}ms", count, frequency, duration_ms);
 
     let sr: u32 = config.sample_rate();
     let sample_rate = sr as f32;
     let channels = config.channels() as usize;
 
     let total_duration_ms = (count * duration_ms) + ((count.saturating_sub(1)) * interval_ms);
-    let total_samples = ((sample_rate * total_duration_ms as f32) / 1000.0) as usize * channels;
+    let samples = generate_beep_samples(count, frequency, duration_ms, interval_ms, sample_rate, channels);
 
+    play_samples(&device, &config, samples, channels, total_duration_ms);
+}
+
+fn get_output_device() -> Option<cpal::Device> {
+    cpal::default_host().default_output_device()
+}
+
+fn get_output_config(device: &cpal::Device) -> Option<cpal::SupportedStreamConfig> {
+    device.default_output_config().ok()
+}
+
+fn generate_beep_samples(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32, sample_rate: f32, channels: usize) -> Vec<f32> {
+    let total_duration_ms = (count * duration_ms) + ((count.saturating_sub(1)) * interval_ms);
+    let total_samples = ((sample_rate * total_duration_ms as f32) / 1000.0) as usize * channels;
     let mut samples = vec![0.0f32; total_samples];
 
-    // 生成正弦波
     for i in 0..count {
         let start_time = i * (duration_ms + interval_ms);
         let start_sample = ((sample_rate * start_time as f32) / 1000.0) as usize * channels;
@@ -365,26 +361,31 @@ pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32)
         for j in 0..sample_count {
             let t = (j / channels) as f32 / sample_rate;
             let sine = (2.0 * std::f32::consts::PI * frequency * t).sin();
-            // 添加淡入淡出
-            let envelope = if j < sample_count / 4 {
-                j as f32 / (sample_count / 4) as f32
-            } else if j > sample_count * 3 / 4 {
-                (sample_count - j) as f32 / (sample_count / 4) as f32
-            } else {
-                1.0
-            };
+            let envelope = calc_envelope(j, sample_count);
             samples[start_sample + j] = sine * envelope * 0.5;
         }
     }
 
-    let samples = samples;
-    let channels_out = channels;
-    let sample_rate_out = config.sample_rate();
+    samples
+}
 
+fn calc_envelope(j: usize, total: usize) -> f32 {
+    let quarter = total / 4;
+    if j < quarter {
+        j as f32 / quarter as f32
+    } else if j > total * 3 / 4 {
+        (total - j) as f32 / quarter as f32
+    } else {
+        1.0
+    }
+}
+
+fn play_samples(device: &cpal::Device, config: &cpal::SupportedStreamConfig, samples: Vec<f32>, channels: usize, duration_ms: u32) {
+    let samples = samples;
     let stream = match device.build_output_stream(
         &cpal::StreamConfig {
-            channels: channels_out as cpal::ChannelCount,
-            sample_rate: sample_rate_out,
+            channels: channels as cpal::ChannelCount,
+            sample_rate: config.sample_rate(),
             buffer_size: cpal::BufferSize::Default,
         },
         move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
@@ -407,6 +408,5 @@ pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32)
         return;
     }
 
-    // 等待播放完成
-    std::thread::sleep(std::time::Duration::from_millis(total_duration_ms as u64 + 50));
+    std::thread::sleep(std::time::Duration::from_millis(duration_ms as u64 + 50));
 }

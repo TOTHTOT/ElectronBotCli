@@ -9,7 +9,6 @@ mod ui;
 mod ui_components;
 mod voice;
 
-use crate::emotion::Emotion;
 use crate::llm::QwenLlm;
 use crate::voice::VoiceManager;
 use crossterm::event::KeyModifiers;
@@ -22,7 +21,7 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
     let log_file = File::create("ele_bot.log").ok();
@@ -125,24 +124,4 @@ fn handle_input(app: &mut app::App) -> io::Result<()> {
         input::handle_by_mode(app, key.code, key.modifiers);
     }
     Ok(())
-}
-
-/// 测试情感模块
-fn test_emotion_module() {
-    log::info!("=== 情感模块测试 ===");
-
-    let test_texts = [
-        "你好，我很高兴认识你",
-        "我今天很生气",
-        "我好难过啊",
-        "哇，真的吗？",
-        "我好害怕",
-        "今天天气不错",
-    ];
-
-    for text in test_texts {
-        let emotion = Emotion::from_text(text);
-        let sound = emotion.sound();
-        log::info!("文本: \"{}\" -> 情感: {} (beep: {}次, {}Hz)", text, emotion.description(), sound.beep_count, sound.frequency as i32);
-    }
 }
