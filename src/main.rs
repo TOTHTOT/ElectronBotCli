@@ -1,6 +1,7 @@
 extern crate log;
 
 mod app;
+mod emotion;
 mod input;
 mod llm;
 mod robot;
@@ -20,7 +21,7 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 fn main() -> anyhow::Result<()> {
     let log_file = File::create("ele_bot.log").ok();
@@ -33,38 +34,35 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
 
-    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
-    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
-    llm.preload()?;
-    let response = llm.chat("你好，我叫tothtot", 32)?;
-    log::info!("Response 1: {response}");
-    let response = llm.chat("你还记得我是谁吗？", 64)?;
-    log::info!("Response 2: {response}");
-
-    let voice_manager =
-        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    run(&mut terminal, voice_manager)?;
+    run(&mut terminal, init_llm()?)?;
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
     Ok(())
 }
 
+/// 初始化 LLM
+fn init_llm() -> anyhow::Result<QwenLlm> {
+    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
+    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
+    llm.preload()?;
+    Ok(llm)
+}
+
 /// 主运行循环，负责应用的生命周期管理
-///
-/// 循环执行以下步骤：
-fn run(
-    terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    voice_manager: Option<VoiceManager>,
-) -> anyhow::Result<()> {
-    let mut app = app::App::new(voice_manager);
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, llm: QwenLlm) -> anyhow::Result<()> {
+    let voice_manager =
+        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
+    let mut app = app::App::new(voice_manager, llm);
+
     let tick_rate = Duration::from_millis(20);
     while app.running {
         if app.is_connected() {
+            app.poll_voice_input();
             let _ = app.send_frame();
         }
 

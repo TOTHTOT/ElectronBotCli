@@ -4,4 +4,5 @@
 screenshot_*.bmp
 /config.toml
 nul
-*gguf
+*guff
+/assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf

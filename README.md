@@ -36,6 +36,15 @@
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     ```
+2. 部署到到rk3566
+```shell
+# cross+docker 编译程序, cross 配置参考 Cross.toml
+cross build --target aarch64-unknown-linux-gnu --release
+# 发送编译好的程序
+scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.159:~/ElectronBotCli
+# 发送模型和词表
+scp assets/module/llm/qwen2/*  radxa@192.168.2.159:~/ElectronBotCli/assets/module/llm/qwen2
+```
 
 ## 备注
 1. 使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.
