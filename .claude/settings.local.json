@@ -33,7 +33,17 @@
       "Bash(cross build:*)",
       "Bash(cargo check:*)",
       "WebFetch(domain:docs.rs)",
-      "WebFetch(domain:raw.githubusercontent.com)"
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(cargo run:*)",
+      "Bash(timeout:*)",
+      "Bash(cargo build:*)",
+      "Bash(./target/release/ele_bot.exe:*)",
+      "Bash(tasklist:*)",
+      "WebFetch(domain:api.github.com)",
+      "Bash(curl:*)",
+      "Bash(taskkill:*)",
+      "Bash(del:*)",
+      "Bash(git checkout:*)"
     ]
   }
 }

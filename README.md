@@ -39,3 +39,4 @@
 
 ## 备注
 1. 使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.
+2. [千问3的6b模型下载](https://huggingface.co/snowmead/qwen3-0.6b-rust-sft-GGUF)

@@ -2,11 +2,13 @@ extern crate log;
 
 mod app;
 mod input;
+mod llm;
 mod robot;
 mod ui;
 mod ui_components;
 mod voice;
 
+use crate::llm::QwenLlm;
 use crate::voice::VoiceManager;
 use crossterm::event::KeyModifiers;
 use crossterm::{
@@ -18,20 +20,29 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn main() -> anyhow::Result<()> {
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
-            simplelog::LevelFilter::Trace,
+            simplelog::LevelFilter::Info,
             Config::default(),
             f,
         )])
         .ok();
     }
+
+    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
+    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
+    llm.preload()?;
+    let response = llm.chat("你好，我叫tothtot", 32)?;
+    log::info!("Response 1: {response}");
+    let response = llm.chat("你还记得我是谁吗？", 64)?;
+    log::info!("Response 2: {response}");
+
     let voice_manager =
-        VoiceManager::new("assets/module/vosk-model-small-cn-0.22", "麦克风阵列").ok();
+        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
