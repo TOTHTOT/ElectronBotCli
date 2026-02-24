@@ -4,17 +4,21 @@ pub mod menu;
 
 use crate::llm::QwenLlm;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
+use crate::ui::pages::llm_test::LlmTestState;
+use std::default::Default;
+use std::sync::{Arc, Mutex};
 
 // 导出菜单
 pub use menu::*;
 
+use crate::voice::play_beep;
 use crate::voice::VoiceManager;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::atomic::AtomicBool;
+use std::sync::mpsc;
 use std::sync::mpsc::{Sender, SyncSender};
-use std::sync::{mpsc, Arc};
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -36,6 +40,11 @@ pub struct App {
     voice_result_rx: Option<mpsc::Receiver<Mood>>,
     pub left_focused: bool,
     pub is_processing: Arc<AtomicBool>,
+    pub in_llm_test_mode: bool,
+    pub llm_test_state: LlmTestState,
+    pub text_tx: Sender<String>,
+    #[allow(dead_code)]
+    llm: Option<Arc<Mutex<QwenLlm>>>,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -50,14 +59,35 @@ impl App {
         let lcd = Lcd::new();
         let config = config::AppConfig::load();
 
-        let voice_arc = voice_manager.map(Arc::new);
+        let llm_arc = Arc::new(Mutex::new(llm));
         let is_processing = Arc::new(AtomicBool::new(false));
         let is_processing_clone = is_processing.clone();
         let (result_tx, result_rx) = mpsc::channel();
-        if let Some(vm) = voice_arc.clone() {
-            std::thread::spawn(move || {
-                Self::llm_analysis_thread(llm, result_tx, vm, is_processing_clone);
-            });
+
+        let (text_tx, text_rx) = mpsc::channel::<String>();
+        let text_tx_clone = text_tx.clone();
+
+        // 启动 LLM 处理线程
+        let llm_for_thread = llm_arc.clone();
+        let result_tx_for_llm = result_tx.clone();
+        std::thread::spawn(move || {
+            Self::llm_analysis_thread(
+                llm_for_thread,
+                text_rx,
+                result_tx_for_llm,
+                is_processing_clone,
+            );
+        });
+
+        // 启动语音识别（如果有）
+        if voice_manager.is_some() {
+            if let Err(e) = VoiceManager::new(
+                "assets/module/vosk/vosk-model-small-cn-0.22",
+                "麦克风阵列",
+                text_tx_clone,
+            ) {
+                log::warn!("Failed to init voice manager: {}", e);
+            }
         }
 
         Self {
@@ -73,10 +103,14 @@ impl App {
             config,
             lcd,
             popup: Popup::new(),
-            voice_manager: voice_arc,
+            voice_manager: None,
             voice_result_rx: Some(result_rx),
             left_focused: true,
             is_processing,
+            in_llm_test_mode: false,
+            llm_test_state: LlmTestState::default(),
+            text_tx,
+            llm: Some(llm_arc),
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -100,22 +134,24 @@ impl App {
     ///
     /// ```
     fn llm_analysis_thread(
-        llm: QwenLlm,
+        llm: Arc<Mutex<QwenLlm>>,
+        text_rx: mpsc::Receiver<String>,
         result_tx: Sender<Mood>,
-        vm: Arc<VoiceManager>,
         is_processing: Arc<AtomicBool>,
     ) {
-        let mut llm = llm;
         loop {
-            if let Some(text) = vm.take_last_text() {
+            if let Ok(text) = text_rx.recv() {
                 if !text.is_empty() {
                     is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
-                    let mood = llm.analyze_mood(&text).unwrap_or(Mood::Default);
+                    let mood = llm
+                        .lock()
+                        .unwrap()
+                        .analyze_mood(&text)
+                        .unwrap_or(Mood::Default);
                     is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
                     let _ = result_tx.send(mood);
                 }
             }
-            std::thread::sleep(std::time::Duration::from_millis(50));
         }
     }
 
@@ -261,7 +297,6 @@ impl App {
 
     /// 根据 Mood 播放对应的 bibi 声
     fn play_beep_for_mood(mood: Mood) {
-        use crate::voice::play_beep;
         match mood {
             Mood::Happy | Mood::Surprise => play_beep(2, 800.0, 100, 150),
             Mood::Angry | Mood::Sad | Mood::Confuse => play_beep(3, 500.0, 80, 100),
@@ -273,6 +308,13 @@ impl App {
         if let Some(rx) = &self.voice_result_rx {
             while let Ok(mood) = rx.try_recv() {
                 log::info!("Mood: {mood:?}");
+                // 更新 LLM 测试状态
+                if self.in_llm_test_mode {
+                    self.llm_test_state.current_mood = Some(mood);
+                    self.llm_test_state.output_text = format!("情感: {:?}", mood);
+                }
+                self.is_processing
+                    .store(false, std::sync::atomic::Ordering::Relaxed);
                 self.lcd.set_eyes_mood(mood);
                 Self::play_beep_for_mood(mood);
             }

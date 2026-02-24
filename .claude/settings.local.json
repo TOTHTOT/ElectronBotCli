@@ -48,7 +48,8 @@
       "Bash(cargo search:*)",
       "mcp__filesystem__edit_file",
       "mcp__filesystem__list_directory",
-      "mcp__filesystem__move_file"
+      "mcp__filesystem__move_file",
+      "Bash(cargo fmt:*)"
     ]
   }
 }

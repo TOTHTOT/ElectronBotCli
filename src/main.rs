@@ -10,7 +10,6 @@ mod ui_components;
 mod voice;
 
 use crate::llm::QwenLlm;
-use crate::voice::VoiceManager;
 use crossterm::event::KeyModifiers;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -53,18 +52,31 @@ fn init_llm() -> anyhow::Result<QwenLlm> {
     Ok(llm)
 }
 
-/// 主运行循环，负责应用的生命周期管理
+/// 主线程
+/// 实现页面渲染, 按键事件, 机器人数据发送
+///
+/// # Arguments
+///
+/// * `terminal`:
+/// * `llm`:
+///
+/// returns: Result<(), Error>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, llm: QwenLlm) -> anyhow::Result<()> {
-    let voice_manager =
-        VoiceManager::new("assets/module/vosk/vosk-model-small-cn-0.22", "麦克风阵列").ok();
-    let mut app = app::App::new(voice_manager, llm);
+    let mut app = app::App::new(None, llm);
 
     let tick_rate = Duration::from_millis(20);
     while app.running {
         if app.is_connected() {
-            app.poll_voice_input();
             let _ = app.send_frame();
         }
+
+        app.poll_voice_input();
 
         render(terminal, &mut app)?;
         handle_input(&mut app)?;
@@ -82,7 +94,19 @@ fn render(terminal: &mut Terminal<CrosstermBackend<Stdout>>, app: &mut app::App)
     Ok(())
 }
 
-/// 输入事件处理入口
+/// 输入事件处理入口, 会根据当前页面路由到对应事件
+///
+/// # Arguments
+///
+/// * `app`:
+///
+/// returns: Result<(), Error>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 fn handle_input(app: &mut app::App) -> io::Result<()> {
     if !event::poll(Duration::from_millis(10))? {
         return Ok(());

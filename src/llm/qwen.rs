@@ -99,7 +99,6 @@ impl QwenLlm {
 
 fn build_emotion_prompt(user_input: &str) -> String {
     format!(
-        "<|im_start|>system\n分析用户输入的情感，只输出情感标签。\n情感选项：开心、难过、生气、惊讶、害怕、中性\n输出格式：[情感]<|im_end|>\n<|im_start|>user\n{}\n<|im_end|>\n<|im_start|>assistant\n",
-        user_input
+        "<|im_start|>system\n分析用户输入的情感，只输出情感标签。\n情感选项：开心、难过、生气、困惑、害怕、中性\n输出格式：[情感]<|im_end|>\n<|im_start|>user\n{user_input}\n<|im_end|>\n<|im_start|>assistant\n"
     )
 }

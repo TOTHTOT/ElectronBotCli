@@ -1,14 +1,17 @@
 //! 事件模块 - 按功能分类的事件定义和处理
 
 mod device;
+mod llm_test;
 mod menu;
 mod settings;
 
 pub use device::DeviceEvent;
+pub use llm_test::LlmTestEvent;
 pub use menu::MenuEvent;
 pub use settings::SettingsEvent;
 
 use crate::app::{App, MenuItem};
+use crate::input::llm_test::handle;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 /// 通用事件
@@ -25,6 +28,7 @@ pub enum AppEvent {
     Menu(MenuEvent),
     Device(DeviceEvent),
     Settings(SettingsEvent),
+    LlmTest(LlmTestEvent),
 }
 
 impl From<CommonEvent> for AppEvent {
@@ -51,6 +55,12 @@ impl From<SettingsEvent> for AppEvent {
     }
 }
 
+impl From<LlmTestEvent> for AppEvent {
+    fn from(e: LlmTestEvent) -> Self {
+        AppEvent::LlmTest(e)
+    }
+}
+
 /// 处理应用事件
 pub fn handle_event(app: &mut App, event: AppEvent) {
     match event {
@@ -61,6 +71,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
         AppEvent::Menu(e) => menu::handle(app, e),
         AppEvent::Device(e) => device::handle(app, e),
         AppEvent::Settings(e) => settings::handle(app, e),
+        AppEvent::LlmTest(_) => {} // Handled in handle_by_mode
     }
 }
 
@@ -86,13 +97,16 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         app.in_edit_settings_mode,
         app.in_servo_mode,
         app.in_settings,
+        app.in_llm_test_mode,
     ) {
         // 编辑模式：处理设置项内容编辑
-        (true, _, _) => handle_edit_settings_mode(app, code),
+        (true, _, _, _) => handle_edit_settings_mode(app, code),
         // 设备控制模式：处理舵机角度调整
-        (_, true, _) => handle_servo_mode(app, code),
+        (_, true, _, _) => handle_servo_mode(app, code),
         // 设置模式：处理配置项选择
-        (_, _, true) => handle_settings_mode(app, code),
+        (_, _, true, _) => handle_settings_mode(app, code),
+        // LLM 测试模式：处理文本输入
+        (_, _, _, true) => handle_llm_test_mode(app, code),
         // 菜单模式：处理侧边栏导航
         _ => handle_menu_mode(app, code, modifiers),
     }
@@ -128,6 +142,7 @@ fn handle_menu_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 /// 根据当前选中的菜单项触发相应的事件：
 /// - 设备控制：进入伺服模式
 /// - 设置：进入设置模式
+/// - LLM测试：进入LLM测试模式
 /// - 其他：尝试连接设备
 ///
 /// # Arguments
@@ -141,6 +156,11 @@ fn handle_menu_enter(app: &mut App) -> AppEvent {
     match app.selected_menu {
         MenuItem::DeviceControl => MenuEvent::EnterServoMode.into(),
         MenuItem::Settings => MenuEvent::EnterSettingMode.into(),
+        MenuItem::LlmTest => {
+            app.in_llm_test_mode = true;
+            app.left_focused = false;
+            AppEvent::LlmTest(LlmTestEvent::None)
+        }
         _ => MenuEvent::ConnectDevice.into(),
     }
 }
@@ -251,5 +271,26 @@ fn handle_edit_settings_mode(app: &mut App, code: KeyCode) {
 fn handle_popup_mode(app: &mut App, code: KeyCode) {
     if matches!(code, KeyCode::Esc) {
         app.stop_comm_thread();
+    }
+}
+
+fn handle_llm_test_mode(app: &mut App, code: KeyCode) {
+    if app.left_focused {
+        if code == KeyCode::Tab
+            || !matches!(
+                code,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Up | KeyCode::Down
+            )
+        {
+            app.toggle_focus();
+        }
+    } else if code == KeyCode::Esc || code == KeyCode::Tab {
+        app.in_llm_test_mode = false;
+        app.llm_test_state.input_text.clear();
+        app.llm_test_state.output_text.clear();
+        app.llm_test_state.current_mood = None;
+        app.toggle_focus();
+    } else {
+        handle(app, code);
     }
 }

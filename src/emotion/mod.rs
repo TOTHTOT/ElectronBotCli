@@ -7,7 +7,7 @@ pub fn parse_mood(llm_output: &str) -> Mood {
         ("[难过]", Mood::Sad),
         ("[生气]", Mood::Angry),
         ("[惊讶]", Mood::Surprise),
-        ("[害怕]", Mood::Confuse),
+        ("[困惑]", Mood::Confuse),
     ] {
         if llm_output.starts_with(label) {
             return *mood;

@@ -1,4 +1,4 @@
-mod pages;
+pub mod pages;
 mod sidebar;
 
 use crate::app::{App, MenuItem};
@@ -39,6 +39,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             right_border_color,
         ),
         MenuItem::About => pages::about::render(frame, chunks[1], right_border_color),
+        MenuItem::LlmTest => pages::llm_test::render(frame, chunks[1], app, right_border_color),
     }
 
     // 渲染弹窗

@@ -3,26 +3,23 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc};
 use std::thread;
-use std::time::Instant;
 use vosk::{Model, Recognizer};
-
-#[derive(Clone, Debug)]
-pub struct WakeEvent {
-    pub text: String,
-}
 
 #[allow(dead_code)]
 pub struct VoiceManager {
     _stream: Stream,
     volume: Arc<AtomicI32>,
-    last_text: Arc<Mutex<Option<String>>>,
 }
 
 #[allow(dead_code)]
 impl VoiceManager {
-    pub fn new(model_path: &str, speech_name: &str) -> Result<Self> {
+    pub fn new(
+        model_path: &str,
+        speech_name: &str,
+        result_tx: mpsc::Sender<String>,
+    ) -> Result<Self> {
         let device = find_input_device(speech_name)?;
         let config = get_input_config(&device)?;
         let need_resample = config.sample_rate() != 16000;
@@ -34,25 +31,18 @@ impl VoiceManager {
         let stream = build_audio_stream(&device, &config, need_resample, volume.clone(), audio_tx)?;
         stream.play()?;
 
-        let last_text = Arc::new(Mutex::new(None));
-        let last_text_clone = last_text.clone();
         thread::spawn(move || {
-            audio_analysis_thread(recognizer, audio_rx, last_text_clone);
+            audio_analysis_thread(recognizer, audio_rx, result_tx);
         });
 
         Ok(Self {
             _stream: stream,
             volume,
-            last_text,
         })
     }
 
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
-    }
-
-    pub fn take_last_text(&self) -> Option<String> {
-        self.last_text.lock().ok()?.take()
     }
 }
 
@@ -120,38 +110,6 @@ fn build_audio_stream(
         .map_err(|e| anyhow!("Failed to build input stream: {}", e))
 }
 
-/// 将解析后语音派发个别的任务
-///
-/// # Arguments
-///
-/// * `event`: 解析成功的语音内容
-/// * `last_text`: 最新的一条语音信息, 处理好后发送给llm线程
-/// * `audio_interval`: 收到语音消息的间隔, 超时的话就必须使用关键字唤醒, 以实现连续对话
-///
-/// returns: ()
-///
-/// # Examples
-///
-/// ```
-///
-/// ```
-fn audio_distribute(
-    event: WakeEvent,
-    last_text: Arc<Mutex<Option<String>>>,
-    audio_interval: &mut Instant,
-) {
-    if SpeechRecognizer::is_wake_word(&event.text) {
-        log::info!("Wake word detected");
-        *audio_interval = Instant::now();
-    }
-    if audio_interval.elapsed().as_secs() < 60 && !event.text.is_empty() {
-        if let Ok(mut txt) = last_text.lock() {
-            *txt = Some(event.text.clone());
-        }
-        *audio_interval = Instant::now();
-    }
-}
-
 fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
     let ratio = from_rate as f64 / 16000.0;
     let new_len = (samples.len() as f64 / ratio) as usize;
@@ -178,19 +136,18 @@ fn resample_to_16k(samples: &[i16], from_rate: u32) -> Vec<i16> {
 fn audio_analysis_thread(
     mut recognizer: SpeechRecognizer,
     audio_rx: Receiver<Vec<i16>>,
-    last_text: Arc<Mutex<Option<String>>>,
+    result_tx: mpsc::Sender<String>,
 ) {
     let chunk_size = 1600;
     let mut buffer = Vec::new();
-    let mut audio_interval = Instant::now();
     for samples in audio_rx {
         buffer.extend(samples);
         while buffer.len() >= chunk_size {
             let frame = &buffer[..chunk_size];
             if let Some(text) = recognizer.process(frame) {
                 if !text.is_empty() {
-                    log::info!("Audio analysis processing text: {text}");
-                    audio_distribute(WakeEvent { text }, last_text.clone(), &mut audio_interval);
+                    log::info!("Audio analysis result: {text}");
+                    let _ = result_tx.send(text);
                 }
             }
             buffer.drain(..chunk_size);
@@ -226,14 +183,6 @@ impl SpeechRecognizer {
         } else {
             None
         }
-    }
-
-    pub fn is_wake_word(text: &str) -> bool {
-        let lower = text.to_lowercase();
-        lower.contains("小波")
-            || ["晓波", "小博", "笑波", "晓博"]
-                .iter()
-                .any(|v| lower.contains(v))
     }
 }
 
