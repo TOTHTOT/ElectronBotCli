@@ -49,7 +49,13 @@
       "mcp__filesystem__edit_file",
       "mcp__filesystem__list_directory",
       "mcp__filesystem__move_file",
-      "Bash(cargo fmt:*)"
+      "Bash(cargo fmt:*)",
+      "Bash(RUSTUP_TOOLCHAIN=stable RUSTUP_IO_USE_LOCKS=0 rustup install:*)",
+      "Bash(cargo:*)",
+      "Bash(export:*)",
+      "Bash(~/.cargo/bin/cross build:*)",
+      "Bash(RUSTFLAGS=\"-L ./assets/module/vosk/vosk_linux_arcch64_lib\" cargo build:*)",
+      "Bash(RUSTUP_DIST_SERVER=https://static.rust-lang.org rustup target add:*)"
     ]
   }
 }
