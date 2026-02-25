@@ -82,7 +82,12 @@ impl App {
         // 启动语音识别（如果有）
         if voice_manager.is_some() {
             if let Err(e) = VoiceManager::new(
-                "assets/module/vosk/vosk-model-small-cn-0.22",
+                // SenseVoice model path
+                "assets/module/sherpa-onnx-sense-voice/model.int8.onnx",
+                // TTS model path
+                "assets/module/vits/model.onnx",
+                // TTS tokens path
+                "assets/module/vits/tokens.txt",
                 "麦克风阵列",
                 text_tx_clone,
             ) {
