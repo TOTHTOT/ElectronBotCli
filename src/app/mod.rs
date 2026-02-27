@@ -52,7 +52,7 @@ pub struct App {
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(voice_manager: Option<VoiceManager>, llm: QwenLlm) -> Self {
+    pub fn new(llm: QwenLlm) -> Self {
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
@@ -79,21 +79,16 @@ impl App {
             );
         });
 
-        // 启动语音识别（如果有）
-        if voice_manager.is_some() {
-            if let Err(e) = VoiceManager::new(
-                // SenseVoice model path
-                "assets/module/sherpa-onnx-sense-voice/model.int8.onnx",
-                // TTS model path
-                "assets/module/vits/model.onnx",
-                // TTS tokens path
-                "assets/module/vits/tokens.txt",
-                "麦克风阵列",
-                text_tx_clone,
-            ) {
-                log::warn!("Failed to init voice manager: {}", e);
-            }
-        }
+        // 启动语音识别
+        let voice_manager = VoiceManager::new(
+            "assets/module/sherpa-onnx-sense-voice/model.int8.onnx",
+            "assets/module/vits/model.onnx",
+            "assets/module/vits/tokens.txt",
+            &config.speech_name,
+            text_tx_clone,
+        )
+        .map(|v| Arc::new(v))
+        .ok();
 
         Self {
             menu_state,
@@ -108,7 +103,7 @@ impl App {
             config,
             lcd,
             popup: Popup::new(),
-            voice_manager: None,
+            voice_manager,
             voice_result_rx: Some(result_rx),
             left_focused: true,
             is_processing,

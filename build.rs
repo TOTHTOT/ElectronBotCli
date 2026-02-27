@@ -32,20 +32,16 @@ fn get_models() -> Vec<ModelConfig> {
             ],
         },
         ModelConfig {
-            name: "VITS (TTS)",
+            name: "VITS (TTS - Chinese)",
             dir: "assets/module/vits",
             files: &[
                 ModelFile {
                     name: "model.onnx",
-                    url: "https://huggingface.co/csukuangfj/vits-ljs/resolve/main/vits-ljs.onnx",
+                    url: "https://huggingface.co/csukuangfj/csmsc-vits/resolve/main/csmsc_vits.onnx",
                 },
                 ModelFile {
                     name: "tokens.txt",
-                    url: "https://huggingface.co/csukuangfj/vits-ljs/resolve/main/tokens.txt",
-                },
-                ModelFile {
-                    name: "lexicon.txt",
-                    url: "https://huggingface.co/csukuangfj/vits-ljs/resolve/main/lexicon.txt",
+                    url: "https://huggingface.co/csukuangfj/csmsc-vits/resolve/main/tokens.txt",
                 },
             ],
         },
@@ -53,6 +49,7 @@ fn get_models() -> Vec<ModelConfig> {
 }
 
 fn main() {
+    println!("start build.rs");
     // 获取项目根目录
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let project_root = Path::new(&manifest_dir);

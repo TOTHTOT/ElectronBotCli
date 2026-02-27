@@ -58,7 +58,12 @@
       "Bash(RUSTUP_DIST_SERVER=https://static.rust-lang.org rustup target add:*)",
       "mcp__filesystem__directory_tree",
       "Bash(head:*)",
-      "Bash(wget:*)"
+      "Bash(wget:*)",
+      "Bash(DOWNLOAD_ASSETS=1 cargo build:*)",
+      "Bash(LIBCLANG_PATH=\"D:/WorkSoft/LLVM/bin\" DOWNLOAD_ASSETS=1 cargo build:*)",
+      "Bash(set:*)",
+      "Bash($env:LIBCLANG_PATH=\"D:/WorkSoft/LLVM/bin\")",
+      "Bash(cmd /c:*)"
     ]
   }
 }

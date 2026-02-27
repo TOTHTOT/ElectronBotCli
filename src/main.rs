@@ -68,7 +68,7 @@ fn init_llm() -> anyhow::Result<QwenLlm> {
 ///
 /// ```
 fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, llm: QwenLlm) -> anyhow::Result<()> {
-    let mut app = app::App::new(None, llm);
+    let mut app = app::App::new(llm);
 
     let tick_rate = Duration::from_millis(20);
     while app.running {
