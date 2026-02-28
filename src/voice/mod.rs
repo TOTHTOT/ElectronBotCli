@@ -9,7 +9,9 @@ use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 pub const VAD_WINDOW_SIZE: i32 = 512;
+#[allow(dead_code)]
 pub const CHUNK_SIZE: usize = 1600; // 100ms at 16kHz
+#[allow(dead_code)]
 pub const SAMPLE_RATE: u32 = 16000;
 #[allow(dead_code)]
 pub struct VoiceManager {

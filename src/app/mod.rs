@@ -87,7 +87,7 @@ impl App {
             &config.speech_name,
             text_tx_clone,
         )
-        .map(|v| Arc::new(v))
+        .map(Arc::new)
         .ok();
 
         Self {

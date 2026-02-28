@@ -196,6 +196,7 @@ fn download_all_models(project_root: &Path) {
 
 /// 下载文件 - 跨平台
 fn download_file(url: &str, path: &Path) -> Result<(), String> {
+    // 先尝试 curl
     if let Ok(output) = Command::new("curl")
         .args(["-L", "-f", "-o"])
         .arg(path)
@@ -211,20 +212,17 @@ fn download_file(url: &str, path: &Path) -> Result<(), String> {
     #[cfg(target_os = "windows")]
     {
         let path_str = path.to_string_lossy().replace('/', "\\");
-        let ps_command = format!(
-            "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
-            url, path_str
-        );
+        let ps_command = format!("Invoke-WebRequest -Uri '{}' -OutFile '{}'", url, path_str);
         let output = Command::new("powershell")
             .args(["-Command", &ps_command])
             .output()
             .map_err(|e| format!("Failed to run PowerShell: {}", e))?;
 
         if output.status.success() {
-            return Ok(());
+            Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Download failed: {}", stderr));
+            Err(format!("Download failed: {}", stderr))
         }
     }
 
@@ -238,10 +236,10 @@ fn download_file(url: &str, path: &Path) -> Result<(), String> {
             .map_err(|e| format!("Failed to run wget: {}", e))?;
 
         if output.status.success() {
-            return Ok(());
+            Ok(())
         } else {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("Download failed: {}", stderr));
+            Err(format!("Download failed: {}", stderr))
         }
     }
 }

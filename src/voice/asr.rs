@@ -108,7 +108,7 @@ pub fn recognition_thread(
         vad.accept_waveform(samples.clone());
         if vad.is_speech() {
             buffer.extend(samples);
-        } else if buffer.len() > 0 {
+        } else if !buffer.is_empty() {
             log::info!("received a audio msg, len: {}", buffer.len());
         }
     }
