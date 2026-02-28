@@ -19,7 +19,7 @@ fn get_models() -> Vec<ModelConfig> {
     vec![
         ModelConfig {
             name: "SenseVoice (ASR)",
-            dir: "assets/module/sherpa-onnx-sense-voice",
+            dir: "assets/module/sense_voice",
             files: &[
                 ModelFile {
                     name: "model.int8.onnx",

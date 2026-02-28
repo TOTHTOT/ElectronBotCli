@@ -2,7 +2,7 @@ mod asr;
 mod tts;
 
 use crate::voice::asr::{build_audio_stream, recognition_thread};
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -38,8 +38,8 @@ impl VoiceManager {
     ///
     /// ```
     pub fn new(
-        model_path: &str,
-        _tts_model_path: &str,
+        sense_voice_model_path: String,
+        silero_vad_model_path: String,
         _tts_tokens_path: &str,
         speech_name: &str,
         result_tx: mpsc::Sender<String>,
@@ -51,9 +51,13 @@ impl VoiceManager {
         let stream = build_audio_stream(&device, volume.clone(), audio_tx)?;
         stream.play()?;
 
-        let model_path_owned = model_path.to_string();
         thread::spawn(move || {
-            recognition_thread(&model_path_owned, audio_rx, result_tx);
+            recognition_thread(
+                sense_voice_model_path,
+                silero_vad_model_path,
+                audio_rx,
+                result_tx,
+            );
         });
 
         Ok(Self {

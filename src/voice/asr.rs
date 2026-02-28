@@ -75,12 +75,13 @@ pub fn build_audio_stream(
 ///
 /// ```
 pub fn recognition_thread(
-    model_path: &str,
+    sense_voice_model_path: String,
+    silero_vad_model_path: String,
     audio_rx: Receiver<Vec<f32>>,
     _result_tx: mpsc::Sender<String>,
 ) {
     let _config = SenseVoiceConfig {
-        model: model_path.into(),
+        model: sense_voice_model_path,
         tokens: "".into(), // Will be auto-detected from model directory
         #[cfg(target_os = "windows")]
         provider: Some("cpu".into()),
@@ -97,7 +98,7 @@ pub fn recognition_thread(
     let mut buffer = Vec::new();
     // 加载静音检测模型
     let vad_config = SileroVadConfig {
-        model: "assets/module/silero_vad/silero_vad.onnx".into(),
+        model: silero_vad_model_path,
         window_size: VAD_WINDOW_SIZE,
         ..Default::default()
     };

@@ -46,8 +46,8 @@ fn main() -> anyhow::Result<()> {
 
 /// 初始化 LLM
 fn init_llm() -> anyhow::Result<QwenLlm> {
-    let mut llm = QwenLlm::load("assets/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
-    llm.load_tokenizer("assets/module/llm/qwen2/tokenizer.json")?;
+    let mut llm = QwenLlm::load("external/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
+    llm.load_tokenizer("external/module/llm/qwen2/tokenizer.json")?;
     llm.preload()?;
     Ok(llm)
 }

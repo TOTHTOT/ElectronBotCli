@@ -81,9 +81,9 @@ impl App {
 
         // 启动语音识别
         let voice_manager = VoiceManager::new(
-            "assets/module/sherpa-onnx-sense-voice/model.int8.onnx",
-            "assets/module/vits/model.onnx",
-            "assets/module/vits/tokens.txt",
+            "external/module/sense_voice/model.int8.onnx".into(),
+            "external/module/silero_vad/silero_vad.onnx".into(),
+            "external/module/vits/tokens.txt",
             &config.speech_name,
             text_tx_clone,
         )

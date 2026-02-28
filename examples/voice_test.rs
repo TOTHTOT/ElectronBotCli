@@ -85,8 +85,8 @@ fn test_asr() -> Result<(), Box<dyn std::error::Error>> {
 
     // Initialize recognizer
     let sense_config = SenseVoiceConfig {
-        model: "./assets/module/sherpa-onnx-sense-voice/model.int8.onnx".into(),
-        tokens: "./assets/module/sherpa-onnx-sense-voice/tokens.txt".into(),
+        model: "./assets/module/sense_voice/model.int8.onnx".into(),
+        tokens: "./assets/module/sense_voice/tokens.txt".into(),
         provider: Some("cpu".into()),
         ..Default::default()
     };
