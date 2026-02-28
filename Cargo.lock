@@ -320,6 +320,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "build-print"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8e6738dfb11354886f890621b4a34c0b177f75538023f7100b608ab9adbd66b"
+
+[[package]]
 name = "built"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1058,6 +1064,7 @@ version = "0.1.0"
 dependencies = [
  "BotEyes",
  "anyhow",
+ "build-print",
  "candle-core",
  "candle-transformers",
  "chrono",

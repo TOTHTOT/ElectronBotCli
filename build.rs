@@ -19,7 +19,7 @@ fn get_models() -> Vec<ModelConfig> {
     vec![
         ModelConfig {
             name: "SenseVoice (ASR)",
-            dir: "assets/module/sense_voice",
+            dir: "external/module/sense_voice",
             files: &[
                 ModelFile {
                     name: "model.int8.onnx",
@@ -32,16 +32,26 @@ fn get_models() -> Vec<ModelConfig> {
             ],
         },
         ModelConfig {
-            name: "VITS (TTS - Chinese)",
-            dir: "assets/module/vits",
+            name: "静音检测",
+            dir: "external/module/silero_vad",
             files: &[
                 ModelFile {
-                    name: "model.onnx",
-                    url: "https://huggingface.co/csukuangfj/csmsc-vits/resolve/main/csmsc_vits.onnx",
+                    name: "silero_vad.onnx",
+                    url: "https://huggingface.co/deepghs/silero-vad-onnx/resolve/main/silero_vad.onnx",
+                },
+            ],
+        },
+        ModelConfig {
+            name: "Qwen2-0.5B",
+            dir: "external/module/llm/qwen2",
+            files: &[
+                ModelFile {
+                    name: "qwen2.5-0.5b-instruct-q4_0.gguf",
+                    url: "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf",
                 },
                 ModelFile {
-                    name: "tokens.txt",
-                    url: "https://huggingface.co/csukuangfj/csmsc-vits/resolve/main/tokens.txt",
+                    name: "tokenizer.json",
+                    url: "https://huggingface.co/Qwen/Qwen2.5-0.5B/resolve/main/tokenizer.json",
                 },
             ],
         },
@@ -49,7 +59,6 @@ fn get_models() -> Vec<ModelConfig> {
 }
 
 fn main() {
-    println!("start build.rs");
     // 获取项目根目录
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     let project_root = Path::new(&manifest_dir);
@@ -58,7 +67,8 @@ fn main() {
     let download_models = should_download_models();
 
     if download_models {
-        println!("cargo:rerun-if-changed=assets/");
+        println!("cargo:rerun-if-changed=external/");
+        println!("cargo:rerun-if-changed=build.rs");
         download_all_models(project_root);
     } else {
         check_models_exist(project_root);
@@ -107,47 +117,42 @@ fn check_models_exist(project_root: &Path) {
     }
 
     if !missing.is_empty() {
-        println!("\n========================================");
-        println!("Warning: Some model files are missing:");
-        println!("========================================\n");
+        build_print::warn!("Some model files are missing:");
 
         // 按模型分组显示
         let mut current_model: &str = "";
         for (model_name, file_name, _url) in &missing {
             if *model_name != current_model {
-                if !current_model.is_empty() {
-                    println!();
-                }
                 current_model = model_name;
-                println!("[{}]", model_name);
+                build_print::info!("[{}]", model_name);
             }
-            println!("  - {}", file_name);
+            build_print::info!("  - {}", file_name);
         }
 
-        println!("\n----------------------------------------");
-        println!("To download all missing models, run:");
-        println!("  MODEL_AUTO_DOWNLOAD=1 cargo build");
-        println!("\nOr manually download from:");
+        build_print::println!("\n----------------------------------------");
+        build_print::info!("To download all missing models, run:");
+        build_print::info!("  MODEL_AUTO_DOWNLOAD=1 cargo build");
+        build_print::info!("\nOr manually download from:");
         for (_, _, url) in &missing {
-            println!("  {}", url);
+            build_print::info!("  {}", url);
         }
-        println!("========================================\n");
+        build_print::println!("========================================\n");
     }
 
-    // 告诉 Cargo 如果 assets 目录改变则重新运行
-    println!("cargo:rerun-if-changed=assets/");
+    // 告诉 Cargo 如果 external 目录改变则重新运行
+    println!("cargo:rerun-if-changed=external/");
 }
 
 /// 下载所有模型
 fn download_all_models(project_root: &Path) {
     let models = get_models();
 
-    println!("\n========================================");
-    println!("Downloading model files...");
-    println!("========================================\n");
+    build_print::println!("\n========================================");
+    build_print::println!("Downloading model files...");
+    build_print::println!("========================================\n");
 
     for model in &models {
-        println!("\n[{}]", model.name);
+        build_print::println!("\n[{}]", model.name);
 
         let model_dir = project_root.join(model.dir);
 
@@ -161,17 +166,17 @@ fn download_all_models(project_root: &Path) {
             let file_path = model_dir.join(file.name);
 
             if file_path.exists() {
-                println!("  {} already exists, skipping", file.name);
+                build_print::println!("  {} already exists, skipping", file.name);
                 continue;
             }
 
-            println!("  Downloading {}...", file.name);
+            build_print::println!("  Downloading {}...", file.name);
 
             // 使用 curl 下载
             let result = download_file(file.url, &file_path);
 
             match result {
-                Ok(_) => println!("  ✓ Downloaded {}", file.name),
+                Ok(_) => build_print::println!("  ✓ Downloaded {}", file.name),
                 Err(e) => {
                     eprintln!("  ✗ Failed to download {}: {}", file.name, e);
                     // 删除不完整的文件
@@ -181,28 +186,62 @@ fn download_all_models(project_root: &Path) {
         }
     }
 
-    println!("\n========================================");
-    println!("Model download complete!");
-    println!("========================================\n");
+    build_print::println!("\n========================================");
+    build_print::println!("Model download complete!");
+    build_print::println!("========================================\n");
 
-    // 告诉 Cargo 如果 assets 目录改变则重新运行
-    println!("cargo:rerun-if-changed=assets/");
+    // 告诉 Cargo 如果 external 目录改变则重新运行
+    println!("cargo:rerun-if-changed=external/");
 }
 
-/// 使用 curl 下载文件
+/// 下载文件 - 跨平台
 fn download_file(url: &str, path: &Path) -> Result<(), String> {
-    // 使用 curl 下载，-L 跟随重定向，-f 失败时无输出，-o 指定输出文件
-    let output = Command::new("curl")
+    if let Ok(output) = Command::new("curl")
         .args(["-L", "-f", "-o"])
         .arg(path)
         .arg(url)
         .output()
-        .map_err(|e| format!("Failed to run curl: {}", e))?;
+    {
+        if output.status.success() {
+            return Ok(());
+        }
+    }
 
-    if output.status.success() {
-        Ok(())
-    } else {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(format!("Download failed: {}", stderr))
+    // Windows: 尝试使用 PowerShell
+    #[cfg(target_os = "windows")]
+    {
+        let path_str = path.to_string_lossy().replace('/', "\\");
+        let ps_command = format!(
+            "Invoke-WebRequest -Uri '{}' -OutFile '{}'",
+            url, path_str
+        );
+        let output = Command::new("powershell")
+            .args(["-Command", &ps_command])
+            .output()
+            .map_err(|e| format!("Failed to run PowerShell: {}", e))?;
+
+        if output.status.success() {
+            return Ok(());
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Download failed: {}", stderr));
+        }
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = Command::new("wget")
+            .args(["-O"])
+            .arg(path)
+            .arg(url)
+            .output()
+            .map_err(|e| format!("Failed to run wget: {}", e))?;
+
+        if output.status.success() {
+            return Ok(());
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(format!("Download failed: {}", stderr));
+        }
     }
 }

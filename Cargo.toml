@@ -28,3 +28,6 @@ opt-level = 3
 lto = "fat"          # 深度链接优化
 codegen-units = 1    # 减少代码生成单元，增加优化机会
 panic = "abort"      # 减小二进制体积，稍微提升速度
+
+[build-dependencies]
+build-print = "1.0"
