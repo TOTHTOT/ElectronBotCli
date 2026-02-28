@@ -139,18 +139,16 @@ impl App {
         result_tx: Sender<Mood>,
         is_processing: Arc<AtomicBool>,
     ) {
-        loop {
-            if let Ok(text) = text_rx.recv() {
-                if !text.is_empty() {
-                    is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
-                    let mood = llm
-                        .lock()
-                        .unwrap()
-                        .analyze_mood(&text)
-                        .unwrap_or(Mood::Default);
-                    is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
-                    let _ = result_tx.send(mood);
-                }
+        for text in text_rx {
+            if !text.is_empty() {
+                is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
+                let mood = llm
+                    .lock()
+                    .unwrap()
+                    .analyze_mood(&text)
+                    .unwrap_or(Mood::Default);
+                is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
+                let _ = result_tx.send(mood);
             }
         }
     }
