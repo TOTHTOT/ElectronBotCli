@@ -63,7 +63,12 @@
       "Bash(LIBCLANG_PATH=\"D:/WorkSoft/LLVM/bin\" DOWNLOAD_ASSETS=1 cargo build:*)",
       "Bash(set:*)",
       "Bash($env:LIBCLANG_PATH=\"D:/WorkSoft/LLVM/bin\")",
-      "Bash(cmd /c:*)"
+      "Bash(cmd /c:*)",
+      "Bash(ssh:*)",
+      "Bash(xxd:*)",
+      "Bash(ping:*)",
+      "Bash(sudo apt:*)",
+      "Bash(ip addr:*)"
     ]
   }
 }

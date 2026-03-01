@@ -19,8 +19,8 @@ cpal = "0.17.1"
 rodio = "0.19"
 toml = "1.0.1"
 serde = { version = "1.0", features = ["derive"] }
-candle-core = "0.8"
-candle-transformers = "0.8"
+candle-core = "0.9"
+candle-transformers = "0.9"
 tokenizers = "0.21"
 
 [profile.release]

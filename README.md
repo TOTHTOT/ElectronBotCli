@@ -41,9 +41,9 @@
 # cross+docker 编译程序, cross 配置参考 Cross.toml
 cross build --target aarch64-unknown-linux-gnu --release
 # 发送编译好的程序
-scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.159:~/ElectronBotCli
-# 发送模型和词表
-scp assets/module/llm/qwen2/*  radxa@192.168.2.159:~/ElectronBotCli/assets/module/llm/qwen2
+sshpass -p 'radxa' scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.159:~/ElectronBotCli
+# 同步资源文件
+sshpass -p 'radxa' scp -r ./external radxa@192.168.2.159:~/ElectronBotCli/
 ```
 
 ## 备注

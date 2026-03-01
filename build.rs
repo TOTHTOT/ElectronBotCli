@@ -42,7 +42,7 @@ fn get_models() -> Vec<ModelConfig> {
             ],
         },
         ModelConfig {
-            name: "Qwen2-0.5B",
+            name: "Qwen2.5-0.5B",
             dir: "external/module/llm/qwen2",
             files: &[
                 ModelFile {

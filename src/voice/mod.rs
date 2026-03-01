@@ -1,4 +1,4 @@
-mod asr;
+pub mod asr;
 mod tts;
 
 use crate::voice::asr::{build_audio_stream, recognition_thread};
@@ -48,8 +48,7 @@ impl VoiceManager {
     ) -> Result<Self> {
         let device = find_input_device(speech_name)?; // 查找输入麦克风
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
-                                                  // 原始音频数据传输通道
-        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
+        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
         let stream = build_audio_stream(&device, volume.clone(), audio_tx)?;
         stream.play()?;
 

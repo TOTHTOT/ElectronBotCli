@@ -37,7 +37,10 @@ fn main() -> anyhow::Result<()> {
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    run(&mut terminal, init_llm()?)?;
+    if let Err(e) = run(&mut terminal, init_llm()?) {
+        log::error!("load llm failed: {e}");
+        return Err(e);
+    }
     disable_raw_mode()?;
     io::stdout().execute(LeaveAlternateScreen)?;
 
