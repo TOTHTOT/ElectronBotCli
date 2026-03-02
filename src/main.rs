@@ -8,6 +8,7 @@ mod robot;
 mod ui;
 mod ui_components;
 mod voice;
+mod web;
 
 use crate::llm::QwenLlm;
 use crossterm::event::KeyModifiers;

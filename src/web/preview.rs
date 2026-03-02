@@ -232,20 +232,31 @@ fn grayscale_to_jpeg(gray_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 fn bgr_to_jpeg(bgr_data: &[u8]) -> Vec<u8> {
     use image::{ImageBuffer, Rgb};
 
+    // 调试: 显示数据大小
+    let data_len = bgr_data.len();
+    log::info!("Frame data size: {} bytes", data_len);
+
     // 检查是否是 MJPEG 压缩数据 (JPEG 以 FF D8 开头)
     if bgr_data.len() > 2 && bgr_data[0] == 0xFF && bgr_data[1] == 0xD8 {
         log::debug!("Detected MJPEG frame, {} bytes", bgr_data.len());
         return bgr_data.to_vec(); // 直接返回 JPEG 数据
     }
 
-    // 尝试多种常见分辨率
+    // 尝试多种常见分辨率 (优先 640x480 速度最快)
     let resolutions = [
-        (800, 768),
         (640, 480),
-        (320, 240),
         (1280, 720),
         (1920, 1080),
+        (800, 768),
+        (320, 240),
     ];
+
+    // 显示每种分辨率对应的数据大小
+    for (width, height) in resolutions.iter() {
+        let rgb_size = width * height * 3;
+        let yuv_size = width * height * 2;
+        log::info!("  {}x{}: RGB24={}, YUYV={}", width, height, rgb_size, yuv_size);
+    }
 
     for (width, height) in resolutions.iter() {
         let expected_len = (*width * *height * 3) as usize;
@@ -269,37 +280,42 @@ fn bgr_to_jpeg(bgr_data: &[u8]) -> Vec<u8> {
     Vec::new()
 }
 
-/// YUYV (YUV422) 转 RGB
+/// YUYV (YUV422) 转 RGB - 标准 USB 摄像头格式
 fn yuyv_to_rgb(yuyv_data: &[u8], width: u32, height: u32) -> Vec<u8> {
-    let mut rgb_data = Vec::with_capacity((width * height * 3) as usize);
+    use image::{ImageBuffer, Rgb};
 
-    for chunk in yuyv_data.chunks(4) {
-        if chunk.len() == 4 {
-            let y0 = chunk[0] as i32;
-            let u = chunk[1] as i32 - 128;
-            let y1 = chunk[2] as i32;
-            let v = chunk[3] as i32 - 128;
+    // YUYV 格式: Y U Y V (每4字节表示2个像素)
+    let mut img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::new(width, height);
 
-            // Y0 转 RGB
-            let r0 = (y0 + ((v * 143 + 64) >> 7)).clamp(0, 255) as u8;
-            let g0 = (y0 - ((u * 45 + v * 91 + 64) >> 7)).clamp(0, 255) as u8;
-            let b0 = (y0 + ((u * 181 + 64) >> 7)).clamp(0, 255) as u8;
+    for y in 0..height {
+        for x in (0..width).step_by(2) {
+            let idx = ((y * width + x) * 2) as usize;
+            if idx + 3 < yuyv_data.len() {
+                // YUYV: Y 在前, U V 在后
+                // 尝试交换 U 和 V (Y V Y U)
+                let y0 = yuyv_data[idx] as f32;
+                let v = yuyv_data[idx + 1] as f32;  // 原来这里是 U
+                let y1 = yuyv_data[idx + 2] as f32;
+                let u = yuyv_data[idx + 3] as f32;  // 原来这里是 V
 
-            // Y1 转 RGB
-            let r1 = (y1 + ((v * 143 + 64) >> 7)).clamp(0, 255) as u8;
-            let g1 = (y1 - ((u * 45 + v * 91 + 64) >> 7)).clamp(0, 255) as u8;
-            let b1 = (y1 + ((u * 181 + 64) >> 7)).clamp(0, 255) as u8;
+                // YUV 到 RGB (BT.601)
+                let r0 = (y0 + 1.402 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+                let g0 = (y0 - 0.344136 * (u - 128.0) - 0.714136 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+                let b0 = (y0 + 1.772 * (u - 128.0)).clamp(0.0, 255.0) as u8;
 
-            rgb_data.push(r0);
-            rgb_data.push(g0);
-            rgb_data.push(b0);
-            rgb_data.push(r1);
-            rgb_data.push(g1);
-            rgb_data.push(b1);
+                img.put_pixel(x, y, Rgb([r0, g0, b0]));
+
+                if x + 1 < width {
+                    let r1 = (y1 + 1.402 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+                    let g1 = (y1 - 0.344136 * (u - 128.0) - 0.714136 * (v - 128.0)).clamp(0.0, 255.0) as u8;
+                    let b1 = (y1 + 1.772 * (u - 128.0)).clamp(0.0, 255.0) as u8;
+                    img.put_pixel(x + 1, y, Rgb([r1, g1, b1]));
+                }
+            }
         }
     }
 
-    rgb_data
+    img.into_raw()
 }
 
 fn bgr_to_jpeg_with_size(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
@@ -396,9 +412,18 @@ impl WebPreview {
 
         log::info!("Camera initialized, starting capture loop");
 
+        let mut frame_count = 0;
+
         loop {
             if !state.running.load(Ordering::Relaxed) {
                 break;
+            }
+
+            // 跳帧处理: 每3帧处理1帧，大幅减少CPU负担
+            frame_count += 1;
+            if frame_count % 3 != 0 {
+                std::thread::sleep(std::time::Duration::from_millis(5));
+                continue;
             }
 
             match camera.frame() {
@@ -428,11 +453,13 @@ impl WebPreview {
     fn init_camera() -> Option<Camera> {
         log::info!("Trying to initialize camera...");
 
-        // 尝试多种分辨率
-        let resolutions = [(800, 768), (640, 480), (320, 240), (1280, 720), (1920, 1080)];
+        // 尝试多种分辨率 (优先 1080p)
+        let resolutions = [(640, 480), (1280, 720), (1920, 1080), (800, 768), (320, 240)];
 
+        // 尝试 YUYV 格式
+        log::info!("Trying YUYV format...");
         for (width, height) in resolutions.iter() {
-            log::info!("Trying resolution {}x{}", width, height);
+            log::info!("Trying YUYV {}x{}", width, height);
 
             let query = nokhwa::utils::RequestedFormat::new::<YuyvFormat>(
                 nokhwa::utils::RequestedFormatType::HighestResolution(
@@ -442,11 +469,11 @@ impl WebPreview {
 
             match Camera::new(nokhwa::utils::CameraIndex::Index(0), query) {
                 Ok(cam) => {
-                    log::info!("Camera opened successfully with {}x{}", width, height);
+                    log::info!("Camera opened with YUYV {}x{}", width, height);
                     return Some(cam);
                 }
                 Err(e) => {
-                    log::warn!("Failed to open camera with {}x{}: {:?}", width, height, e);
+                    log::warn!("Failed to open camera with YUYV {}x{}: {:?}", width, height, e);
                 }
             }
         }

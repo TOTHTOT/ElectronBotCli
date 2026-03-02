@@ -5,6 +5,7 @@ pub mod menu;
 use crate::llm::QwenLlm;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
+use crate::web::WebPreview;
 use std::default::Default;
 use std::sync::{Arc, Mutex};
 
@@ -17,8 +18,7 @@ use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::atomic::AtomicBool;
-use std::sync::mpsc;
-use std::sync::mpsc::{Sender, SyncSender};
+use std::sync::mpsc::{self, Sender, SyncSender};
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -48,6 +48,10 @@ pub struct App {
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
+    /// Web 预览服务器
+    web_preview: Option<Arc<WebPreview>>,
+    /// LCD 帧缓存（用于 Web 预览）
+    lcd_frame_cache: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
 }
 
 #[allow(dead_code)]
@@ -90,6 +94,21 @@ impl App {
         .map(Arc::new)
         .ok();
 
+        // 创建 Web 预览服务器
+        let web_port = 8080;
+        let web_preview = WebPreview::new(web_port);
+        let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
+
+        // 启动 Web 服务器（异步运行）
+        let web_preview_arc = Arc::new(web_preview.clone());
+        let web_preview_for_thread = (*web_preview_arc).clone();
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(web_preview_for_thread.run());
+        });
+
+        log::info!("Web preview server started at http://localhost:{}", web_port);
+
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
@@ -114,6 +133,8 @@ impl App {
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
+            web_preview: Some(web_preview_arc),
+            lcd_frame_cache,
         }
     }
 
@@ -193,6 +214,12 @@ impl App {
     pub fn send_frame(&mut self) -> anyhow::Result<()> {
         if let Some(tx) = &self.comm_tx {
             let pixels = self.lcd.frame_vec();
+            // 发送 LCD 帧到 Web 预览服务器
+            if let Some(ref cache) = self.lcd_frame_cache {
+                if let Ok(mut guard) = cache.lock() {
+                    *guard = Some(pixels.clone());
+                }
+            }
             let config = self.joint.config();
             tx.try_send((pixels, config))?;
         }
