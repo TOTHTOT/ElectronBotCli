@@ -64,6 +64,13 @@
       "Bash(set:*)",
       "Bash($env:LIBCLANG_PATH=\"D:/WorkSoft/LLVM/bin\")",
       "Bash(cmd /c:*)",
+      "Bash(netstat:*)",
+      "Bash(start:*)",
+      "Bash(ping:*)",
+      "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
+      "Bash(ele_bot.exe)",
+      "Bash(powershell:*)"
+      "Bash(cmd /c:*)",
       "Bash(ssh:*)",
       "Bash(xxd:*)",
       "Bash(ping:*)",

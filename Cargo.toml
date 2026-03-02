@@ -23,6 +23,23 @@ candle-core = "0.9"
 candle-transformers = "0.9"
 tokenizers = "0.21"
 
+# Web server for preview
+axum = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+futures-util = "0.3"
+base64 = "0.22"
+async-stream = "0.3"
+
+# Camera capture
+[target.'cfg(windows)'.dependencies]
+nokhwa = { version = "0.10", features = ["input-native"] }
+
+[target.'cfg(unix)'.dependencies]
+nokhwa = { version = "0.10", features = ["input-v4l"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+nokhwa = { version = "0.10", features = ["input-avfoundation"] }
+
 [profile.release]
 opt-level = 3
 lto = "fat"          # 深度链接优化
