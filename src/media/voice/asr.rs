@@ -1,4 +1,4 @@
-use crate::voice::VAD_WINDOW_SIZE;
+use crate::media::voice::VAD_WINDOW_SIZE;
 use cpal::traits::DeviceTrait;
 use cpal::{Device, Stream};
 use sherpa_rs::sense_voice::SenseVoiceConfig;

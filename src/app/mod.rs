@@ -12,8 +12,9 @@ use std::sync::{Arc, Mutex};
 // 导出菜单
 pub use menu::*;
 
-use crate::voice::play_beep;
-use crate::voice::VoiceManager;
+use crate::media::video::VideoCapture;
+use crate::media::voice::play_beep;
+use crate::media::voice::VoiceManager;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
@@ -49,7 +50,7 @@ pub struct App {
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
     /// Web 预览服务器
-    web_preview: Option<Arc<WebPreview>>,
+    _web_preview: Option<Arc<WebPreview>>,
     /// LCD 帧缓存（用于 Web 预览）
     lcd_frame_cache: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
 }
@@ -94,9 +95,17 @@ impl App {
         .map(Arc::new)
         .ok();
 
-        // 创建 Web 预览服务器
-        let web_port = 8080;
-        let web_preview = WebPreview::new(web_port);
+        // 创建视频捕获器（None 表示使用默认摄像头）
+        let mut video_capture = VideoCapture::new(None);
+        // 获取帧缓存和分辨率
+        let web_preview = WebPreview::new(
+            8080,
+            Some(video_capture.frame_cache()),
+            video_capture.resolution_arc(),
+        );
+        // 启动视频捕获
+        video_capture.start_capture_frames_thread();
+
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 
         // 启动 Web 服务器（异步运行）
@@ -106,9 +115,6 @@ impl App {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(web_preview_for_thread.run());
         });
-
-        log::info!("Web preview server started at http://localhost:{}", web_port);
-
         Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
@@ -133,7 +139,7 @@ impl App {
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
-            web_preview: Some(web_preview_arc),
+            _web_preview: Some(web_preview_arc),
             lcd_frame_cache,
         }
     }

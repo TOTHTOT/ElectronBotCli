@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2021"
 build = "build.rs"
 
+[features]
+default = []
+fps-counter = []
+
 [dependencies]
 ratatui = "0.30.0"
 crossterm = "0.29.0"
@@ -42,9 +46,12 @@ nokhwa = { version = "0.10", features = ["input-avfoundation"] }
 
 [profile.release]
 opt-level = 3
-lto = "fat"          # 深度链接优化
-codegen-units = 1    # 减少代码生成单元，增加优化机会
+#lto = "fat"          # 深度链接优化
+#codegen-units = 1    # 减少代码生成单元，增加优化机会
 panic = "abort"      # 减小二进制体积，稍微提升速度
+# 提高了编译速度
+lto = "thin"       # 改用 thin LTO
+codegen-units = 16 # 增加并行度
 
 [build-dependencies]
 build-print = "1.0"

@@ -5,10 +5,12 @@
       <w>clippy</w>
       <w>endoftext</w>
       <w>gguf</w>
+      <w>nokhwa</w>
       <w>rknn</w>
       <w>silero</w>
       <w>tothtot</w>
       <w>vosk</w>
+      <w>yuyv</w>
     </words>
   </dictionary>
 </component>

@@ -47,8 +47,8 @@ sshpass -p 'radxa' scp -r ./external radxa@192.168.2.159:~/ElectronBotCli/
 ```
 
 ## 备注
-1. 使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.
-
+-  ~~使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.~~
+- 电子的摄像头实际上只有480p8帧.
 
 ### 资源下载 
 1. [qwen2-0.5b模型下载](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf)

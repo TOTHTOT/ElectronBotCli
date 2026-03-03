@@ -31,12 +31,10 @@
       "Bash(CC=aarch64-linux-gnu-gcc cargo:*)",
       "Bash(cargo install:*)",
       "Bash(cross build:*)",
-      "Bash(cargo check:*)",
       "WebFetch(domain:docs.rs)",
       "WebFetch(domain:raw.githubusercontent.com)",
       "Bash(cargo run:*)",
       "Bash(timeout:*)",
-      "Bash(cargo build:*)",
       "Bash(./target/release/ele_bot.exe:*)",
       "Bash(tasklist:*)",
       "WebFetch(domain:api.github.com)",
@@ -69,13 +67,12 @@
       "Bash(ping:*)",
       "WebFetch(domain:minimax-algeng-chat-tts.oss-cn-wulanchabu.aliyuncs.com)",
       "Bash(ele_bot.exe)",
-      "Bash(powershell:*)"
-      "Bash(cmd /c:*)",
+      "Bash(powershell:*)",
       "Bash(ssh:*)",
       "Bash(xxd:*)",
-      "Bash(ping:*)",
       "Bash(sudo apt:*)",
-      "Bash(ip addr:*)"
+      "Bash(ip addr:*)",
+      "Bash(echo:*)"
     ]
   }
 }

@@ -4,10 +4,10 @@ mod app;
 mod emotion;
 mod input;
 mod llm;
+mod media;
 mod robot;
 mod ui;
 mod ui_components;
-mod voice;
 mod web;
 
 use crate::llm::QwenLlm;
