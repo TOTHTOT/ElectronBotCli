@@ -1,19 +1,20 @@
 //! 视频模块 - 类型定义
 
+use bytes::Bytes;
 use std::sync::{Arc, Mutex};
 
-/// 帧数据 - 区分是否已经是 JPEG 编码
+/// 帧数据 - 使用 Bytes 避免内存复制
 #[derive(Debug, Clone)]
 pub enum FrameData {
     /// 已经是 JPEG 编码的数据，浏览器可直接显示
-    Jpeg(Vec<u8>),
+    Jpeg(Bytes),
     /// 原始 BGR 数据，用于图像识别等后续处理
-    RawBgr(Vec<u8>),
+    RawBgr(Bytes),
 }
 
 impl FrameData {
-    /// 获取 JPEG 数据（如果已经是 JPEG 则直接返回，否则返回 None）
-    pub fn as_jpeg(&self) -> Option<&Vec<u8>> {
+    /// 获取 JPEG 数据
+    pub fn as_jpeg(&self) -> Option<&Bytes> {
         match self {
             FrameData::Jpeg(data) => Some(data),
             FrameData::RawBgr(_) => None,
@@ -21,7 +22,7 @@ impl FrameData {
     }
 
     /// 获取原始 BGR 数据
-    pub fn as_raw_bgr(&self) -> Option<&Vec<u8>> {
+    pub fn as_raw_bgr(&self) -> Option<&Bytes> {
         match self {
             FrameData::Jpeg(_) => None,
             FrameData::RawBgr(data) => Some(data),
@@ -35,8 +36,9 @@ impl FrameData {
     }
 }
 
-/// 帧缓存类型 - 存储 FrameData 而非原始 Vec
+/// 帧缓存类型 - 使用共享缓存
 pub type FrameCache = Arc<Mutex<Option<FrameData>>>;
+
 /// 摄像头支持的格式和分辨率
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

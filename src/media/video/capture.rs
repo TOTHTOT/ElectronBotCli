@@ -1,6 +1,7 @@
 //! 视频模块 - 摄像头捕获
 
-use crate::media::video::encode::bgr_to_jpeg;
+use bytes::Bytes;
+
 use crate::media::video::process::{process_frame, rgb_to_bgr};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
 use nokhwa::pixel_format::RgbFormat;
@@ -44,9 +45,10 @@ impl FrameRateCounter {
     }
 }
 
-/// 视频捕获器
+/// 视频捕获器 - 使用共享缓存
 pub struct VideoCapture {
-    frame_cache: FrameCache, // 帧缓存
+    /// 帧缓存
+    frame_cache: FrameCache,
     /// 运行标志
     running: Arc<AtomicBool>,
     /// 摄像头名称
@@ -136,27 +138,6 @@ impl VideoCapture {
         }
         formats
     }
-
-    /// 获取当前帧的 JPEG 编码
-    /// 如果数据已经是 JPEG（MJPEG 格式），直接返回
-    /// 否则编码为 JPEG
-    pub fn get_jpeg_frame(&self, quality: u8) -> Option<Vec<u8>> {
-        let guard = self.frame_cache.lock().ok()?;
-        let frame_data = guard.as_ref()?;
-
-        // 如果已经是 JPEG，直接返回
-        if let Some(jpeg) = frame_data.as_jpeg() {
-            return Some(jpeg.clone());
-        }
-
-        // 否则需要编码
-        let bgr_data = frame_data.as_raw_bgr()?;
-        let (width, height) = self.resolution();
-        if width == 0 || height == 0 {
-            return None;
-        }
-        bgr_to_jpeg(bgr_data, width, height, quality)
-    }
 }
 
 /// 打开摄像头
@@ -219,6 +200,7 @@ fn capture_frames(
             log::info!("Camera FPS: {:.1}", fps);
         }
 
+        // 写入帧缓存
         let mut guard = frame_cache.lock().unwrap();
         *guard = Some(frame_data);
     }
@@ -240,38 +222,41 @@ fn process_frame_by_format(
                 "Frame: {width}x{height}, MJPEG, {} bytes",
                 frame.buffer().len()
             );
-            FrameData::Jpeg(frame.buffer().to_vec())
+            FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer()))
         }
         FrameFormat::YUYV | FrameFormat::NV12 => {
             // YUV 格式需要解码
-            log::debug!("Frame: {width}x{height}, len: {}, YUV, decoding...", frame.buffer().len());
+            log::debug!(
+                "Frame: {width}x{height}, len: {}, YUV, decoding...",
+                frame.buffer().len()
+            );
             let rgb_data = match frame.decode_image::<RgbFormat>() {
                 Ok(img_buf) => img_buf.into_raw(),
                 Err(e) => {
                     log::warn!("Failed to decode YUV frame: {:?}", e);
-                    return FrameData::RawBgr(Vec::new());
+                    return FrameData::RawBgr(Bytes::new());
                 }
             };
             // RGB -> BGR
             let bgr = rgb_to_bgr(&rgb_data, width, height);
             let processed = process_frame(bgr, width, height);
-            FrameData::RawBgr(processed)
+            FrameData::RawBgr(Bytes::from(processed))
         }
         FrameFormat::RAWRGB | FrameFormat::RAWBGR => {
             // 原始 RGB/BGR 格式
             log::debug!("Frame: {}x{}, Raw RGB/BGR", width, height);
             let bgr = if format == FrameFormat::RAWBGR {
-                frame.buffer().to_vec()
+                Bytes::copy_from_slice(frame.buffer())
             } else {
-                rgb_to_bgr(frame.buffer(), width, height)
+                Bytes::from(rgb_to_bgr(frame.buffer(), width, height))
             };
-            let processed = process_frame(bgr, width, height);
-            FrameData::RawBgr(processed)
+            let processed = process_frame(bgr.to_vec(), width, height);
+            FrameData::RawBgr(Bytes::from(processed))
         }
         FrameFormat::GRAY => {
             // 灰度格式
             log::debug!("Frame: {}x{}, GRAY", width, height);
-            FrameData::RawBgr(frame.buffer().to_vec())
+            FrameData::RawBgr(Bytes::copy_from_slice(frame.buffer()))
         }
     }
 }

@@ -8,24 +8,23 @@ use axum::{
     routing::get,
     Router,
 };
+use bytes::Bytes;
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::media::video::types::FrameData;
+use crate::media::video::types::FrameCache;
 use base64::Engine as _;
 
-/// LCD 帧缓存（使用 std::sync::Mutex 以便从同步代码写入）
+/// LCD 帧缓存
 type LcdFrameCache = Arc<Mutex<Option<Vec<u8>>>>;
-/// 摄像头帧缓存 - 使用 FrameData 以支持 MJPEG 直通
-type CameraFrameCache = Arc<Mutex<Option<FrameData>>>;
 
 /// Web 预览服务器状态
 pub struct WebPreviewState {
     /// LCD 帧缓存
     pub lcd_frame: LcdFrameCache,
     /// 摄像头帧缓存
-    pub camera_frame: CameraFrameCache,
+    pub camera_frame: FrameCache,
     /// 服务器运行标志
     pub running: Arc<AtomicBool>,
     /// 摄像头分辨率 (width, height)
@@ -33,16 +32,16 @@ pub struct WebPreviewState {
 }
 
 impl WebPreviewState {
-    pub fn new(camera_resolution: Arc<Mutex<(u32, u32)>>) -> Self {
+    pub fn new(camera_resolution: Arc<Mutex<(u32, u32)>>, camera_frame: FrameCache) -> Self {
         Self {
             lcd_frame: Arc::new(Mutex::new(None)),
-            camera_frame: Arc::new(Mutex::new(None)),
+            camera_frame,
             running: Arc::new(AtomicBool::new(false)),
             camera_resolution,
         }
     }
 
-    /// 获取 LCD 帧缓存的 Arc 句柄（用于从 App 写入）
+    /// 获取 LCD 帧缓存的 Arc 句柄
     pub fn lcd_frame(&self) -> LcdFrameCache {
         self.lcd_frame.clone()
     }
@@ -203,7 +202,7 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
                     let (width, height) = *resolution.lock().unwrap();
                     bgr_to_jpeg_with_size(bgr_data, width, height)
                 } else {
-                    Vec::new()
+                    Bytes::new()
                 };
 
                 if jpeg.is_empty() {
@@ -224,7 +223,7 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
 }
 
 /// 将灰度帧转换为 JPEG
-fn grayscale_to_jpeg(gray_data: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn grayscale_to_jpeg(gray_data: &[u8], width: u32, height: u32) -> Bytes {
     use image::{ImageBuffer, Luma};
 
     let img: ImageBuffer<Luma<u8>, Vec<u8>> =
@@ -236,13 +235,13 @@ fn grayscale_to_jpeg(gray_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 
     if let Err(e) = img.write_to(&mut cursor, image::ImageFormat::Jpeg) {
         log::error!("Failed to encode JPEG: {}", e);
-        return Vec::new();
+        return Bytes::new();
     }
 
-    jpeg_bytes
+    Bytes::from(jpeg_bytes)
 }
 
-fn bgr_to_jpeg_with_size(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
+fn bgr_to_jpeg_with_size(bgr_data: &Bytes, width: u32, height: u32) -> Bytes {
     use image::{ImageBuffer, Rgb};
 
     // 转换为 RGB
@@ -259,10 +258,10 @@ fn bgr_to_jpeg_with_size(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 
     if let Err(e) = img.write_to(&mut cursor, image::ImageFormat::Jpeg) {
         log::error!("Failed to encode JPEG: {}", e);
-        return Vec::new();
+        return Bytes::new();
     }
 
-    jpeg_bytes
+    Bytes::from(jpeg_bytes)
 }
 
 /// Web 预览服务器
@@ -278,23 +277,14 @@ impl WebPreview {
     ///
     /// # Arguments
     /// * `port` - 服务器端口
-    /// * `camera_frame_cache` - 可选的摄像头帧缓存（由 VideoCapture 提供）
+    /// * `camera_frame` - 摄像头帧缓存（由 VideoCapture 提供）
     /// * `camera_resolution` - 摄像头分辨率 (width, height)
     pub fn new(
         port: u16,
-        camera_frame_cache: Option<CameraFrameCache>,
+        camera_frame: FrameCache,
         camera_resolution: Arc<Mutex<(u32, u32)>>,
     ) -> Self {
-        let state = if let Some(cache) = camera_frame_cache {
-            Arc::new(WebPreviewState {
-                lcd_frame: Arc::new(Mutex::new(None)),
-                camera_frame: cache,
-                running: Arc::new(AtomicBool::new(false)),
-                camera_resolution,
-            })
-        } else {
-            Arc::new(WebPreviewState::new(camera_resolution))
-        };
+        let state = Arc::new(WebPreviewState::new(camera_resolution, camera_frame));
 
         Self { state, port }
     }

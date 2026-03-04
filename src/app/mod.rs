@@ -100,7 +100,7 @@ impl App {
         // 获取帧缓存和分辨率
         let web_preview = WebPreview::new(
             8080,
-            Some(video_capture.frame_cache()),
+            video_capture.frame_cache(),
             video_capture.resolution_arc(),
         );
         // 启动视频捕获

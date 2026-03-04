@@ -5,7 +5,7 @@ edition = "2021"
 build = "build.rs"
 
 [features]
-default = ["fps-counter"]
+default = []
 fps-counter = []
 
 [dependencies]
