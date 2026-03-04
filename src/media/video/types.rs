@@ -37,17 +37,6 @@ impl FrameData {
 
 /// 帧缓存类型 - 存储 FrameData 而非原始 Vec
 pub type FrameCache = Arc<Mutex<Option<FrameData>>>;
-
-/// 摄像头设备信息
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
-pub struct CameraInfo {
-    /// 设备索引或名称
-    pub index: String,
-    /// 设备友好名称
-    pub friendly_name: Option<String>,
-}
-
 /// 摄像头支持的格式和分辨率
 #[allow(dead_code)]
 #[derive(Debug, Clone)]

@@ -8,4 +8,4 @@ pub mod types;
 pub use capture::VideoCapture;
 // 导出类型供外部使用
 #[allow(unused_imports)]
-pub use types::{CameraFormat, CameraInfo, FrameCache};
+pub use types::{CameraFormat, FrameCache};

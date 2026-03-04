@@ -2,14 +2,12 @@
 
 use crate::media::video::encode::bgr_to_jpeg;
 use crate::media::video::process::{process_frame, rgb_to_bgr};
-use crate::media::video::types::{
-    CameraFormat as LocalCameraFormat, CameraInfo, FrameCache, FrameData,
-};
-
+use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
 use nokhwa::pixel_format::RgbFormat;
-use nokhwa::utils::{CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType};
-use nokhwa::Camera;
-
+use nokhwa::utils::{
+    ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
+};
+use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -113,22 +111,8 @@ impl VideoCapture {
     }
 
     /// 列出可用摄像头
-    pub fn list_cameras() -> Vec<CameraInfo> {
-        let mut cameras = Vec::new();
-
-        for i in 0..10 {
-            let index = CameraIndex::Index(i as u32);
-            let query = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
-
-            if Camera::new(index, query).is_ok() {
-                cameras.push(CameraInfo {
-                    index: i.to_string(),
-                    friendly_name: None,
-                });
-            }
-        }
-
-        cameras
+    pub fn list_cameras() -> anyhow::Result<Vec<CameraInfo>> {
+        Ok(query(ApiBackend::Auto)?)
     }
 
     /// 获取摄像头支持的格式列表
@@ -150,7 +134,6 @@ impl VideoCapture {
                 }
             }
         }
-
         formats
     }
 
@@ -177,23 +160,16 @@ impl VideoCapture {
 }
 
 /// 打开摄像头
-fn open_camera_default(device_name: Option<&str>) -> Option<Camera> {
+fn open_camera_default(device_name: Option<&str>) -> anyhow::Result<Camera> {
+    let cameras = VideoCapture::list_cameras()?;
+    log::info!("Available cameras: {:?}", cameras);
     let index = match device_name {
         Some(name) => CameraIndex::String(name.to_string()),
         None => CameraIndex::Index(0),
     };
 
     let query = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
-    match Camera::new(index, query) {
-        Ok(c) => {
-            log::info!("Camera opened with auto format");
-            Some(c)
-        }
-        Err(e) => {
-            log::error!("Failed to open camera: {e:?}");
-            None
-        }
-    }
+    Ok(Camera::new(index, query)?)
 }
 
 /// 捕获帧循环
@@ -204,9 +180,9 @@ fn capture_frames(
     resolution: Arc<Mutex<(u32, u32)>>,
 ) {
     let mut camera = match open_camera_default(device_name.as_deref()) {
-        Some(c) => c,
-        None => {
-            log::error!("Could not open camera in capture loop");
+        Ok(c) => c,
+        Err(e) => {
+            log::error!("Could not open camera in capture loop, error: {e}");
             return;
         }
     };
@@ -261,16 +237,14 @@ fn process_frame_by_format(
         FrameFormat::MJPEG => {
             // MJPEG 已经是压缩的 JPEG 数据，浏览器可直接显示
             log::debug!(
-                "Frame: {}x{}, MJPEG, {} bytes",
-                width,
-                height,
+                "Frame: {width}x{height}, MJPEG, {} bytes",
                 frame.buffer().len()
             );
             FrameData::Jpeg(frame.buffer().to_vec())
         }
         FrameFormat::YUYV | FrameFormat::NV12 => {
             // YUV 格式需要解码
-            log::debug!("Frame: {width}x{height}, YUV, decoding...");
+            log::debug!("Frame: {width}x{height}, len: {}, YUV, decoding...", frame.buffer().len());
             let rgb_data = match frame.decode_image::<RgbFormat>() {
                 Ok(img_buf) => img_buf.into_raw(),
                 Err(e) => {
