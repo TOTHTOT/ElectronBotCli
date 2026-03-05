@@ -55,6 +55,16 @@ fn get_models() -> Vec<ModelConfig> {
                 },
             ],
         },
+        ModelConfig {
+            name: "yunet",
+            dir: "external/module/video/",
+            files: &[
+                ModelFile {
+                    name: "face_detection_yunet_2023mar.onnx",
+                    url: "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
+                },
+            ],
+        },
     ]
 }
 
