@@ -43,9 +43,9 @@ impl ModelManager {
                 filename: "tokenizer.json",
             },
             ModelEntry {
-                key: "blazeface",
-                repo_id: "garavv/blazeface-onnx",
-                filename: "blaze.onnx",
+                key: "yolo_face",
+                repo_id: "deepghs/yolo-face",
+                filename: "yolov8n-face/model.onnx",
             },
         ];
 
@@ -53,7 +53,12 @@ impl ModelManager {
 
         for entry in &registry {
             let repo = api.model(entry.repo_id.to_string());
-            log::info!("正在下载 [{}] from {}/{} ...", entry.key, entry.repo_id, entry.filename);
+            log::info!(
+                "正在下载 [{}] from {}/{} ...",
+                entry.key,
+                entry.repo_id,
+                entry.filename
+            );
             match repo.get(entry.filename) {
                 Ok(path) => {
                     log::info!("✓ 资源就绪 [{}]: {:?}", entry.key, path);
