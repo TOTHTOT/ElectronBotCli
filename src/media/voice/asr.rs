@@ -3,6 +3,7 @@ use cpal::traits::DeviceTrait;
 use cpal::{Device, Stream};
 use sherpa_rs::sense_voice::SenseVoiceConfig;
 use sherpa_rs::silero_vad::{SileroVad, SileroVadConfig};
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender};
 use std::sync::{mpsc, Arc};
@@ -75,13 +76,16 @@ pub fn build_audio_stream(
 ///
 /// ```
 pub fn recognition_thread(
-    sense_voice_model_path: String,
-    silero_vad_model_path: String,
+    sense_voice_model_path: PathBuf,
+    silero_vad_model_path: PathBuf,
     audio_rx: Receiver<Vec<f32>>,
     _result_tx: mpsc::Sender<String>,
 ) {
     let _config = SenseVoiceConfig {
-        model: sense_voice_model_path,
+        model: sense_voice_model_path
+            .to_str()
+            .expect("sense_voice_model_path illegal")
+            .to_string(),
         tokens: "".into(), // Will be auto-detected from model directory
         #[cfg(target_os = "windows")]
         provider: Some("cpu".into()),
@@ -98,7 +102,10 @@ pub fn recognition_thread(
     let mut buffer = Vec::new();
     // 加载静音检测模型
     let vad_config = SileroVadConfig {
-        model: silero_vad_model_path,
+        model: silero_vad_model_path
+            .to_str()
+            .expect("silero_vad_model_path illegal")
+            .to_string(),
         window_size: VAD_WINDOW_SIZE,
         ..Default::default()
     };

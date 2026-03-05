@@ -5,12 +5,13 @@ mod emotion;
 mod input;
 mod llm;
 mod media;
+mod model_manager;
 mod robot;
 mod ui;
 mod ui_components;
 mod web;
 
-use crate::llm::QwenLlm;
+use crate::model_manager::ModelManager;
 use crossterm::event::KeyModifiers;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -34,12 +35,15 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
 
+    // 使用 ModelManager 统一管理模型
+    let mm = ModelManager::init()?;
+
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    if let Err(e) = run(&mut terminal, init_llm()?) {
-        log::error!("load llm failed: {e}");
+    if let Err(e) = run(&mut terminal, mm) {
+        log::error!("app failed: {e}");
         return Err(e);
     }
     disable_raw_mode()?;
@@ -48,31 +52,10 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// 初始化 LLM
-fn init_llm() -> anyhow::Result<QwenLlm> {
-    let mut llm = QwenLlm::load("external/module/llm/qwen2/qwen2.5-0.5b-instruct-q4_0.gguf")?;
-    llm.load_tokenizer("external/module/llm/qwen2/tokenizer.json")?;
-    llm.preload()?;
-    Ok(llm)
-}
-
 /// 主线程
 /// 实现页面渲染, 按键事件, 机器人数据发送
-///
-/// # Arguments
-///
-/// * `terminal`:
-/// * `llm`:
-///
-/// returns: Result<(), Error>
-///
-/// # Examples
-///
-/// ```
-///
-/// ```
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, llm: QwenLlm) -> anyhow::Result<()> {
-    let mut app = app::App::new(llm);
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, mm: ModelManager) -> anyhow::Result<()> {
+    let mut app = app::App::new(mm);
 
     let tick_rate = Duration::from_millis(20);
     while app.running {

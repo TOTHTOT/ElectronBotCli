@@ -4,7 +4,7 @@ use boteyes::Mood;
 use candle_core::quantized::gguf_file::Content;
 use candle_core::{Device, Tensor};
 use std::fs::File;
-use std::path::Path;
+use std::path::PathBuf;
 use std::time::Instant;
 
 pub mod quantized_qwen2 {
@@ -12,24 +12,20 @@ pub mod quantized_qwen2 {
 }
 
 pub struct QwenLlm {
-    model_path: String,
+    model_path: PathBuf,
     tokenizer: Option<tokenizers::Tokenizer>,
     device: Device,
     model: Option<quantized_qwen2::ModelWeights>,
 }
 
 impl QwenLlm {
-    pub fn load(model_path: &str) -> Result<Self> {
-        let path = Path::new(model_path);
-        if !path.exists() {
-            anyhow::bail!("Model file not found: {}", model_path);
-        }
-        Ok(Self {
-            model_path: model_path.to_string(),
+    pub fn load(model_path: PathBuf) -> Self {
+        Self {
+            model_path,
             tokenizer: None,
             device: Device::Cpu,
             model: None,
-        })
+        }
     }
 
     pub fn load_tokenizer(&mut self, tokenizer_path: &str) -> Result<()> {

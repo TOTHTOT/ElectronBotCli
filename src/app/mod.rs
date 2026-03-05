@@ -3,6 +3,7 @@ pub mod config;
 pub mod menu;
 
 use crate::llm::QwenLlm;
+use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
 use crate::web::WebPreview;
@@ -53,11 +54,24 @@ pub struct App {
     _web_preview: Option<Arc<WebPreview>>,
     /// LCD 帧缓存（用于 Web 预览）
     lcd_frame_cache: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
+    /// 模型管理器
+    pub _mm: ModelManager,
 }
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(llm: QwenLlm) -> Self {
+    pub fn new(mm: ModelManager) -> Self {
+        // 初始化 LLM
+        let mut llm = QwenLlm::load(mm.get("qwen").expect("qwen model not found"));
+        llm.load_tokenizer(
+            mm.get("tokenizer")
+                .expect("tokenizer not found")
+                .to_str()
+                .unwrap_or(""),
+        )
+        .expect("load tokenizer failed");
+        llm.preload().expect("llm preload failed");
+
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
@@ -84,16 +98,23 @@ impl App {
             );
         });
 
-        // 启动语音识别
-        let voice_manager = VoiceManager::new(
-            "external/module/sense_voice/model.int8.onnx".into(),
-            "external/module/silero_vad/silero_vad.onnx".into(),
-            "external/module/vits/tokens.txt",
-            &config.speech_name,
-            text_tx_clone,
-        )
-        .map(Arc::new)
-        .ok();
+        // 从 ModelManager 获取模型路径并创建 VoiceManager
+        let voice_manager = if let (Some(sense_voice_path), Some(silero_vad_path)) =
+            (mm.get("sense_voice"), mm.get("silero_vad"))
+        {
+            VoiceManager::new(
+                sense_voice_path,
+                silero_vad_path,
+                "".into(),
+                &config.speech_name,
+                text_tx_clone,
+            )
+            .map(Arc::new)
+            .ok()
+        } else {
+            log::warn!("Voice model not available");
+            None
+        };
 
         // 创建视频捕获器（None 表示使用默认摄像头）
         let mut video_capture = VideoCapture::new(None);
@@ -141,6 +162,7 @@ impl App {
             comm_tx: None,
             _web_preview: Some(web_preview_arc),
             lcd_frame_cache,
+            _mm: mm,
         }
     }
 

@@ -72,7 +72,8 @@
       "Bash(xxd:*)",
       "Bash(sudo apt:*)",
       "Bash(ip addr:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(huggingface-cli whoami:*)"
     ]
   }
 }

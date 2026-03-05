@@ -2,7 +2,6 @@
 name = "ele_bot"
 version = "0.1.0"
 edition = "2021"
-build = "build.rs"
 
 [features]
 default = []
@@ -34,6 +33,7 @@ futures-util = "0.3"
 base64 = "0.22"
 async-stream = "0.3"
 bytes = "1"
+hf-hub = "0.5.0"
 
 # Camera capture
 [target.'cfg(windows)'.dependencies]
@@ -53,6 +53,3 @@ panic = "abort"      # 减小二进制体积，稍微提升速度
 # 提高了编译速度
 lto = "thin"       # 改用 thin LTO
 codegen-units = 16 # 增加并行度
-
-[build-dependencies]
-build-print = "1.0"

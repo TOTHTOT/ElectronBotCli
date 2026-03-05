@@ -1,6 +1,7 @@
 pub mod asr;
 mod tts;
 
+use std::path::PathBuf;
 use crate::media::voice::asr::{build_audio_stream, recognition_thread};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -41,9 +42,9 @@ impl VoiceManager {
     ///
     /// ```
     pub fn new(
-        sense_voice_model_path: String,
-        silero_vad_model_path: String,
-        _tts_tokens_path: &str,
+        sense_voice_model_path: PathBuf,
+        silero_vad_model_path: PathBuf,
+        _tts_tokens_path: PathBuf,
         speech_name: &str,
         result_tx: mpsc::Sender<String>,
     ) -> Result<Self> {
