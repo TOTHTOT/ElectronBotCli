@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<head>
+    <meta charset="UTF-8">
+    <title>ElectronBot Preview</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #1a1a1a;
+            color: #eee;
+        }
+        h1 {
+            text-align: center;
+            color: #00ff88;
+        }
+        .container {
+            display: flex;
+            justify-content: center;
+            gap: 40px;
+            flex-wrap: wrap;
+        }
+        .preview-box {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            flex: 1;
+            min-width: fit-content;
+        }
+        .preview-box.camera-box {
+            flex: 2;
+        }
+        .preview-box h2 {
+            color: #00ccff;
+            margin-bottom: 15px;
+        }
+        img {
+            border: 2px solid #444;
+            border-radius: 5px;
+            max-width: 100%;
+            height: auto;
+        }
+        #lcd-img {
+            max-width: 300px;
+        }
+        #camera-img {
+            min-width: 640px;
+            min-height: 480px;
+            max-width: 854px;
+        }
+        .info {
+            margin-top: 20px;
+            text-align: center;
+            color: #888;
+        }
+    </style>
+</head>
+<body>
+<h1>🤖 ElectronBot Preview</h1>
+<div class="container">
+    <div class="preview-box">
+        <h2>LCD Eyes Animation</h2>
+        <img id="lcd-img" src="/lcd" alt="LCD Preview" />
+    </div>
+    <div class="preview-box camera-box">
+        <h2>USB Camera</h2>
+        <img id="camera-img" src="/camera" alt="Camera Preview" />
+    </div>
+</div>
+<div class="info">
+    <p>Streams should update automatically</p>
+</div>
+<script>
+    // 更新 LCD 图像
+    async function updateLcd() {
+        try {
+            const response = await fetch('/lcd');
+            const text = await response.text();
+            if (text) {
+                document.getElementById('lcd-img').src = 'data:image/jpeg;base64,' + text;
+            }
+        } catch(e) {}
+        setTimeout(updateLcd, 100);
+    }
+    // 使用 EventSource 更新摄像头图像
+    function updateCamera() {
+        try {
+            const eventSource = new EventSource('/camera');
+            eventSource.onmessage = function(event) {
+                if (event.data) {
+                    document.getElementById('camera-img').src = 'data:image/jpeg;base64,' + event.data;
+                }
+            };
+            eventSource.onerror = function() {
+                eventSource.close();
+                setTimeout(updateCamera, 1000);
+            };
+        } catch(e) {
+            setTimeout(updateCamera, 1000);
+        }
+    }
+    updateLcd();
+    updateCamera();
+</script>
+</body>
+</html>
