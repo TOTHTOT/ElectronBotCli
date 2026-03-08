@@ -60,7 +60,7 @@ pub struct VideoCapture {
     /// 旋转角度
     rotate_angle: RotateAngle,
     /// 人脸检测器
-    face_detector: Option<Arc<Mutex<FaceDetector>>>,
+    face_detector: Option<FaceDetector>,
 }
 
 #[allow(dead_code)]
@@ -68,7 +68,7 @@ impl VideoCapture {
     /// 创建新的视频捕获器
     pub fn new(
         device_name: Option<String>,
-        face_detector: Option<Arc<Mutex<FaceDetector>>>,
+        face_detector: FaceDetector,
         rotate_angle: RotateAngle,
     ) -> Self {
         log::info!(
@@ -81,13 +81,8 @@ impl VideoCapture {
             device_name,
             resolution: Arc::new(Mutex::new((0, 0))),
             rotate_angle,
-            face_detector,
+            face_detector: Some(face_detector),
         }
-    }
-
-    /// 设置人脸检测器
-    pub fn set_face_detector(&mut self, face_detector: Option<Arc<Mutex<FaceDetector>>>) {
-        self.face_detector = face_detector;
     }
 
     /// 设置旋转角度
@@ -131,7 +126,10 @@ impl VideoCapture {
         let running = self.running.clone();
         let resolution = self.resolution.clone();
         let rotate_angle = self.rotate_angle;
-        let face_detector = self.face_detector.clone();
+        let face_detector = self
+            .face_detector
+            .take()
+            .expect("take face_detector failed");
 
         std::thread::spawn(move || {
             capture_frames(
@@ -213,7 +211,7 @@ fn capture_frames(
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
-    face_detector: Option<Arc<Mutex<FaceDetector>>>,
+    face_detector: FaceDetector,
 ) {
     let mut camera = match open_camera_default(device_name.as_deref()) {
         Ok(mut c) => {
@@ -261,7 +259,7 @@ fn capture_frames(
                 continue;
             }
         };
-        // 根据格式处理帧数据（使用输出宽高）
+        // 拿到原始的图像数据然后根据格式处理帧数据
         let frame_data = process_frame_by_format(
             frame,
             out_width,
@@ -270,7 +268,7 @@ fn capture_frames(
             rotate_angle,
             width,
             height,
-            face_detector.as_ref(),
+            &face_detector,
         );
 
         // 计算帧率
@@ -291,7 +289,7 @@ fn process_and_rotate(
     bgr: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
+    face_detector: &FaceDetector,
     rotate_angle: RotateAngle,
 ) -> FrameData {
     let processed = process_frame(bgr, width, height, face_detector);
@@ -304,9 +302,25 @@ fn process_and_rotate(
 }
 
 /// 根据帧格式处理数据
-/// - out_width, out_height: 输出图像的宽高（已考虑旋转后的交换）
-/// - rotate_angle: 旋转角度
-/// - src_width, src_height: 原始图像的宽高（用于旋转计算）
+///
+/// # Arguments
+///
+/// * `frame`:
+/// * `out_width`: 输出图像的宽
+/// * `out_height`: 输出图像的高
+/// * `format`: 图像格式
+/// * `rotate_angle`: 旋转角度
+/// * `src_width`: 摄像头的宽
+/// * `src_height`: 摄像头的高
+/// * `face_detector`:
+///
+/// returns: FrameData
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
 #[allow(clippy::too_many_arguments)]
 fn process_frame_by_format(
     frame: nokhwa::Buffer,
@@ -316,7 +330,7 @@ fn process_frame_by_format(
     rotate_angle: RotateAngle,
     src_width: u32,
     src_height: u32,
-    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
+    face_detector: &FaceDetector,
 ) -> FrameData {
     match format {
         FrameFormat::MJPEG => {

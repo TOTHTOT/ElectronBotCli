@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 
 /// 人脸检测结果
 #[derive(Debug, Clone, Default)]
+#[allow(dead_code)]
 pub struct FaceDetectionResult {
     pub has_face: bool,
     pub x: f32,      // 归一化中心 X
     pub y: f32,      // 归一化中心 Y
     pub width: f32,  // 归一化宽度
     pub height: f32, // 归一化高度
-    #[allow(dead_code)]
     pub confidence: f32,
 }
 

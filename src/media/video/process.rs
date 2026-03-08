@@ -2,7 +2,6 @@
 
 use crate::vision::face::FaceDetector;
 use std::convert::TryFrom;
-use std::sync::{Arc, Mutex};
 
 /// 旋转角度
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -152,37 +151,33 @@ pub fn process_frame(
     mut bgr_data: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
+    face_detector: &FaceDetector,
 ) -> Vec<u8> {
     // 尝试检测人脸
-    if let Some(detector_lock) = face_detector {
-        if let Ok(guard) = detector_lock.lock() {
-            match guard.detect(&bgr_data, width, height) {
-                Ok(result) => {
-                    if result.has_face {
-                        log::info!(
-                            "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
-                            result.x,
-                            result.y,
-                            result.width,
-                            result.height
-                        );
-                        // 绘制人脸框
-                        draw_face_box(
-                            &mut bgr_data,
-                            width,
-                            height,
-                            result.x,
-                            result.y,
-                            result.width,
-                            result.height,
-                        );
-                    }
-                }
-                Err(e) => {
-                    log::warn!("Face detection error: {}", e);
-                }
+    match face_detector.detect(&bgr_data, width, height) {
+        Ok(result) => {
+            if result.has_face {
+                log::info!(
+                    "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
+                    result.x,
+                    result.y,
+                    result.width,
+                    result.height
+                );
+                // 绘制人脸框
+                draw_face_box(
+                    &mut bgr_data,
+                    width,
+                    height,
+                    result.x,
+                    result.y,
+                    result.width,
+                    result.height,
+                );
             }
+        }
+        Err(e) => {
+            log::warn!("Face detection error: {}", e);
         }
     }
 

@@ -48,8 +48,6 @@ pub struct App {
     pub llm_test_state: LlmTestState,
     pub text_tx: Sender<String>,
     llm: Option<Arc<Mutex<QwenLlm>>>,
-    /// 人脸检测器
-    face_detector: Option<Arc<Mutex<FaceDetector>>>,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
@@ -110,9 +108,7 @@ impl App {
         let Some(yolo_path) = mm.get("yolo_face") else {
             anyhow::bail!("yolo_face not found");
         };
-        let face_detector = FaceDetector::new(yolo_path)
-            .map(|d| Arc::new(Mutex::new(d)))
-            .ok();
+        let face_detector = FaceDetector::new(yolo_path)?;
 
         // 从 ModelManager 获取模型路径并创建 VoiceManager
         log::info!("start load voice manager");
@@ -133,8 +129,7 @@ impl App {
             None
         };
 
-        let mut video_capture =
-            VideoCapture::new(None, face_detector.clone(), RotateAngle::Rotate270);
+        let mut video_capture = VideoCapture::new(None, face_detector, RotateAngle::Rotate270);
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),
@@ -175,7 +170,6 @@ impl App {
             llm_test_state: LlmTestState::default(),
             text_tx,
             llm: Some(llm_arc),
-            face_detector,
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
@@ -306,7 +300,7 @@ impl App {
         let items = MenuItem::all();
         let len = items.len();
         let current = self.menu_state.selected().unwrap_or(0);
-        let new_i = ((current as isize + delta).rem_euclid(len as isize)) as usize;
+        let new_i = (current as isize + delta).rem_euclid(len as isize) as usize;
         self.menu_state.select(Some(new_i));
         self.selected_menu = items[new_i];
     }
@@ -332,7 +326,7 @@ impl App {
     fn move_settings(&mut self, delta: isize) {
         let count = self.settings_item_count();
         self.settings_selected =
-            ((self.settings_selected as isize + delta).rem_euclid(count as isize)) as usize;
+            (self.settings_selected as isize + delta).rem_euclid(count as isize) as usize;
     }
 
     /// 保存设置项编辑内容
