@@ -38,16 +38,6 @@ impl TryFrom<u32> for RotateAngle {
     }
 }
 
-/// RGB 转换为 BGR
-#[inline]
-pub fn rgb_to_bgr(rgb_data: &[u8], _width: u32, _height: u32) -> Vec<u8> {
-    let mut bgr_data = Vec::with_capacity(rgb_data.len());
-    for chunk in rgb_data.chunks_exact(3) {
-        bgr_data.extend_from_slice(&[chunk[2], chunk[1], chunk[0]]);
-    }
-    bgr_data
-}
-
 /// 将像素从源缓冲区复制到目标向量
 #[inline]
 fn copy_pixel(src: &[u8], x: u32, y: u32, width: u32, dst: &mut Vec<u8>) {

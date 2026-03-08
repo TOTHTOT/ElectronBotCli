@@ -8,8 +8,8 @@ use std::sync::{Arc, Mutex};
 pub enum FrameData {
     /// 已经是 JPEG 编码的数据，浏览器可直接显示
     Jpeg(Bytes),
-    /// 原始 BGR 数据，用于图像识别等后续处理
-    RawBgr(Bytes),
+    /// 原始 RGB 数据，用于图像识别等后续处理
+    RawRgb(Bytes),
 }
 
 impl FrameData {
@@ -17,15 +17,15 @@ impl FrameData {
     pub fn as_jpeg(&self) -> Option<&Bytes> {
         match self {
             FrameData::Jpeg(data) => Some(data),
-            FrameData::RawBgr(_) => None,
+            FrameData::RawRgb(_) => None,
         }
     }
 
     /// 获取原始 BGR 数据
-    pub fn as_raw_bgr(&self) -> Option<&Bytes> {
+    pub fn as_raw_rgb(&self) -> Option<&Bytes> {
         match self {
             FrameData::Jpeg(_) => None,
-            FrameData::RawBgr(data) => Some(data),
+            FrameData::RawRgb(data) => Some(data),
         }
     }
 

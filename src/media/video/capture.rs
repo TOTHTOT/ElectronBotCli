@@ -2,11 +2,14 @@
 
 use bytes::Bytes;
 
-use crate::media::video::process::{process_frame, rgb_to_bgr, rotate_by_angle, RotateAngle};
+use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
 use crate::vision::face::FaceDetector;
 use nokhwa::pixel_format::RgbFormat;
-use nokhwa::utils::{ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
+use nokhwa::utils::{
+    ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
+    Resolution,
+};
 use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -299,7 +302,7 @@ fn process_and_rotate(
     } else {
         rotate_by_angle(&processed, width, height, rotate_angle)
     };
-    FrameData::RawBgr(Bytes::from(rotated))
+    FrameData::RawRgb(Bytes::from(rotated))
 }
 
 /// 根据帧格式处理数据
@@ -350,24 +353,24 @@ fn process_frame_by_format(
                 Ok(img_buf) => img_buf.into_raw(),
                 Err(e) => {
                     log::warn!("Failed to decode YUV frame: {:?}", e);
-                    return FrameData::RawBgr(Bytes::new());
+                    return FrameData::RawRgb(Bytes::new());
                 }
             };
-            let bgr = rgb_to_bgr(&rgb_data, src_width, src_height);
-            process_and_rotate(bgr, src_width, src_height, face_detector, rotate_angle)
+            process_and_rotate(rgb_data, src_width, src_height, face_detector, rotate_angle)
         }
         FrameFormat::RAWRGB | FrameFormat::RAWBGR => {
             log::debug!("Frame: {}x{}, Raw RGB/BGR", out_width, out_height);
-            let bgr = if format == FrameFormat::RAWBGR {
+            let rgb = if format == FrameFormat::RAWRGB {
                 frame.buffer().to_vec()
             } else {
-                rgb_to_bgr(frame.buffer(), src_width, src_height)
+                log::warn!("FrameFormat::RAWBGR not supported");
+                Vec::new()
             };
-            process_and_rotate(bgr, src_width, src_height, face_detector, rotate_angle)
+            process_and_rotate(rgb, src_width, src_height, face_detector, rotate_angle)
         }
         FrameFormat::GRAY => {
             log::debug!("Frame: {}x{}, GRAY", out_width, out_height);
-            FrameData::RawBgr(Bytes::copy_from_slice(frame.buffer()))
+            FrameData::RawRgb(Bytes::copy_from_slice(frame.buffer()))
         }
     }
 }

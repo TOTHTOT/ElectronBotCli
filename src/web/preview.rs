@@ -2,19 +2,19 @@
 //!
 //! 使用 Axum 实现 MJPEG 流服务器
 
+use crate::media::video::types::FrameCache;
 use axum::{
     extract::State,
     response::{sse::Event, Html, IntoResponse},
     routing::get,
     Router,
 };
+use base64::Engine as _;
 use bytes::Bytes;
+use image::{ImageBuffer, Rgb};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-
-use crate::media::video::types::FrameCache;
-use base64::Engine as _;
 
 /// LCD 帧缓存
 type LcdFrameCache = Arc<Mutex<Option<Vec<u8>>>>;
@@ -101,12 +101,15 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
             if let Some(frame) = frame_data {
                 // 根据数据类型获取 JPEG
                 let jpeg = if let Some(jpeg_data) = frame.as_jpeg() {
-                    // 已经是 JPEG（MJPEG 格式），直接使用
+                    // 已经是 JPEG, 直接使用
                     jpeg_data.clone()
-                } else if let Some(bgr_data) = frame.as_raw_bgr() {
-                    // 需要编码为 JPEG，使用已知分辨率
+                } else if let Some(rgb_data) = frame.as_raw_rgb() {
+                    // 需要编码为 JPEG
                     let (width, height) = *resolution.lock().unwrap();
-                    bgr_to_jpeg_with_size(bgr_data, width, height)
+                    rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {
+                        log::warn!("To jpeg failed: {e}");
+                        Bytes::new()
+                    })
                 } else {
                     Bytes::new()
                 };
@@ -115,7 +118,7 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
                     log::warn!("Empty JPEG, skipping frame");
                 } else {
                     log::debug!("JPEG encoded: {} bytes", jpeg.len());
-                    // 将 JPEG 转换为 Base64 字符串
+                    // 将 JPEG 转换为 Base64 字符串, 后续优化了 直接发图片数据
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&jpeg);
                     yield Ok::<_, Infallible>(Event::default().data(encoded));
                 }
@@ -147,27 +150,16 @@ fn grayscale_to_jpeg(gray_data: &[u8], width: u32, height: u32) -> Bytes {
     Bytes::from(jpeg_bytes)
 }
 
-fn bgr_to_jpeg_with_size(bgr_data: &Bytes, width: u32, height: u32) -> Bytes {
-    use image::{ImageBuffer, Rgb};
-
-    // 转换为 RGB
-    let rgb_data: Vec<u8> = bgr_data
-        .chunks(3)
-        .flat_map(|chunk| vec![chunk[2], chunk[1], chunk[0]])
-        .collect();
-
-    let img: ImageBuffer<Rgb<u8>, Vec<u8>> = ImageBuffer::from_raw(width, height, rgb_data)
-        .unwrap_or_else(|| ImageBuffer::from_pixel(width, height, Rgb([128, 128, 128])));
+fn rgb_to_jpeg_with_size(rgb_data: &Bytes, width: u32, height: u32) -> anyhow::Result<Bytes> {
+    let img: ImageBuffer<Rgb<u8>, Vec<u8>> =
+        ImageBuffer::from_raw(width, height, rgb_data.to_vec())
+            .unwrap_or_else(|| ImageBuffer::from_pixel(width, height, Rgb([128, 128, 128])));
 
     let mut jpeg_bytes = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut jpeg_bytes);
+    img.write_to(&mut cursor, image::ImageFormat::Jpeg)?;
 
-    if let Err(e) = img.write_to(&mut cursor, image::ImageFormat::Jpeg) {
-        log::error!("Failed to encode JPEG: {}", e);
-        return Bytes::new();
-    }
-
-    Bytes::from(jpeg_bytes)
+    Ok(Bytes::from(jpeg_bytes))
 }
 
 /// Web 预览服务器

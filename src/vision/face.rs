@@ -74,43 +74,29 @@ impl FaceDetector {
     ) -> anyhow::Result<Tensor<f32>> {
         let (w, h) = (self.input_width, self.input_height);
 
-        // 创建 RGB 格式的输入 (1, 3, 640, 640)
+        let img =
+            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(img_width, img_height, image_data)
+                .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
+
+        let resized = image::imageops::resize(
+            &img,
+            w as u32,
+            h as u32,
+            image::imageops::FilterType::Triangle,
+        );
+
+        // 速构建 CHW 格式 Tensor
         let mut input: Vec<f32> = vec![0.0f32; (3 * w * h) as usize];
+        let channel_size = (w * h) as usize;
 
-        // 读取 BGR 数据并 resize
-        let scale_x = w as f32 / img_width as f32;
-        let scale_y = h as f32 / img_height as f32;
-
-        for y in 0..img_height {
-            for x in 0..img_width {
-                let src_idx = ((y * img_width + x) * 3) as usize;
-                if src_idx + 2 >= image_data.len() {
-                    continue;
-                }
-
-                // BGR 转 RGB，并进行 normalization
-                let dst_x = (x as f32 * scale_x) as i32;
-                let dst_y = (y as f32 * scale_y) as i32;
-
-                if dst_x >= 0 && dst_x < w && dst_y >= 0 && dst_y < h {
-                    // BGR format -> RGB
-                    let b = image_data[src_idx] as f32 / 255.0;
-                    let g = image_data[src_idx + 1] as f32 / 255.0;
-                    let r = image_data[src_idx + 2] as f32 / 255.0;
-
-                    // Channel first: (C, H, W)
-                    let r_idx = (dst_y * w + dst_x) as usize;
-                    let g_idx = (w * h + dst_y * w + dst_x) as usize;
-                    let b_idx = (2 * w * h + dst_y * w + dst_x) as usize;
-
-                    input[r_idx] = r;
-                    input[g_idx] = g;
-                    input[b_idx] = b;
-                }
-            }
+        for (i, pixel) in resized.pixels().enumerate() {
+            // pixel.0 是 [r, g, b]
+            input[i] = pixel.0[0] as f32 / 255.0; // R channel
+            input[i + channel_size] = pixel.0[1] as f32 / 255.0; // G channel
+            input[i + 2 * channel_size] = pixel.0[2] as f32 / 255.0; // B channel
         }
 
-        // 创建 Tensor，使用 (data, shape) 元组
+        // 创建 Tensor
         let shape: (Vec<i32>, Vec<f32>) = (vec![1, 3, h, w], input);
         let tensor = Tensor::from_array(shape)?;
         Ok(tensor)
