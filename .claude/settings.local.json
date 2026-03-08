@@ -77,7 +77,8 @@
       "WebFetch(domain:ort.pyke.io)",
       "mcp__filesystem__write_file",
       "mcp__fs__list_directory",
-      "mcp__fs__create_directory"
+      "mcp__fs__create_directory",
+      "Bash(file:*)"
     ]
   }
 }
