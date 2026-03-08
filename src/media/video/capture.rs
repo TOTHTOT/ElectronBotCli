@@ -6,9 +6,7 @@ use crate::media::video::process::{process_frame, rgb_to_bgr, rotate_by_angle, R
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
 use crate::vision::face::FaceDetector;
 use nokhwa::pixel_format::RgbFormat;
-use nokhwa::utils::{
-    ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
-};
+use nokhwa::utils::{ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType, Resolution};
 use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -199,8 +197,11 @@ fn open_camera_default(device_name: Option<&str>) -> anyhow::Result<Camera> {
         }
         None => CameraIndex::Index(0),
     };
-
-    let query = RequestedFormat::new::<RgbFormat>(RequestedFormatType::None);
+    let format_type = RequestedFormatType::HighestResolution(Resolution {
+        width_x: 640,
+        height_y: 480,
+    });
+    let query = RequestedFormat::new::<RgbFormat>(format_type);
     Ok(Camera::new(index, query)?)
 }
 
