@@ -9,9 +9,9 @@ mod model_manager;
 mod robot;
 mod ui;
 mod ui_components;
+mod vision;
 mod web;
 
-use crate::model_manager::ModelManager;
 use crossterm::event::KeyModifiers;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -35,14 +35,11 @@ fn main() -> anyhow::Result<()> {
         .ok();
     }
 
-    // 使用 ModelManager 统一管理模型
-    let mm = ModelManager::init()?;
-
     let mut stdout = io::stdout();
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    if let Err(e) = run(&mut terminal, mm) {
+    if let Err(e) = run(&mut terminal) {
         log::error!("app failed: {e}");
         return Err(e);
     }
@@ -54,17 +51,15 @@ fn main() -> anyhow::Result<()> {
 
 /// 主线程
 /// 实现页面渲染, 按键事件, 机器人数据发送
-fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>, mm: ModelManager) -> anyhow::Result<()> {
-    let mut app = app::App::new(mm);
+fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> {
+    let mut app = app::App::new()?;
 
     let tick_rate = Duration::from_millis(20);
     while app.running {
         if app.is_connected() {
             let _ = app.send_frame();
         }
-
         app.poll_voice_input();
-
         render(terminal, &mut app)?;
         handle_input(&mut app)?;
         std::thread::sleep(tick_rate);

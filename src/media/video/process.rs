@@ -1,9 +1,11 @@
 //! 视频模块 - 图像处理
 
+use crate::vision::face::FaceDetector;
 use std::convert::TryFrom;
+use std::sync::{Arc, Mutex};
 
 /// 旋转角度
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum RotateAngle {
     #[default]
     None,
@@ -47,36 +49,35 @@ pub fn rgb_to_bgr(rgb_data: &[u8], _width: u32, _height: u32) -> Vec<u8> {
     bgr_data
 }
 
+/// 将像素从源缓冲区复制到目标向量
+#[inline]
+fn copy_pixel(src: &[u8], x: u32, y: u32, width: u32, dst: &mut Vec<u8>) {
+    let idx = ((y * width + x) * 3) as usize;
+    if idx + 2 < src.len() {
+        dst.extend_from_slice(&src[idx..idx + 3]);
+    }
+}
+
 /// 顺时针旋转 90 度
 /// 原始 width x height -> 旋转后 height x width
 pub fn rotate_90_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
-
     for x in 0..width {
         for y in (0..height).rev() {
-            let idx = ((y * width + x) * 3) as usize;
-            if idx + 2 < bgr_data.len() {
-                rotated.extend_from_slice(&[bgr_data[idx], bgr_data[idx + 1], bgr_data[idx + 2]]);
-            }
+            copy_pixel(bgr_data, x, y, width, &mut rotated);
         }
     }
-
     rotated
 }
 
 /// 顺时针旋转 180 度
 pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity(bgr_data.len());
-
     for y in (0..height).rev() {
         for x in (0..width).rev() {
-            let idx = ((y * width + x) * 3) as usize;
-            if idx + 2 < bgr_data.len() {
-                rotated.extend_from_slice(&[bgr_data[idx], bgr_data[idx + 1], bgr_data[idx + 2]]);
-            }
+            copy_pixel(bgr_data, x, y, width, &mut rotated);
         }
     }
-
     rotated
 }
 
@@ -84,16 +85,11 @@ pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 /// 原始 width x height -> 旋转后 height x width
 pub fn rotate_270_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
-
     for x in (0..width).rev() {
         for y in 0..height {
-            let idx = ((y * width + x) * 3) as usize;
-            if idx + 2 < bgr_data.len() {
-                rotated.extend_from_slice(&[bgr_data[idx], bgr_data[idx + 1], bgr_data[idx + 2]]);
-            }
+            copy_pixel(bgr_data, x, y, width, &mut rotated);
         }
     }
-
     rotated
 }
 
@@ -107,8 +103,88 @@ pub fn rotate_by_angle(bgr_data: &[u8], width: u32, height: u32, angle: RotateAn
     }
 }
 
-/// 处理视频帧（如添加人脸框）
-pub fn process_frame(bgr_data: Vec<u8>, _width: u32, _height: u32) -> Vec<u8> {
-    // TODO: 添加人脸检测功能
+/// 绘制人脸框到图像上
+fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w: f32, h: f32) {
+    let cx = (x * width as f32) as i32;
+    let cy = (y * height as f32) as i32;
+    let box_w = (w * width as f32) as i32;
+    let box_h = (h * height as f32) as i32;
+
+    let x1 = (cx - box_w / 2).max(0) as u32;
+    let y1 = (cy - box_h / 2).max(0) as u32;
+    let x2 = (cx + box_w / 2).min(width as i32 - 1) as u32;
+    let y2 = (cy + box_h / 2).min(height as i32 - 1) as u32;
+
+    const COLOR: [u8; 3] = [0, 255, 0];
+    const THICKNESS: u32 = 2;
+
+    // 绘制水平线（上下边框）
+    for dy in 0..THICKNESS {
+        for px in x1..=x2 {
+            set_pixel(bgr_data, width, height, px, y1 + dy, COLOR);
+            set_pixel(bgr_data, width, height, px, y2.saturating_sub(dy), COLOR);
+        }
+    }
+
+    // 绘制垂直线（左右边框）
+    for dy in y1..=y2 {
+        for dx in 0..THICKNESS {
+            set_pixel(bgr_data, width, height, x1 + dx, dy, COLOR);
+            set_pixel(bgr_data, width, height, x2.saturating_sub(dx), dy, COLOR);
+        }
+    }
+}
+
+/// 设置像素颜色（带边界检查）
+#[inline]
+fn set_pixel(data: &mut [u8], width: u32, height: u32, x: u32, y: u32, color: [u8; 3]) {
+    if x >= width || y >= height {
+        return;
+    }
+    let idx = (y * width + x) as usize * 3;
+    if idx + 2 < data.len() {
+        data[idx..idx + 3].copy_from_slice(&color);
+    }
+}
+
+/// 处理视频帧（添加人脸检测和框）
+pub fn process_frame(
+    mut bgr_data: Vec<u8>,
+    width: u32,
+    height: u32,
+    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
+) -> Vec<u8> {
+    // 尝试检测人脸
+    if let Some(detector_lock) = face_detector {
+        if let Ok(guard) = detector_lock.lock() {
+            match guard.detect(&bgr_data, width, height) {
+                Ok(result) => {
+                    if result.has_face {
+                        log::info!(
+                            "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
+                            result.x,
+                            result.y,
+                            result.width,
+                            result.height
+                        );
+                        // 绘制人脸框
+                        draw_face_box(
+                            &mut bgr_data,
+                            width,
+                            height,
+                            result.x,
+                            result.y,
+                            result.width,
+                            result.height,
+                        );
+                    }
+                }
+                Err(e) => {
+                    log::warn!("Face detection error: {}", e);
+                }
+            }
+        }
+    }
+
     bgr_data
 }

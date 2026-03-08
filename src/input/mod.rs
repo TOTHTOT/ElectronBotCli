@@ -117,7 +117,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 /// 处理侧边栏导航相关的按键输入：
 /// - 上/下方向键：切换菜单项
 /// - 回车键：进入对应功能页面
-/// - ESC键：退出程序
+/// - ESC 或 Ctrl+C：退出程序
 /// - Ctrl+S：保存设置
 ///
 /// # Arguments
@@ -131,7 +131,10 @@ fn handle_menu_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         KeyCode::Up => MenuEvent::Up.into(),
         KeyCode::Down => MenuEvent::Down.into(),
         KeyCode::Enter => handle_menu_enter(app),
-        KeyCode::Char('s') if modifiers == KeyModifiers::CONTROL => SettingsEvent::Save.into(),
+        KeyCode::Char('c') if modifiers.contains(KeyModifiers::CONTROL) => CommonEvent::Quit.into(),
+        KeyCode::Char('s') if modifiers.contains(KeyModifiers::CONTROL) => {
+            SettingsEvent::Save.into()
+        }
         _ => CommonEvent::None.into(),
     };
     handle_event(app, evt);

@@ -73,7 +73,10 @@
       "Bash(sudo apt:*)",
       "Bash(ip addr:*)",
       "Bash(echo:*)",
-      "Bash(huggingface-cli whoami:*)"
+      "Bash(huggingface-cli whoami:*)",
+      "WebFetch(domain:ort.pyke.io)",
+      "mcp__filesystem__write_file",
+      "mcp__fs__list_directory"
     ]
   }
 }

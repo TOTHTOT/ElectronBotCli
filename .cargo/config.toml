@@ -18,7 +18,8 @@
 #PKG_CONFIG_ALLOW_CROSS = "1"
 #PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig/"
 #
-#[env]
-## 避免 pkg-config 检测导致增量编译失效
-#PKG_CONFIG_PATH = { value = "", force = true }
-#BINDGEN_EXTRA_CLANG_ARGS = { value = "-isystem \"D:/Soft/Microsoft Visual Studio/2022/新建文件夹/VC/Tools/MSVC/14.41.34120/include\"", force = true }
+[env]
+# ONNX Runtime 路径 - 根据你的 Mac 类型选择正确的路径
+# Apple Silicon Mac (M1/M2/M3):
+ORT_DYLIB_PATH = { value = "/opt/homebrew/lib/libonnxruntime.dylib" }
+# Intel Mac 请用: /usr/local/lib/libonnxruntime.dylib

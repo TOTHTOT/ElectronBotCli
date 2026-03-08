@@ -4,6 +4,7 @@ use bytes::Bytes;
 
 use crate::media::video::process::{process_frame, rgb_to_bgr, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
+use crate::vision::face::FaceDetector;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{
     ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
@@ -12,6 +13,7 @@ use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
+use anyhow::Context;
 #[cfg(feature = "fps-counter")]
 use std::time::Instant;
 
@@ -57,28 +59,21 @@ pub struct VideoCapture {
     resolution: Arc<Mutex<(u32, u32)>>,
     /// 旋转角度
     rotate_angle: RotateAngle,
+    /// 人脸检测器
+    face_detector: Option<Arc<Mutex<FaceDetector>>>,
 }
 
 #[allow(dead_code)]
 impl VideoCapture {
     /// 创建新的视频捕获器
-    pub fn new(device_name: Option<String>) -> Self {
-        log::info!("Creating VideoCapture with device: {device_name:?}");
-
-        // 检测是否需要旋转
-        let rotate_angle = if device_name
-            .as_ref()
-            .map(|name| name.contains("USB 2.0 PC Cam"))
-            .unwrap_or(false)
-        {
-            RotateAngle::Rotate270
-        } else {
-            RotateAngle::None
-        };
-
-        if !matches!(rotate_angle, RotateAngle::None) {
-            log::info!("Camera requires {:?} rotation", rotate_angle);
-        }
+    pub fn new(
+        device_name: Option<String>,
+        face_detector: Option<Arc<Mutex<FaceDetector>>>,
+        rotate_angle: RotateAngle,
+    ) -> Self {
+        log::info!(
+            "Creating VideoCapture with device: {device_name:?}, rotation: {rotate_angle:?}"
+        );
 
         Self {
             frame_cache: Arc::new(Mutex::new(None)),
@@ -86,7 +81,13 @@ impl VideoCapture {
             device_name,
             resolution: Arc::new(Mutex::new((0, 0))),
             rotate_angle,
+            face_detector,
         }
+    }
+
+    /// 设置人脸检测器
+    pub fn set_face_detector(&mut self, face_detector: Option<Arc<Mutex<FaceDetector>>>) {
+        self.face_detector = face_detector;
     }
 
     /// 设置旋转角度
@@ -130,9 +131,17 @@ impl VideoCapture {
         let running = self.running.clone();
         let resolution = self.resolution.clone();
         let rotate_angle = self.rotate_angle;
+        let face_detector = self.face_detector.clone();
 
         std::thread::spawn(move || {
-            capture_frames(device_name, frame_cache, running, resolution, rotate_angle);
+            capture_frames(
+                device_name,
+                frame_cache,
+                running,
+                resolution,
+                rotate_angle,
+                face_detector,
+            );
         });
 
         log::info!("Video capture started");
@@ -204,9 +213,13 @@ fn capture_frames(
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
+    face_detector: Option<Arc<Mutex<FaceDetector>>>,
 ) {
     let mut camera = match open_camera_default(device_name.as_deref()) {
-        Ok(c) => c,
+        Ok(mut c) => {
+            c.open_stream().context("Failed to open stream").unwrap();
+            c
+        }
         Err(e) => {
             log::error!("Could not open camera in capture loop, error: {e}");
             return;
@@ -239,9 +252,7 @@ fn capture_frames(
     // 帧率计算
     #[cfg(feature = "fps-counter")]
     let mut fps_counter = FrameRateCounter::new();
-
     while running.load(Ordering::Relaxed) {
-        std::thread::sleep(std::time::Duration::from_millis(10));
         let frame = match camera.frame() {
             Ok(f) => f,
             Err(e) => {
@@ -259,6 +270,7 @@ fn capture_frames(
             rotate_angle,
             width,
             height,
+            face_detector.as_ref(),
         );
 
         // 计算帧率
@@ -266,7 +278,6 @@ fn capture_frames(
         if let Some(fps) = fps_counter.tick() {
             log::info!("Camera FPS: {:.1}", fps);
         }
-
         // 写入帧缓存
         let mut guard = frame_cache.lock().unwrap();
         *guard = Some(frame_data);
@@ -275,10 +286,28 @@ fn capture_frames(
     log::info!("Video capture loop stopped");
 }
 
+/// 处理帧并应用旋转
+fn process_and_rotate(
+    bgr: Vec<u8>,
+    width: u32,
+    height: u32,
+    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
+    rotate_angle: RotateAngle,
+) -> FrameData {
+    let processed = process_frame(bgr, width, height, face_detector);
+    let rotated = if rotate_angle == RotateAngle::None {
+        processed
+    } else {
+        rotate_by_angle(&processed, width, height, rotate_angle)
+    };
+    FrameData::RawBgr(Bytes::from(rotated))
+}
+
 /// 根据帧格式处理数据
 /// - out_width, out_height: 输出图像的宽高（已考虑旋转后的交换）
 /// - rotate_angle: 旋转角度
 /// - src_width, src_height: 原始图像的宽高（用于旋转计算）
+#[allow(clippy::too_many_arguments)]
 fn process_frame_by_format(
     frame: nokhwa::Buffer,
     out_width: u32,
@@ -287,10 +316,10 @@ fn process_frame_by_format(
     rotate_angle: RotateAngle,
     src_width: u32,
     src_height: u32,
+    face_detector: Option<&Arc<Mutex<FaceDetector>>>,
 ) -> FrameData {
     match format {
         FrameFormat::MJPEG => {
-            // MJPEG 已经是压缩的 JPEG 数据，无法直接旋转，返回原始数据
             log::debug!(
                 "Frame: {out_width}x{out_height}, MJPEG, {} bytes",
                 frame.buffer().len()
@@ -298,7 +327,6 @@ fn process_frame_by_format(
             FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer()))
         }
         FrameFormat::YUYV | FrameFormat::NV12 => {
-            // YUV 格式需要解码
             log::debug!(
                 "Frame: {out_width}x{out_height}, len: {}, YUV, decoding...",
                 frame.buffer().len()
@@ -310,36 +338,19 @@ fn process_frame_by_format(
                     return FrameData::RawBgr(Bytes::new());
                 }
             };
-            // RGB -> BGR（使用原始尺寸）
-            let mut bgr = rgb_to_bgr(&rgb_data, src_width, src_height);
-            bgr = process_frame(bgr, src_width, src_height);
-
-            // 应用旋转
-            if !matches!(rotate_angle, RotateAngle::None) {
-                bgr = rotate_by_angle(&bgr, src_width, src_height, rotate_angle);
-            }
-
-            FrameData::RawBgr(Bytes::from(bgr))
+            let bgr = rgb_to_bgr(&rgb_data, src_width, src_height);
+            process_and_rotate(bgr, src_width, src_height, face_detector, rotate_angle)
         }
         FrameFormat::RAWRGB | FrameFormat::RAWBGR => {
-            // 原始 RGB/BGR 格式
             log::debug!("Frame: {}x{}, Raw RGB/BGR", out_width, out_height);
             let bgr = if format == FrameFormat::RAWBGR {
-                Bytes::copy_from_slice(frame.buffer())
+                frame.buffer().to_vec()
             } else {
-                Bytes::from(rgb_to_bgr(frame.buffer(), src_width, src_height))
+                rgb_to_bgr(frame.buffer(), src_width, src_height)
             };
-            let mut processed = process_frame(bgr.to_vec(), src_width, src_height);
-
-            // 应用旋转
-            if !matches!(rotate_angle, RotateAngle::None) {
-                processed = rotate_by_angle(&processed, src_width, src_height, rotate_angle);
-            }
-
-            FrameData::RawBgr(Bytes::from(processed))
+            process_and_rotate(bgr, src_width, src_height, face_detector, rotate_angle)
         }
         FrameFormat::GRAY => {
-            // 灰度格式
             log::debug!("Frame: {}x{}, GRAY", out_width, out_height);
             FrameData::RawBgr(Bytes::copy_from_slice(frame.buffer()))
         }

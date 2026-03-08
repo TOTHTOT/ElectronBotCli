@@ -4,7 +4,7 @@ use boteyes::Mood;
 use candle_core::quantized::gguf_file::Content;
 use candle_core::{Device, Tensor};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 pub mod quantized_qwen2 {
@@ -28,7 +28,7 @@ impl QwenLlm {
         }
     }
 
-    pub fn load_tokenizer(&mut self, tokenizer_path: &str) -> Result<()> {
+    pub fn load_tokenizer(&mut self, tokenizer_path: impl AsRef<Path>) -> Result<()> {
         let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
             .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
         self.tokenizer = Some(tokenizer);

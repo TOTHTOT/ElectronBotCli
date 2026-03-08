@@ -1,5 +1,4 @@
 pub mod config;
-/// app模块, 负责界面调度以及实际运行功能
 pub mod menu;
 
 use crate::llm::QwenLlm;
@@ -13,9 +12,11 @@ use std::sync::{Arc, Mutex};
 // 导出菜单
 pub use menu::*;
 
+use crate::media::video::process::RotateAngle;
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
 use crate::media::voice::VoiceManager;
+use crate::vision::face::FaceDetector;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
@@ -25,6 +26,7 @@ use std::sync::mpsc::{self, Sender, SyncSender};
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
 /// 主应用
+#[allow(dead_code)]
 pub struct App {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
@@ -45,40 +47,45 @@ pub struct App {
     pub in_llm_test_mode: bool,
     pub llm_test_state: LlmTestState,
     pub text_tx: Sender<String>,
-    #[allow(dead_code)]
     llm: Option<Arc<Mutex<QwenLlm>>>,
+    /// 人脸检测器
+    face_detector: Option<Arc<Mutex<FaceDetector>>>,
     comm_state: Option<CommState>,
     comm_thread: Option<std::thread::JoinHandle<()>>,
     comm_tx: Option<SyncSender<BotRecvType>>,
+
     /// Web 预览服务器
     _web_preview: Option<Arc<WebPreview>>,
+
     /// LCD 帧缓存（用于 Web 预览）
-    lcd_frame_cache: Option<std::sync::Arc<std::sync::Mutex<Option<Vec<u8>>>>>,
+    lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
     /// 模型管理器
     pub _mm: ModelManager,
 }
 
 #[allow(dead_code)]
 impl App {
-    pub fn new(mm: ModelManager) -> Self {
+    pub fn new() -> anyhow::Result<Self> {
+        let lcd = Lcd::new();
+        let config = config::AppConfig::load();
+
+        let mm = ModelManager::init()?;
         // 初始化 LLM
-        let mut llm = QwenLlm::load(mm.get("qwen").expect("qwen model not found"));
-        llm.load_tokenizer(
-            mm.get("tokenizer")
-                .expect("tokenizer not found")
-                .to_str()
-                .unwrap_or(""),
-        )
-        .expect("load tokenizer failed");
-        llm.preload().expect("llm preload failed");
+        log::info!("start load llm");
+        let Some(qw_tokenizer_path) = mm.get("tokenizer") else {
+            anyhow::bail!("tokenizer not found");
+        };
+        let Some(qw_path) = mm.get("qwen") else {
+            anyhow::bail!("qwen not found");
+        };
+        let mut llm = QwenLlm::load(qw_path);
+        llm.load_tokenizer(qw_tokenizer_path)?;
+        llm.preload()?;
+        let llm_arc = Arc::new(Mutex::new(llm));
 
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
 
-        let lcd = Lcd::new();
-        let config = config::AppConfig::load();
-
-        let llm_arc = Arc::new(Mutex::new(llm));
         let is_processing = Arc::new(AtomicBool::new(false));
         let is_processing_clone = is_processing.clone();
         let (result_tx, result_rx) = mpsc::channel();
@@ -98,7 +105,17 @@ impl App {
             );
         });
 
+        // 初始化人脸检测器
+        log::info!("start load yolo face");
+        let Some(yolo_path) = mm.get("yolo_face") else {
+            anyhow::bail!("yolo_face not found");
+        };
+        let face_detector = FaceDetector::new(yolo_path)
+            .map(|d| Arc::new(Mutex::new(d)))
+            .ok();
+
         // 从 ModelManager 获取模型路径并创建 VoiceManager
+        log::info!("start load voice manager");
         let voice_manager = if let (Some(sense_voice_path), Some(silero_vad_path)) =
             (mm.get("sense_voice"), mm.get("silero_vad"))
         {
@@ -116,15 +133,13 @@ impl App {
             None
         };
 
-        // 创建视频捕获器（None 表示使用默认摄像头）
-        let mut video_capture = VideoCapture::new(None);
-        // 获取帧缓存和分辨率
+        let mut video_capture =
+            VideoCapture::new(None, face_detector.clone(), RotateAngle::Rotate270);
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),
             video_capture.resolution_arc(),
         );
-        // 启动视频捕获
         video_capture.start_capture_frames_thread();
 
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
@@ -136,7 +151,10 @@ impl App {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(web_preview_for_thread.run());
         });
-        Self {
+
+        log::info!("init app successfully");
+
+        Ok(Self {
             menu_state,
             selected_menu: MenuItem::DeviceStatus,
             running: true,
@@ -157,13 +175,14 @@ impl App {
             llm_test_state: LlmTestState::default(),
             text_tx,
             llm: Some(llm_arc),
+            face_detector,
             comm_state: None,
             comm_thread: None,
             comm_tx: None,
             _web_preview: Some(web_preview_arc),
             lcd_frame_cache,
             _mm: mm,
-        }
+        })
     }
 
     /// 大语言模型线程, vosk返回的语音消息会丢入此线程解析, 当没联网时使用本地的qwen模型
@@ -276,23 +295,20 @@ impl App {
     }
 
     pub fn next_menu(&mut self) {
-        let items = MenuItem::all();
-        let i = match self.menu_state.selected() {
-            Some(i) => (i + 1) % items.len(),
-            None => 0,
-        };
-        self.menu_state.select(Some(i));
-        self.selected_menu = items[i];
+        self.select_menu(1);
     }
 
     pub fn prev_menu(&mut self) {
+        self.select_menu(-1);
+    }
+
+    fn select_menu(&mut self, delta: isize) {
         let items = MenuItem::all();
-        let i = match self.menu_state.selected() {
-            Some(i) => (i + items.len() - 1) % items.len(),
-            None => 0,
-        };
-        self.menu_state.select(Some(i));
-        self.selected_menu = items[i];
+        let len = items.len();
+        let current = self.menu_state.selected().unwrap_or(0);
+        let new_i = ((current as isize + delta).rem_euclid(len as isize)) as usize;
+        self.menu_state.select(Some(new_i));
+        self.selected_menu = items[new_i];
     }
 
     /// 切换左右窗口焦点
@@ -305,16 +321,18 @@ impl App {
         3 // Wifi名称, Wifi密码, 麦克风名称
     }
 
-    /// 设置模式: 上一项
     pub fn settings_prev(&mut self) {
-        let count = self.settings_item_count();
-        self.settings_selected = (self.settings_selected + count - 1) % count;
+        self.move_settings(-1);
     }
 
-    /// 设置模式: 下一项
     pub fn settings_next(&mut self) {
+        self.move_settings(1);
+    }
+
+    fn move_settings(&mut self, delta: isize) {
         let count = self.settings_item_count();
-        self.settings_selected = (self.settings_selected + 1) % count;
+        self.settings_selected =
+            ((self.settings_selected as isize + delta).rem_euclid(count as isize)) as usize;
     }
 
     /// 保存设置项编辑内容
@@ -416,43 +434,27 @@ pub struct Popup {
 
 impl Popup {
     pub fn new() -> Self {
-        Self {
-            visible: false,
-            config: PopupConfig::default(),
-        }
+        Self::default()
     }
 
-    /// 显示弹窗
     pub fn show(&mut self) {
         self.visible = true;
     }
 
-    /// 隐藏弹窗
     pub fn hide(&mut self) {
         self.visible = false;
     }
 
-    /// 是否可见
     pub fn is_visible(&self) -> bool {
         self.visible
     }
 
-    /// 设置配置
-    pub fn configure(&mut self, config: PopupConfig) {
-        self.config = config;
-    }
-
-    /// 快速设置连接中弹窗
     pub fn show_connecting(&mut self) {
-        self.configure(PopupConfig {
+        self.config = PopupConfig {
             title: " 连接设备 ".to_string(),
             content: "正在通过 USB 连接设备...".to_string(),
-            width: 40,
-            height: 5,
-            border_color: ratatui::style::Color::Green,
-            bg_color: ratatui::style::Color::DarkGray,
-            title_color: ratatui::style::Color::Cyan,
-        });
+            ..PopupConfig::default()
+        };
         self.show();
     }
 }
