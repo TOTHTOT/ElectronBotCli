@@ -183,18 +183,18 @@ impl FaceDetector {
         // NMS 去重
         let results = Self::nms_filter(results, 0.5);
 
-        log::info!("Detected {} faces (after NMS)", results.len());
-        for (i, r) in results.iter().enumerate() {
-            log::info!(
-                "  Face {}: conf={:.3}, box=[{:.3}, {:.3}, {:.3}, {:.3}]",
-                i,
-                r.confidence,
-                r.x,
-                r.y,
-                r.width,
-                r.height
-            );
-        }
+        // log::info!("Detected {} faces (after NMS)", results.len());
+        // for (i, r) in results.iter().enumerate() {
+        //     log::info!(
+        //         "  Face {}: conf={:.3}, box=[{:.3}, {:.3}, {:.3}, {:.3}]",
+        //         i,
+        //         r.confidence,
+        //         r.x,
+        //         r.y,
+        //         r.width,
+        //         r.height
+        //     );
+        // }
 
         Ok(results)
     }

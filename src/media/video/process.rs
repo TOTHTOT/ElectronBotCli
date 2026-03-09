@@ -128,13 +128,13 @@ pub fn process_frame(
     match face_detector.detect(&bgr_data, width, height) {
         Ok(result) => {
             if result.has_face {
-                log::info!(
-                    "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
-                    result.x,
-                    result.y,
-                    result.width,
-                    result.height
-                );
+                // log::info!(
+                //     "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
+                //     result.x,
+                //     result.y,
+                //     result.width,
+                //     result.height
+                // );
                 // 绘制人脸框
                 draw_face_box(
                     &mut bgr_data,
