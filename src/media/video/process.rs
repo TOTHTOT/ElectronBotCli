@@ -136,12 +136,12 @@ fn set_pixel(data: &mut [u8], width: u32, height: u32, x: u32, y: u32, color: [u
     }
 }
 
-/// 处理视频帧（添加人脸检测和框）
+/// 处理视频帧, 添加人脸检测和框
 pub fn process_frame(
     mut bgr_data: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &FaceDetector,
+    face_detector: &mut FaceDetector,
 ) -> Vec<u8> {
     // 尝试检测人脸
     match face_detector.detect(&bgr_data, width, height) {

@@ -4,7 +4,6 @@ use image::{DynamicImage, Rgb, RgbImage};
 use ort::session::{Session, SessionOutputs};
 use ort::value::Tensor;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 
 #[derive(Debug, Clone, Default)]
 #[allow(dead_code)]
@@ -18,7 +17,7 @@ pub struct FaceDetectionResult {
 }
 
 pub struct FaceDetector {
-    session: Arc<Mutex<Session>>,
+    session: Session,
     input_width: u32,
     input_height: u32,
     conf_threshold: f32,
@@ -28,7 +27,7 @@ impl FaceDetector {
     pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
         let session = Session::builder()?.commit_from_file(model_path)?;
         Ok(Self {
-            session: Arc::new(Mutex::new(session)),
+            session,
             input_width: 640,
             input_height: 640,
             conf_threshold: 0.35,
@@ -36,7 +35,7 @@ impl FaceDetector {
     }
 
     pub fn detect(
-        &self,
+        &mut self,
         image_data: &[u8],
         width: u32,
         height: u32,
@@ -45,11 +44,10 @@ impl FaceDetector {
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
 
         let input_tensor = self.preprocess(image_data, width, height)?;
-        let mut session = self.session.lock().unwrap();
-        let outputs = session.run(ort::inputs!["images" => input_tensor])?;
+        let outputs = self.session.run(ort::inputs!["images" => input_tensor])?;
 
         // 传入原图宽高
-        self.postprocess(outputs, scale, width, height)
+        Self::postprocess(outputs, scale, width, height, self.conf_threshold)
     }
 
     /// 检测多张人脸，返回所有结果
@@ -67,8 +65,9 @@ impl FaceDetector {
     /// ```
     ///
     /// ```
+    #[cfg(test)]
     pub fn detect_multiple(
-        &self,
+        &mut self,
         image_data: &[u8],
         width: u32,
         height: u32,
@@ -77,10 +76,9 @@ impl FaceDetector {
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
 
         let input_tensor = self.preprocess(image_data, width, height)?;
-        let mut session = self.session.lock().unwrap();
-        let outputs = session.run(ort::inputs!["images" => input_tensor])?;
+        let outputs = self.session.run(ort::inputs!["images" => input_tensor])?;
 
-        self.postprocess_multiple(outputs, scale, width, height)
+        Self::postprocess_multiple(outputs, scale, width, height, self.conf_threshold)
     }
 
     fn preprocess(
@@ -118,22 +116,23 @@ impl FaceDetector {
         Ok(tensor)
     }
     fn postprocess(
-        &self,
         outputs: SessionOutputs<'_>,
         scale: f32,
         img_width: u32,
         img_height: u32,
+        conf_threshold: f32,
     ) -> anyhow::Result<FaceDetectionResult> {
-        let results = self.postprocess_multiple(outputs, scale, img_width, img_height)?;
+        let results =
+            Self::postprocess_multiple(outputs, scale, img_width, img_height, conf_threshold)?;
         Ok(results.into_iter().next().unwrap_or_default())
     }
 
     fn postprocess_multiple(
-        &self,
         outputs: SessionOutputs<'_>,
         scale: f32,
         img_width: u32,
         img_height: u32,
+        conf_threshold: f32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
         let output = &outputs[0];
         let arr = output.try_extract_array::<f32>()?;
@@ -147,7 +146,7 @@ impl FaceDetector {
 
         for i in 0..num_anchors {
             let score = slice[4 * num_anchors + i];
-            if score > self.conf_threshold {
+            if score > conf_threshold {
                 let box_data = [
                     slice[i],
                     slice[num_anchors + i],
@@ -181,7 +180,10 @@ impl FaceDetector {
         // 按置信度降序排序
         results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
 
-        log::info!("Detected {} faces", results.len());
+        // NMS 去重
+        let results = Self::nms_filter(results, 0.5);
+
+        log::info!("Detected {} faces (after NMS)", results.len());
         for (i, r) in results.iter().enumerate() {
             log::info!(
                 "  Face {}: conf={:.3}, box=[{:.3}, {:.3}, {:.3}, {:.3}]",
@@ -195,6 +197,82 @@ impl FaceDetector {
         }
 
         Ok(results)
+    }
+
+    /// NMS去重
+    ///
+    /// # Arguments
+    ///
+    /// * `detections`: 检测结果列表（需已按置信度降序排序）
+    /// * `iou_threshold`: IoU 阈值，高于此值的框会被移除
+    ///
+    /// returns: 过滤后的结果
+    fn nms_filter(
+        detections: Vec<FaceDetectionResult>,
+        iou_threshold: f32,
+    ) -> Vec<FaceDetectionResult> {
+        if detections.is_empty() {
+            return detections;
+        }
+
+        let mut keep = Vec::new();
+        let mut suppressed = vec![false; detections.len()];
+
+        for i in 0..detections.len() {
+            if suppressed[i] {
+                continue;
+            }
+
+            keep.push(detections[i].clone());
+
+            for j in (i + 1)..detections.len() {
+                if suppressed[j] {
+                    continue;
+                }
+
+                let iou = Self::calculate_iou(&detections[i], &detections[j]);
+                if iou > iou_threshold {
+                    suppressed[j] = true;
+                }
+            }
+        }
+
+        keep
+    }
+
+    /// 计算两个检测框的 IoU
+    fn calculate_iou(a: &FaceDetectionResult, b: &FaceDetectionResult) -> f32 {
+        // 转换为左上角右下角坐标
+        let a_x1 = a.x - a.width / 2.0;
+        let a_y1 = a.y - a.height / 2.0;
+        let a_x2 = a.x + a.width / 2.0;
+        let a_y2 = a.y + a.height / 2.0;
+
+        let b_x1 = b.x - b.width / 2.0;
+        let b_y1 = b.y - b.height / 2.0;
+        let b_x2 = b.x + b.width / 2.0;
+        let b_y2 = b.y + b.height / 2.0;
+
+        // 计算交集
+        let inter_x1 = a_x1.max(b_x1);
+        let inter_y1 = a_y1.max(b_y1);
+        let inter_x2 = a_x2.min(b_x2);
+        let inter_y2 = a_y2.min(b_y2);
+
+        let inter_width = (inter_x2 - inter_x1).max(0.0);
+        let inter_height = (inter_y2 - inter_y1).max(0.0);
+        let inter_area = inter_width * inter_height;
+
+        // 计算并集
+        let a_area = a.width * a.height;
+        let b_area = b.width * b.height;
+        let union_area = a_area + b_area - inter_area;
+
+        if union_area <= 0.0 {
+            0.0
+        } else {
+            inter_area / union_area
+        }
     }
 
     /// 在图片上画框
@@ -215,6 +293,7 @@ impl FaceDetector {
     /// ```
     ///
     /// ```
+    #[cfg(test)]
     pub fn draw_hollow_rect(img: &mut RgbImage, x: i32, y: i32, w: u32, h: u32, color: Rgb<u8>) {
         for i in 0..w {
             let curr_x = x + (i as i32);
@@ -251,7 +330,7 @@ mod tests {
     #[test]
     fn test_face_detection() -> anyhow::Result<()> {
         let mm = ModelManager::init()?;
-        let detector = FaceDetector::new(mm.get("yolo_face").take().unwrap())?;
+        let mut detector = FaceDetector::new(mm.get("yolo_face").take().unwrap())?;
 
         let img_path = "assets/images/figure1.png";
         let img = image::open(img_path)?.to_rgb8();

@@ -1,6 +1,7 @@
 //! 视频模块 - 摄像头捕获
 
 use bytes::Bytes;
+use image::RgbImage;
 
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
@@ -215,7 +216,7 @@ fn capture_frames(
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
-    face_detector: FaceDetector,
+    mut face_detector: FaceDetector,
 ) {
     let mut camera = match open_camera_default(device_name.as_deref()) {
         Ok(mut c) => {
@@ -272,7 +273,7 @@ fn capture_frames(
             rotate_angle,
             width,
             height,
-            &face_detector,
+            &mut face_detector,
         );
 
         // 计算帧率
@@ -293,7 +294,7 @@ fn process_and_rotate(
     bgr: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &FaceDetector,
+    face_detector: &mut FaceDetector,
     rotate_angle: RotateAngle,
 ) -> FrameData {
     let processed = process_frame(bgr, width, height, face_detector);
@@ -334,7 +335,7 @@ fn process_frame_by_format(
     rotate_angle: RotateAngle,
     src_width: u32,
     src_height: u32,
-    face_detector: &FaceDetector,
+    face_detector: &mut FaceDetector,
 ) -> FrameData {
     match format {
         FrameFormat::MJPEG => {
@@ -342,7 +343,17 @@ fn process_frame_by_format(
                 "Frame: {out_width}x{out_height}, MJPEG, {} bytes",
                 frame.buffer().len()
             );
-            FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer()))
+            // MJPEG 解码 -> 人脸检测 -> 重新编码
+            match decode_jpeg_to_rgb(frame.buffer()) {
+                Some(rgb_data) => {
+                    let processed = process_frame(rgb_data, src_width, src_height, face_detector);
+                    match encode_rgb_to_jpeg(&processed, src_width, src_height) {
+                        Some(jpeg_bytes) => FrameData::Jpeg(jpeg_bytes),
+                        None => FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer())),
+                    }
+                }
+                None => FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer())),
+            }
         }
         FrameFormat::YUYV | FrameFormat::NV12 => {
             log::debug!(
@@ -372,5 +383,36 @@ fn process_frame_by_format(
             log::debug!("Frame: {}x{}, GRAY", out_width, out_height);
             FrameData::RawRgb(Bytes::copy_from_slice(frame.buffer()))
         }
+    }
+}
+
+/// 解码 JPEG 为 RGB 数据
+fn decode_jpeg_to_rgb(jpeg_data: &[u8]) -> Option<Vec<u8>> {
+    use std::io::Cursor;
+
+    let cursor = Cursor::new(jpeg_data);
+    let reader = image::ImageReader::with_format(cursor, image::ImageFormat::Jpeg);
+    let image = reader.decode().ok()?;
+
+    // 转换为 RGB8
+    let rgb = image.to_rgb8();
+    Some(rgb.into_raw())
+}
+
+/// 将 RGB 数据编码为 JPEG
+fn encode_rgb_to_jpeg(rgb_data: &[u8], width: u32, height: u32) -> Option<Bytes> {
+    use image::codecs::jpeg::JpegEncoder;
+    use std::io::Cursor;
+
+    let img = RgbImage::from_raw(width, height, rgb_data.to_vec())?;
+
+    let mut output = Vec::new();
+    let cursor = Cursor::new(&mut output);
+    let mut encoder = JpegEncoder::new_with_quality(cursor, 85);
+
+    if encoder.encode_image(&img).is_ok() {
+        Some(Bytes::from(output))
+    } else {
+        None
     }
 }
