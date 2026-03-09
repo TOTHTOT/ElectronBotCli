@@ -105,7 +105,16 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 
     const COLOR: [u8; 3] = [0, 255, 0];
 
-    FaceDetector::draw_hollow_rect_on_raw(bgr_data, width, height, x1, y1, box_w as u32, box_h as u32, COLOR);
+    FaceDetector::draw_hollow_rect_on_raw(
+        bgr_data,
+        width,
+        height,
+        x1,
+        y1,
+        box_w as u32,
+        box_h as u32,
+        COLOR,
+    );
 }
 
 /// 处理视频帧, 添加人脸检测和框
