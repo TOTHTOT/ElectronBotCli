@@ -1,6 +1,6 @@
 //! 视频模块 - 图像处理
 
-use crate::vision::face::FaceDetector;
+use crate::vision::face::{draw_hollow_rect_static, FaceDetectorTrait};
 use std::convert::TryFrom;
 
 /// 旋转角度
@@ -105,7 +105,7 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 
     const COLOR: [u8; 3] = [0, 255, 0];
 
-    FaceDetector::draw_hollow_rect_on_raw(
+    draw_hollow_rect_static(
         bgr_data,
         width,
         height,
@@ -122,7 +122,7 @@ pub fn process_frame(
     mut bgr_data: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &mut FaceDetector,
+    face_detector: &mut Box<dyn FaceDetectorTrait>,
 ) -> Vec<u8> {
     // 尝试检测人脸
     match face_detector.detect(&bgr_data, width, height) {

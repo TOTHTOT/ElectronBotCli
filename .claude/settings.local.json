@@ -78,7 +78,8 @@
       "mcp__filesystem__write_file",
       "mcp__fs__list_directory",
       "mcp__fs__create_directory",
-      "Bash(file:*)"
+      "Bash(file:*)",
+      "Bash(grep:*)"
     ]
   }
 }

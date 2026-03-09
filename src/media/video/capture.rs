@@ -5,7 +5,7 @@ use image::RgbImage;
 
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
-use crate::vision::face::FaceDetector;
+use crate::vision::face::FaceDetectorTrait;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{
     ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
@@ -62,7 +62,7 @@ pub struct VideoCapture {
     /// 旋转角度
     rotate_angle: RotateAngle,
     /// 人脸检测器
-    face_detector: Option<FaceDetector>,
+    face_detector: Option<Box<dyn FaceDetectorTrait>>,
 }
 
 #[allow(dead_code)]
@@ -70,7 +70,7 @@ impl VideoCapture {
     /// 创建新的视频捕获器
     pub fn new(
         device_name: Option<String>,
-        face_detector: FaceDetector,
+        face_detector: Box<dyn FaceDetectorTrait>,
         rotate_angle: RotateAngle,
     ) -> Self {
         log::info!(
@@ -216,7 +216,7 @@ fn capture_frames(
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
-    mut face_detector: FaceDetector,
+    mut face_detector: Box<dyn FaceDetectorTrait>,
 ) {
     let mut camera = match open_camera_default(device_name.as_deref()) {
         Ok(mut c) => {
@@ -294,7 +294,7 @@ fn process_and_rotate(
     bgr: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &mut FaceDetector,
+    face_detector: &mut Box<dyn FaceDetectorTrait>,
     rotate_angle: RotateAngle,
 ) -> FrameData {
     let processed = process_frame(bgr, width, height, face_detector);
@@ -335,7 +335,7 @@ fn process_frame_by_format(
     rotate_angle: RotateAngle,
     src_width: u32,
     src_height: u32,
-    face_detector: &mut FaceDetector,
+    face_detector: &mut Box<dyn FaceDetectorTrait>,
 ) -> FrameData {
     match format {
         FrameFormat::MJPEG => {

@@ -16,7 +16,7 @@ use crate::media::video::process::RotateAngle;
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
 use crate::media::voice::VoiceManager;
-use crate::vision::face::FaceDetector;
+use crate::vision::face::create_face_detector;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
@@ -108,7 +108,7 @@ impl App {
         let Some(yolo_path) = mm.get("yolo_face") else {
             anyhow::bail!("yolo_face not found");
         };
-        let face_detector = FaceDetector::new(yolo_path)?;
+        let face_detector = create_face_detector(yolo_path)?;
 
         // 从 ModelManager 获取模型路径并创建 VoiceManager
         log::info!("start load voice manager");
