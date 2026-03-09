@@ -93,47 +93,19 @@ pub fn rotate_by_angle(bgr_data: &[u8], width: u32, height: u32, angle: RotateAn
 }
 
 /// 绘制人脸框到图像上
+/// 使用 face 模块的统一画框函数
 fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w: f32, h: f32) {
     let cx = (x * width as f32) as i32;
     let cy = (y * height as f32) as i32;
     let box_w = (w * width as f32) as i32;
     let box_h = (h * height as f32) as i32;
 
-    let x1 = (cx - box_w / 2).max(0) as u32;
-    let y1 = (cy - box_h / 2).max(0) as u32;
-    let x2 = (cx + box_w / 2).min(width as i32 - 1) as u32;
-    let y2 = (cy + box_h / 2).min(height as i32 - 1) as u32;
+    let x1 = cx - box_w / 2;
+    let y1 = cy - box_h / 2;
 
     const COLOR: [u8; 3] = [0, 255, 0];
-    const THICKNESS: u32 = 2;
 
-    // 绘制水平线（上下边框）
-    for dy in 0..THICKNESS {
-        for px in x1..=x2 {
-            set_pixel(bgr_data, width, height, px, y1 + dy, COLOR);
-            set_pixel(bgr_data, width, height, px, y2.saturating_sub(dy), COLOR);
-        }
-    }
-
-    // 绘制垂直线（左右边框）
-    for dy in y1..=y2 {
-        for dx in 0..THICKNESS {
-            set_pixel(bgr_data, width, height, x1 + dx, dy, COLOR);
-            set_pixel(bgr_data, width, height, x2.saturating_sub(dx), dy, COLOR);
-        }
-    }
-}
-
-/// 设置像素颜色（带边界检查）
-#[inline]
-fn set_pixel(data: &mut [u8], width: u32, height: u32, x: u32, y: u32, color: [u8; 3]) {
-    if x >= width || y >= height {
-        return;
-    }
-    let idx = (y * width + x) as usize * 3;
-    if idx + 2 < data.len() {
-        data[idx..idx + 3].copy_from_slice(&color);
-    }
+    FaceDetector::draw_hollow_rect_on_raw(bgr_data, width, height, x1, y1, box_w as u32, box_h as u32, COLOR);
 }
 
 /// 处理视频帧, 添加人脸检测和框

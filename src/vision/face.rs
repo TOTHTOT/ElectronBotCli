@@ -275,7 +275,66 @@ impl FaceDetector {
         }
     }
 
-    /// 在图片上画框
+    /// 在 RGB 原始数据上画空心矩形框
+    ///
+    /// # Arguments
+    ///
+    /// * `data`: RGB 字节数据
+    /// * `width`: 图像宽度
+    /// * `height`: 图像高度
+    /// * `x`: 左上角 x 坐标
+    /// * `y`: 左上角 y 坐标
+    /// * `w`: 框宽度
+    /// * `h`: 框高度
+    /// * `color`: RGB 颜色值 [R, G, B]
+    #[allow(clippy::too_many_arguments)]
+    pub fn draw_hollow_rect_on_raw(
+        data: &mut [u8],
+        width: u32,
+        height: u32,
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+        color: [u8; 3],
+    ) {
+        // 辅助函数：设置像素
+        let mut set_pixel = |px: u32, py: u32| {
+            if px >= width || py >= height {
+                return;
+            }
+            let idx = (py * width + px) as usize * 3;
+            if idx + 2 < data.len() {
+                data[idx..idx + 3].copy_from_slice(&color);
+            }
+        };
+
+        // 绘制水平线（上下边框）
+        for i in 0..w {
+            let curr_x = x + (i as i32);
+            if curr_x >= 0 && curr_x < (width as i32) {
+                set_pixel(curr_x as u32, y as u32);
+                let bottom = y + (h as i32) - 1;
+                if bottom >= 0 && bottom < (height as i32) {
+                    set_pixel(curr_x as u32, bottom as u32);
+                }
+            }
+        }
+
+        // 绘制垂直线（左右边框）
+        for i in 0..h {
+            let curr_y = y + (i as i32);
+            if curr_y >= 0 && curr_y < (height as i32) {
+                set_pixel(x as u32, curr_y as u32);
+                let right = x + (w as i32) - 1;
+                if right >= 0 && right < (width as i32) {
+                    set_pixel(right as u32, curr_y as u32);
+                }
+            }
+        }
+    }
+
+    /// 在图片上画框（用于测试，操作 RgbImage）
     ///
     /// # Arguments
     ///
