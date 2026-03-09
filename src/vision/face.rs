@@ -52,6 +52,37 @@ impl FaceDetector {
         self.postprocess(outputs, scale, width, height)
     }
 
+    /// 检测多张人脸，返回所有结果
+    /// 按置信度降序排序
+    /// # Arguments
+    ///
+    /// * `image_data`:
+    /// * `width`:
+    /// * `height`:
+    ///
+    /// returns: Result<Vec<FaceDetectionResult, Global>, Error>
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn detect_multiple(
+        &self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Vec<FaceDetectionResult>> {
+        let scale =
+            (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
+
+        let input_tensor = self.preprocess(image_data, width, height)?;
+        let mut session = self.session.lock().unwrap();
+        let outputs = session.run(ort::inputs!["images" => input_tensor])?;
+
+        self.postprocess_multiple(outputs, scale, width, height)
+    }
+
     fn preprocess(
         &self,
         image_data: &[u8],
@@ -60,17 +91,14 @@ impl FaceDetector {
     ) -> anyhow::Result<Tensor<f32>> {
         let (tw, th) = (self.input_width, self.input_height);
 
-        // 修复：使用 .to_vec() 确保数据拥有所有权，从而匹配 RgbImage (ImageBuffer<Rgb<u8>, Vec<u8>>)
         let img_buffer = RgbImage::from_raw(img_width, img_height, image_data.to_vec())
             .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
         let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
 
-        // Letterbox 缩放
         let scale = (tw as f32 / img_width as f32).min(th as f32 / img_height as f32);
         let nw = (img_width as f32 * scale) as u32;
         let nh = (img_height as f32 * scale) as u32;
 
-        // 修复：确保 resize 后的图像转回 Rgb8，以匹配 canvas 的像素类型
         let resized = dynamic_img
             .resize_exact(nw, nh, image::imageops::FilterType::Triangle)
             .to_rgb8();
@@ -96,6 +124,17 @@ impl FaceDetector {
         img_width: u32,
         img_height: u32,
     ) -> anyhow::Result<FaceDetectionResult> {
+        let results = self.postprocess_multiple(outputs, scale, img_width, img_height)?;
+        Ok(results.into_iter().next().unwrap_or_default())
+    }
+
+    fn postprocess_multiple(
+        &self,
+        outputs: SessionOutputs<'_>,
+        scale: f32,
+        img_width: u32,
+        img_height: u32,
+    ) -> anyhow::Result<Vec<FaceDetectionResult>> {
         let output = &outputs[0];
         let arr = output.try_extract_array::<f32>()?;
         let view = arr.view();
@@ -104,100 +143,79 @@ impl FaceDetector {
             .ok_or_else(|| anyhow::anyhow!("Failed to get slice"))?;
 
         let num_anchors = 8400;
-        let mut best_score = 0.0f32;
-        let mut best_data_640 = [0.0f32; 4];
+        let mut results = Vec::new();
 
         for i in 0..num_anchors {
             let score = slice[4 * num_anchors + i];
-            if score > self.conf_threshold && score > best_score {
-                best_score = score;
-                best_data_640 = [
+            if score > self.conf_threshold {
+                let box_data = [
                     slice[i],
                     slice[num_anchors + i],
                     slice[2 * num_anchors + i],
                     slice[3 * num_anchors + i],
                 ];
+
+                // 转换坐标到原图空间
+                let x_orig_px = box_data[0] / scale;
+                let y_orig_px = box_data[1] / scale;
+                let w_orig_px = box_data[2] / scale;
+                let h_orig_px = box_data[3] / scale;
+
+                // 归一化
+                let norm_x = x_orig_px / img_width as f32;
+                let norm_y = y_orig_px / img_height as f32;
+                let norm_w = w_orig_px / img_width as f32;
+                let norm_h = h_orig_px / img_height as f32;
+
+                results.push(FaceDetectionResult {
+                    has_face: true,
+                    x: norm_x,
+                    y: norm_y,
+                    width: norm_w,
+                    height: norm_h,
+                    confidence: score,
+                });
             }
         }
 
-        if best_score > 0.0 {
-            // 1. 将 640 空间的像素坐标还原回原图空间的绝对像素值 (对标 Python: box / scale)
-            let x_orig_px = best_data_640[0] / scale;
-            let y_orig_px = best_data_640[1] / scale;
-            let w_orig_px = best_data_640[2] / scale;
-            let h_orig_px = best_data_640[3] / scale;
+        // 按置信度降序排序
+        results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
 
-            // 2. 将绝对像素值转为归一化比例 (0.0 ~ 1.0)
-            let norm_x = x_orig_px / img_width as f32;
-            let norm_y = y_orig_px / img_height as f32;
-            let norm_w = w_orig_px / img_width as f32;
-            let norm_h = h_orig_px / img_height as f32;
-
+        log::info!("Detected {} faces", results.len());
+        for (i, r) in results.iter().enumerate() {
             log::info!(
-                "Final Normalized Box: [x={:.4}, y={:.4}, w={:.4}, h={:.4}]",
-                norm_x,
-                norm_y,
-                norm_w,
-                norm_h
+                "  Face {}: conf={:.3}, box=[{:.3}, {:.3}, {:.3}, {:.3}]",
+                i,
+                r.confidence,
+                r.x,
+                r.y,
+                r.width,
+                r.height
             );
-
-            Ok(FaceDetectionResult {
-                has_face: true,
-                x: norm_x,
-                y: norm_y,
-                width: norm_w,
-                height: norm_h,
-                confidence: best_score,
-            })
-        } else {
-            Ok(FaceDetectionResult::default())
         }
-    }
-}
 
-// --- 单元测试部分 ---
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_face_detection() -> anyhow::Result<()> {
-        let model_path = PathBuf::from("/Users/yangyihui/.cache/huggingface/hub/models--deepghs--yolo-face/snapshots/e3662574830c534dfcc9c3b7ea4d89272f8aae4e/yolov8n-face/model.onnx"); // 确保路径正确
-        let detector = FaceDetector::new(model_path)?;
-
-        let img_path = "assets/images/figure2.png";
-        let img = image::open(img_path)?.to_rgb8();
-        let (w, h) = img.dimensions();
-
-        let result = detector.detect(&img.clone().into_raw(), w, h)?;
-
-        if result.has_face {
-            println!("Face detected! Confidence: {:.3}", result.confidence);
-
-            let mut out_img = img;
-            let x1 = (result.x - result.width / 2.0) * w as f32;
-            let y1 = (result.y - result.height / 2.0) * h as f32;
-            let bw = result.width * w as f32;
-            let bh = result.height * h as f32;
-            println!("rect: [{},{},{},{}]", x1, y1, bw, bh);
-            draw_hollow_rect(
-                &mut out_img,
-                x1 as i32,
-                y1 as i32,
-                bw as u32,
-                bh as u32,
-                Rgb([255, 0, 0]),
-            );
-            out_img.save("assets/images/rust_result.png")?;
-            println!("Result saved to assets/images/rust_result.png");
-        } else {
-            println!("No face detected.");
-        }
-        Ok(())
+        Ok(results)
     }
 
-    fn draw_hollow_rect(img: &mut RgbImage, x: i32, y: i32, w: u32, h: u32, color: Rgb<u8>) {
-        // 修复：通过显式括号解决 < 运算符优先级歧义
+    /// 在图片上画框
+    ///
+    /// # Arguments
+    ///
+    /// * `img`:
+    /// * `x`:
+    /// * `y`:
+    /// * `w`:
+    /// * `h`:
+    /// * `color`:
+    ///
+    /// returns: ()
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    pub fn draw_hollow_rect(img: &mut RgbImage, x: i32, y: i32, w: u32, h: u32, color: Rgb<u8>) {
         for i in 0..w {
             let curr_x = x + (i as i32);
             if curr_x >= 0 && curr_x < (img.width() as i32) {
@@ -222,5 +240,72 @@ mod tests {
                 }
             }
         }
+    }
+}
+
+// --- 单元测试部分 ---
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::model_manager::ModelManager;
+    #[test]
+    fn test_face_detection() -> anyhow::Result<()> {
+        let mm = ModelManager::init()?;
+        let detector = FaceDetector::new(mm.get("yolo_face").take().unwrap())?;
+
+        let img_path = "assets/images/figure1.png";
+        let img = image::open(img_path)?.to_rgb8();
+        let (w, h) = img.dimensions();
+
+        // 使用 detect_multiple 获取多张脸
+        let results = detector.detect_multiple(&img.clone().into_raw(), w, h)?;
+
+        if results.is_empty() {
+            println!("No face detected.");
+        } else {
+            println!("Detected {} face(s)", results.len());
+
+            let mut out_img = img;
+            let colors = [
+                Rgb([255, 0, 0]),   // 红色
+                Rgb([0, 255, 0]),   // 绿色
+                Rgb([0, 0, 255]),   // 蓝色
+                Rgb([255, 255, 0]), // 黄色
+                Rgb([255, 0, 255]), // 紫色
+                Rgb([0, 255, 255]), // 青色
+            ];
+
+            for (i, result) in results.iter().enumerate() {
+                println!(
+                    "Face {}: confidence={:.3}, center=({:.3}, {:.3}), size={:.3}x{:.3}",
+                    i + 1,
+                    result.confidence,
+                    result.x,
+                    result.y,
+                    result.width,
+                    result.height
+                );
+
+                let x1 = (result.x - result.width / 2.0) * w as f32;
+                let y1 = (result.y - result.height / 2.0) * h as f32;
+                let bw = result.width * w as f32;
+                let bh = result.height * h as f32;
+                println!("  rect: [{:.1}, {:.1}, {:.1}, {:.1}]", x1, y1, bw, bh);
+
+                let color = colors[i % colors.len()];
+                FaceDetector::draw_hollow_rect(
+                    &mut out_img,
+                    x1 as i32,
+                    y1 as i32,
+                    bw as u32,
+                    bh as u32,
+                    color,
+                );
+            }
+
+            out_img.save("assets/images/rust_result.png")?;
+            println!("Result saved to assets/images/rust_result.png");
+        }
+        Ok(())
     }
 }
