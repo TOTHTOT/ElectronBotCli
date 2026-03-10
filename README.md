@@ -20,7 +20,12 @@
 ## 使用方法
 
 ### 编译
-
+- 当运行在pc平台是, 使用的推理框架是`onnx`, 这时需要手动安装运行时.
+   ```shell
+   brew install onnxruntime # mac
+   sudo apt install libonnxruntime-dev #ubuntu
+   winget install Microsoft.OnnxRuntime #Windows
+   ```
 - 在wsl中通过这个命令`cross build --target aarch64-unknown-linux-gnu --release`就能编译出rk3566的程序, 需要先安装docker, 解决glibc版本问题. 在Windows和wsl下直接编译就能在终端显示了.
 
 - 使用`rsycn`

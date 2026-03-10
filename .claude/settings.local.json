@@ -79,7 +79,18 @@
       "mcp__fs__list_directory",
       "mcp__fs__create_directory",
       "Bash(file:*)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Read(//Users/yangyihui/.cargo/**)",
+      "Read(//Users/yangyihui/**)",
+      "Bash(docker info:*)",
+      "Bash(docker pull:*)",
+      "Bash(mkdir:*)",
+      "Bash(LIBRARY_PATH=/tmp/rk3566-libs/aarch64-linux-gnu cross build:*)",
+      "Bash(RUSTFLAGS=\"-L /tmp/rk3566-libs/aarch64-linux-gnu\" LIBRARY_PATH=/tmp/rk3566-libs/aarch64-linux-gnu cross build:*)",
+      "Read(//private/tmp/cross-docker/**)",
+      "Bash(docker build -t cross-rk3566 .)",
+      "Bash(docker run:*)",
+      "Bash(RUST_LOG=ort=debug cargo run:*)"
     ]
   }
 }

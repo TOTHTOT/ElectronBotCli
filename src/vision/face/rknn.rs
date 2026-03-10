@@ -1,15 +1,8 @@
 //! RKNN 人脸检测后端 (仅支持 Linux aarch64)
-
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-use rknn_rs::prelude::{Rknn, RknnInput, RknnTensorFormat, RknnTensorType};
-
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 use super::detector::{self, FaceDetectionResult, FaceDetectorTrait};
-
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use rknn_rs::prelude::{Rknn, RknnInput, RknnOutput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
 
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 pub struct RknnFaceDetector {
     rknn: Rknn,
     input_width: u32,
@@ -17,11 +10,10 @@ pub struct RknnFaceDetector {
     conf_threshold: f32,
 }
 
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 impl RknnFaceDetector {
     pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
         log::info!("Loading RKNN model: {:?}", model_path);
-        let rknn = Rknn::rknn_init(&model_path)?;
+        let rknn = Rknn::new(&model_path)?;
         log::info!("RKNN model loaded successfully");
         Ok(Self {
             rknn,
@@ -32,7 +24,6 @@ impl RknnFaceDetector {
     }
 }
 
-#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 impl FaceDetectorTrait for RknnFaceDetector {
     fn detect_multiple(
         &mut self,
@@ -61,11 +52,13 @@ impl FaceDetectorTrait for RknnFaceDetector {
         };
         self.rknn.input_set(&mut input)?;
         self.rknn.run()?;
-        let outputs: Vec<f32> = self.rknn.outputs_get()?;
+        let rknn_output: RknnOutput<f32> = self.rknn.outputs_get()?;
 
-        if outputs.is_empty() {
+        if rknn_output.is_empty() {
             return Ok(Vec::new());
         }
+
+        let outputs: Vec<f32> = rknn_output.to_vec();
 
         Ok(detector::postprocess_output(
             &outputs,
@@ -74,18 +67,5 @@ impl FaceDetectorTrait for RknnFaceDetector {
             height,
             self.conf_threshold,
         ))
-    }
-}
-
-// Stub for non-aarch64 linux - never instantiated
-#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
-#[allow(dead_code)]
-pub struct RknnFaceDetector;
-
-#[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
-#[allow(dead_code)]
-impl RknnFaceDetector {
-    pub fn new(_model_path: std::path::PathBuf) -> anyhow::Result<Self> {
-        anyhow::bail!("RKNN is only supported on aarch64-linux")
     }
 }

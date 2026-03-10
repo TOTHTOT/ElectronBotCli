@@ -57,8 +57,6 @@ pub struct App {
 
     /// LCD 帧缓存（用于 Web 预览）
     lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
-    /// 模型管理器
-    pub _mm: ModelManager,
 }
 
 #[allow(dead_code)]
@@ -175,7 +173,6 @@ impl App {
             comm_tx: None,
             _web_preview: Some(web_preview_arc),
             lcd_frame_cache,
-            _mm: mm,
         })
     }
 

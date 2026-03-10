@@ -11,8 +11,20 @@ pub struct OrtFaceDetector {
 }
 
 impl OrtFaceDetector {
+    fn get_onnx_running_time_path() -> PathBuf {
+        if cfg!(target_os = "macos") {
+            PathBuf::from("/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib")
+        } else if cfg!(target_os = "windows") {
+            PathBuf::from("onnxruntime.dll")
+        } else {
+            PathBuf::from("/usr/lib/libonnxruntime.so")
+        }
+    }
     pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
+        log::info!("start build session");
+        ort::init_from(Self::get_onnx_running_time_path())?;
         let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
+        log::info!("build session finished");
         Ok(Self {
             session,
             input_width: 640,
