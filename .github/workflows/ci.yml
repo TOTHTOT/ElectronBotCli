@@ -16,28 +16,40 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
-  build:
+  fmt:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
-
-      - name: Build
-        run: cargo build --all-features --verbose
-
-      - name: Check
-        run: cargo check --all-features --verbose
-
-      - name: Format check
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Check formatting
         run: cargo fmt --check
 
-      - name: Clippy
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Run Clippy
         run: cargo clippy --all-features -- -D warnings
 
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Build
+        run: cargo build --all-features --verbose
+      - name: Check
+        run: cargo check --all-features --verbose
       - name: Test
         run: cargo test --all-features --verbose

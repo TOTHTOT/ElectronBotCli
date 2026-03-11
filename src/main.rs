@@ -22,9 +22,29 @@ use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
 use std::fs::File;
 use std::io::{self, Stdout};
+use std::panic;
 use std::time::Duration;
 
+/// 终端状态守卫，确保退出时恢复终端
+struct TerminalGuard;
+
+impl Drop for TerminalGuard {
+    fn drop(&mut self) {
+        let _ = disable_raw_mode();
+        let _ = io::stdout().execute(LeaveAlternateScreen);
+    }
+}
+
 fn main() -> anyhow::Result<()> {
+    // 设置 panic handler，确保异常退出时恢复终端
+    panic::set_hook(Box::new(|_| {
+        let _ = disable_raw_mode();
+        let _ = io::stdout().execute(LeaveAlternateScreen);
+    }));
+
+    // RAII 守卫，作用域结束时自动恢复终端
+    let _guard = TerminalGuard;
+
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
@@ -39,12 +59,7 @@ fn main() -> anyhow::Result<()> {
     enable_raw_mode()?;
     stdout.execute(EnterAlternateScreen)?;
     let mut terminal = Terminal::new(CrosstermBackend::new(stdout))?;
-    if let Err(e) = run(&mut terminal) {
-        log::error!("app failed: {e}");
-        return Err(e);
-    }
-    disable_raw_mode()?;
-    io::stdout().execute(LeaveAlternateScreen)?;
+    run(&mut terminal)?;
 
     Ok(())
 }
