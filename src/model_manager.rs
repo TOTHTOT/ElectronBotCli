@@ -5,13 +5,38 @@ pub struct ModelManager {
     paths: HashMap<String, PathBuf>,
 }
 
+/// 模型配置: (key, repo_id, filename, rknn_path)
+type ModelConfig = (&'static str, &'static str, &'static str, &'static str);
+
+/// 从 HuggingFace 下载模型
+fn download_from_hf(
+    key: &str,
+    repo_id: &str,
+    filename: &str,
+    api: &hf_hub::api::sync::Api,
+) -> Option<PathBuf> {
+    let repo = api.model(repo_id.to_string());
+    log::info!("正在下载 [{}] from {}/{} ...", key, repo_id, filename);
+    match repo.get(filename) {
+        Ok(path) => {
+            log::info!("✓ 资源就绪 [{}]: {:?}", key, path);
+            Some(path)
+        }
+        Err(e) => {
+            log::error!("✗ 资源缺失 [{}]: {:?}", key, e);
+            None
+        }
+    }
+}
+
 impl ModelManager {
     /// 初始化并同步所有模型
     pub fn init() -> anyhow::Result<Self> {
         let mut paths = HashMap::new();
 
         // 模型配置: (key, repo_id, filename, rknn_path)
-        let models = vec![
+        // 如果 rknn_path 为空或不存在，则使用 hf 默认地址
+        let models: Vec<ModelConfig> = vec![
             ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "/home/radxa/model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn"),
             ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", "/home/radxa/model/deepghs/silero-vad-onnx/silero_vad.rknn"),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
@@ -23,15 +48,17 @@ impl ModelManager {
 
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         {
-            for (key, _repo, _file, rknn) in &models {
-                if !rknn.is_empty() {
+            use hf_hub::api::sync::Api;
+            let api = Api::new()?;
+
+            for (key, repo, filename, rknn) in &models {
+                // 优先使用 rknn 路径, 否则使用 hf 默认路径
+                if !rknn.is_empty() && PathBuf::from(rknn).exists() {
                     let path = PathBuf::from(rknn);
-                    if path.exists() {
-                        log::info!("✓ 使用 RKNN 模型 [{}]: {:?}", key, path);
-                        paths.insert(key.to_string(), path);
-                    } else {
-                        log::warn!("✗ RKNN 模型不存在 [{}]: {:?}", key, path);
-                    }
+                    log::info!("✓ 使用 RKNN 模型 [{}]: {:?}", key, path);
+                    paths.insert(key.to_string(), path);
+                } else if let Some(path) = download_from_hf(key, repo, filename, &api) {
+                    paths.insert(key.to_string(), path);
                 }
             }
         }
@@ -40,17 +67,10 @@ impl ModelManager {
         {
             use hf_hub::api::sync::Api;
             let api = Api::new()?;
-            for (key, repo, file, _rknn) in &models {
-                // 下载模型
-                let repo_id = *repo;
-                let repo = api.model(repo.to_string());
-                log::info!("正在下载 [{}] from {}/{} ...", key, repo_id, file);
-                match repo.get(file) {
-                    Ok(path) => {
-                        log::info!("✓ 资源就绪 [{}]: {:?}", key, path);
-                        paths.insert(key.to_string(), path);
-                    }
-                    Err(e) => log::error!("✗ 资源缺失 [{}]: {:?}", key, e),
+
+            for (key, repo, filename, _rknn) in &models {
+                if let Some(path) = download_from_hf(key, repo, filename, &api) {
+                    paths.insert(key.to_string(), path);
                 }
             }
         }

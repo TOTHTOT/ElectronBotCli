@@ -90,7 +90,8 @@
       "Read(//private/tmp/cross-docker/**)",
       "Bash(docker build -t cross-rk3566 .)",
       "Bash(docker run:*)",
-      "Bash(RUST_LOG=ort=debug cargo run:*)"
+      "Bash(RUST_LOG=ort=debug cargo run:*)",
+      "Bash(gh api:*)"
     ]
   }
 }
