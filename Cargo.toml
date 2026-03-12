@@ -38,11 +38,11 @@ hf-hub = "0.5.0"
 
 # Camera capture
 [target.'cfg(windows)'.dependencies]
-nokhwa = { version = "0.10", features = ["input-native"] }
+nokhwa = { version = "0.10.10", features = ["input-native"] }
 [target.'cfg(unix)'.dependencies]
-nokhwa = { version = "0.10", features = ["input-v4l"] }
+nokhwa = { version = "0.10.10", features = ["input-v4l"] }
 [target.'cfg(target_os = "macos")'.dependencies]
-nokhwa = { version = "0.10", features = ["input-avfoundation"] }
+nokhwa = { version = "0.10.10", features = ["input-avfoundation"] }
 
 # RKNN only for aarch64 linux (RK3566/RK3588)
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]

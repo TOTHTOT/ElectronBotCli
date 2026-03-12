@@ -94,7 +94,8 @@
       "Bash(gh api:*)",
       "Bash(gh repo:*)",
       "Bash(conda info:*)",
-      "WebFetch(domain:docs.radxa.com)"
+      "WebFetch(domain:docs.radxa.com)",
+      "Bash(scp:*)"
     ]
   }
 }
