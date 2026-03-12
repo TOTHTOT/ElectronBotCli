@@ -37,11 +37,11 @@ impl ModelManager {
         // 模型配置: (key, repo_id, filename, rknn_path)
         // 如果 rknn_path 为空或不存在，则使用 hf 默认地址
         let models: Vec<ModelConfig> = vec![
-            ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "/home/radxa/model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn"),
-            ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", "/home/radxa/model/deepghs/silero-vad-onnx/silero_vad.rknn"),
+            ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn"),
+            ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", "./model/deepghs/silero-vad-onnx/silero_vad.rknn"),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
             ("tokenizer", "onnx-community/Qwen2.5-0.5B-Instruct", "tokenizer.json", ""),
-            ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", "/home/radxa/model/deepghs/yolo-face/yolo_face.rknn"),
+            ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", "./model/deepghs/yolo-face/yolo_face.rknn"),
         ];
 
         log::info!("--- 正在检查系统模型资源 ---");
@@ -58,6 +58,7 @@ impl ModelManager {
                     log::info!("✓ 使用 RKNN 模型 [{}]: {:?}", key, path);
                     paths.insert(key.to_string(), path);
                 } else if let Some(path) = download_from_hf(key, repo, filename, &api) {
+                    log::info!("✓ 使用 ONNX 模型 [{}]: {:?}", key, path);
                     paths.insert(key.to_string(), path);
                 }
             }

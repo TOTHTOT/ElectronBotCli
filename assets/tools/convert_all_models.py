@@ -6,7 +6,7 @@ MODELS = [
     {
         'name': 'sense_voice',
         'onnx': '/home/radxa/.cache/huggingface/hub/models--csukuangfj--sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/snapshots/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx',
-        'rknn': '/home/radxa/model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn',
+        'rknn': './model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn',
         'inputs': ['x', 'x_length', 'language', 'text_norm'],
         'input_size_list': [[1, 300, 560], [1], [1], [1]],
     },
@@ -18,7 +18,7 @@ MODELS = [
     {
         'name': 'yolo_face',
         'onnx': '/home/radxa/.cache/huggingface/hub/models--deepghs--yolo-face/snapshots/e3662574830c534dfcc9c3b7ea4d89272f8aae4e/yolov8n-face/model.onnx',
-        'rknn': '/home/radxa/model/deepghs/yolo-face/yolo_face.rknn',
+        'rknn': './model/deepghs/yolo-face/yolo_face.rknn',
         'inputs': ['images'],
         'input_size_list': [[1, 3, 640, 640]],
     },

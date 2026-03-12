@@ -18,6 +18,7 @@
 - 在添加完基本功能后希望机器人能够自主移动, 通过识别aruco码来让机器人回到充电桩.
 
 ## 使用方法
+- 拿到对应的ele_bot程序后直接运行会在huggingface的默认目录下载模型, 然后程序退出手动调用`convert_all_models.py`进行模型转换再次启动程序即可.
 
 ### 编译
 - 当运行在pc平台是, 使用的推理框架是`onnx`, 这时需要手动安装运行时.
@@ -46,9 +47,10 @@
 # cross+docker 编译程序, cross 配置参考 Cross.toml
 cross build --target aarch64-unknown-linux-gnu --release
 # 发送编译好的程序
-sshpass -p 'radxa' scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.202:~/ElectronBotCli
+scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.202:~/ElectronBotCli
 # 同步资源文件
-sshpass -p 'radxa' scp -r ./external radxa@192.168.2.159:~/ElectronBotCli/
+scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarch64-unknown-linux-gnu/release/libonnxruntime.so radxa@192.168.2.202:~/
+scp assets/tools/convert_all_models.py  radxa@192.168.2.202:~/ElectronBotCli
 ```
 
 ## 备注

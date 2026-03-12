@@ -91,7 +91,10 @@
       "Bash(docker build -t cross-rk3566 .)",
       "Bash(docker run:*)",
       "Bash(RUST_LOG=ort=debug cargo run:*)",
-      "Bash(gh api:*)"
+      "Bash(gh api:*)",
+      "Bash(gh repo:*)",
+      "Bash(conda info:*)",
+      "WebFetch(domain:docs.radxa.com)"
     ]
   }
 }
