@@ -7,7 +7,9 @@ DEVICE="radxa@192.168.2.202"
 REMOTE_DIR="~/ElectronBotCli"
 
 echo "=== 开始编译 ==="
-if ! cross build --release --target $TARGET; then
+if ! http_proxy=http://192.168.2.147:7890 \
+     https_proxy=http://192.168.2.147:7890 \
+     cross build --release --target $TARGET; then
     echo "编译失败！"
     exit 1
 fi
