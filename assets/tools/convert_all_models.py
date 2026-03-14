@@ -44,15 +44,12 @@ def convert_model(model):
 
     try:
         rknn = RKNN()
-        rknn.config(target_platform='rk3566')
-
         print(f"Loading ONNX: {onnx_path}")
-
-        # 获取模型特定的配置
-        inputs = model.get('inputs', None)
-        input_size_list = model.get('input_size_list', None)
-
-        ret = rknn.load_onnx(onnx_path, inputs=inputs, input_size_list=input_size_list)
+        rknn.config(mean_values=[[0, 0, 0]], std_values=[[255, 255, 255]], target_platform='rk3566')
+        ret = rknn.load_onnx(
+                    model=onnx_path,
+                    inputs=model.get('inputs'),
+                    input_size_list=model.get('input_size_list'))
         if ret != 0:
             print(f"Error: Load ONNX failed!")
             return False

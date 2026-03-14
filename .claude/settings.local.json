@@ -100,7 +100,10 @@
       "Bash(brew:*)",
       "Bash(OPENSSL_DIR=/opt/homebrew/opt/openssl@3 cargo build:*)",
       "Bash(chmod +x:*)",
-      "Bash(/Users/yangyihui/WorkSpace/ElectronBotCli/scripts/deploy_rk3566.sh:*)"
+      "Bash(/Users/yangyihui/WorkSpace/ElectronBotCli/scripts/deploy_rk3566.sh:*)",
+      "Bash(source:*)",
+      "Bash(CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 cross build:*)",
+      "Bash(python3:*)"
     ]
   }
 }
