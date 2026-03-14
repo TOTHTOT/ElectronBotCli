@@ -95,7 +95,12 @@
       "Bash(gh repo:*)",
       "Bash(conda info:*)",
       "WebFetch(domain:docs.radxa.com)",
-      "Bash(scp:*)"
+      "Bash(scp:*)",
+      "Bash(OPENSSL_DIR=/usr/local/opt/openssl@3 cargo build:*)",
+      "Bash(brew:*)",
+      "Bash(OPENSSL_DIR=/opt/homebrew/opt/openssl@3 cargo build:*)",
+      "Bash(chmod +x:*)",
+      "Bash(/Users/yangyihui/WorkSpace/ElectronBotCli/scripts/deploy_rk3566.sh:*)"
     ]
   }
 }
