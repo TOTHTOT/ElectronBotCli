@@ -55,8 +55,8 @@ pub struct VideoCapture {
     frame_cache: FrameCache,
     /// 运行标志
     running: Arc<AtomicBool>,
-    /// 摄像头名称
-    device_name: Option<String>,
+    /// 摄像头索引
+    camera_index: CameraIndex,
     /// 实际分辨率
     resolution: Arc<Mutex<(u32, u32)>>,
     /// 旋转角度
@@ -69,18 +69,18 @@ pub struct VideoCapture {
 impl VideoCapture {
     /// 创建新的视频捕获器
     pub fn new(
-        device_name: Option<String>,
+        camera_index: CameraIndex,
         face_detector: Box<dyn FaceDetectorTrait>,
         rotate_angle: RotateAngle,
     ) -> Self {
         log::info!(
-            "Creating VideoCapture with device: {device_name:?}, rotation: {rotate_angle:?}"
+            "Creating VideoCapture with index: {camera_index:?}, rotation: {rotate_angle:?}"
         );
 
         Self {
             frame_cache: Arc::new(Mutex::new(None)),
             running: Arc::new(AtomicBool::new(false)),
-            device_name,
+            camera_index,
             resolution: Arc::new(Mutex::new((0, 0))),
             rotate_angle,
             face_detector: Some(face_detector),
@@ -123,7 +123,7 @@ impl VideoCapture {
         }
         self.running.store(true, Ordering::Relaxed);
 
-        let device_name = self.device_name.clone();
+        let camera_index = self.camera_index.clone();
         let frame_cache = self.frame_cache.clone();
         let running = self.running.clone();
         let resolution = self.resolution.clone();
@@ -135,7 +135,7 @@ impl VideoCapture {
 
         std::thread::spawn(move || {
             capture_frames(
-                device_name,
+                camera_index,
                 frame_cache,
                 running,
                 resolution,
@@ -182,25 +182,9 @@ impl VideoCapture {
 }
 
 /// 打开摄像头
-fn open_camera_default(device_name: Option<&str>) -> anyhow::Result<Camera> {
-    let cameras = VideoCapture::list_cameras()?;
-    log::info!("Available cameras: {:?}", cameras);
+fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
+    log::info!("Opening camera with index: {:?}", index);
 
-    // 根据名称查找对应的索引
-    let index = match device_name {
-        Some(name) => {
-            // 查找匹配的摄像头
-            if let Some(camera_info) = cameras.iter().find(|c| c.human_name() == name) {
-                log::info!("Found camera '{}' at index {:?}", name, camera_info.index());
-                CameraIndex::Index(camera_info.index().as_index()?)
-            } else {
-                // 如果找不到，尝试使用索引 0
-                log::warn!("Camera '{}' not found, falling back to index 0", name);
-                CameraIndex::Index(0)
-            }
-        }
-        None => CameraIndex::Index(0),
-    };
     let format_type = RequestedFormatType::HighestResolution(Resolution {
         width_x: 640,
         height_y: 480,
@@ -211,14 +195,14 @@ fn open_camera_default(device_name: Option<&str>) -> anyhow::Result<Camera> {
 
 /// 捕获帧循环
 fn capture_frames(
-    device_name: Option<String>,
+    camera_index: CameraIndex,
     frame_cache: FrameCache,
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
     mut face_detector: Box<dyn FaceDetectorTrait>,
 ) {
-    let mut camera = match open_camera_default(device_name.as_deref()) {
+    let mut camera = match open_camera_default(camera_index) {
         Ok(mut c) => {
             c.open_stream().context("Failed to open stream").unwrap();
             c

@@ -1,6 +1,4 @@
 //! 人脸检测 trait 定义
-
-use image::{DynamicImage, Rgb, RgbImage};
 use std::path::PathBuf;
 
 /// 人脸检测结果

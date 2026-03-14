@@ -19,6 +19,7 @@ use crate::media::voice::VoiceManager;
 use crate::vision::face::create_face_detector;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
+use nokhwa::utils::CameraIndex;
 use ratatui::widgets::ListState;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender, SyncSender};
@@ -127,7 +128,8 @@ impl App {
             None
         };
 
-        let mut video_capture = VideoCapture::new(None, face_detector, RotateAngle::Rotate270);
+        let mut video_capture =
+            VideoCapture::new(CameraIndex::Index(0), face_detector, RotateAngle::Rotate270);
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),
