@@ -1,5 +1,8 @@
 //! RKNN 人脸检测后端 (仅支持 Linux aarch64)
-use super::detector::{self, draw_hollow_rect_static, FaceDetectionResult, FaceDetectorTrait};
+use super::detector::{
+    self, draw_hollow_rect_static, nms_filter, FaceDetectionResult, FaceDetectorTrait,
+};
+use image::{DynamicImage, RgbImage};
 use rknn_rs::prelude::{Rknn, RknnInput, RknnOutput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
 
@@ -34,7 +37,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
         let scale =
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
 
-        let input_data = detector::preprocess_image(
+        let input_data = preprocess_image(
             image_data,
             width,
             height,
@@ -60,7 +63,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
 
         let outputs: Vec<f32> = rknn_output.to_vec();
 
-        Ok(detector::postprocess_output(
+        Ok(postprocess_output(
             &outputs,
             scale,
             width,
@@ -70,6 +73,73 @@ impl FaceDetectorTrait for RknnFaceDetector {
     }
 }
 
+fn preprocess_image(
+    image_data: &[u8],
+    img_width: u32,
+    img_height: u32,
+    input_width: u32,
+    input_height: u32,
+) -> anyhow::Result<Vec<f32>> {
+    let img_buffer = RgbImage::from_raw(img_width, img_height, image_data.to_vec())
+        .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
+    let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
+
+    // 缩放图片
+    let resized = dynamic_img
+        .resize_exact(
+            input_width,
+            input_height,
+            image::imageops::FilterType::Triangle,
+        )
+        .to_rgb8();
+
+    let mut input = Vec::with_capacity((3 * input_width * input_height) as usize);
+
+    for pixel in resized.pixels() {
+        input.push(pixel.0[0] as f32);
+        input.push(pixel.0[1] as f32);
+        input.push(pixel.0[2] as f32);
+    }
+
+    Ok(input)
+}
+
+fn postprocess_output(
+    output_slice: &[f32],
+    _scale: f32, // 如果用了 resize_exact，scale 其实就是 input/img_size
+    img_width: u32,
+    img_height: u32,
+    conf_threshold: f32,
+) -> Vec<FaceDetectionResult> {
+    let num_anchors = 8400;
+    let mut results = Vec::new();
+
+    for i in 0..num_anchors {
+        let x_center = output_slice[i];
+        let y_center = output_slice[num_anchors + i];
+        let w = output_slice[2 * num_anchors + i];
+        let h = output_slice[3 * num_anchors + i];
+        let score = output_slice[4 * num_anchors + i];
+
+        if score > conf_threshold {
+            let x1 = (x_center - w / 2.0) / 640.0;
+            let y1 = (y_center - h / 2.0) / 640.0;
+            let norm_w = w / 640.0;
+            let norm_h = h / 640.0;
+
+            results.push(FaceDetectionResult {
+                has_face: true,
+                x: x1,
+                y: y1,
+                width: norm_w,
+                height: norm_h,
+                confidence: score,
+            });
+        }
+    }
+
+    nms_filter(results, 0.45)
+}
 /// 测试人脸检测功能
 pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::Result<()> {
     let model_path = PathBuf::from(model_path);
@@ -108,16 +178,7 @@ pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::R
             h,
             face.confidence
         );
-        draw_hollow_rect_static(
-            result_img.as_mut(),
-            width,
-            height,
-            x,
-            y,
-            w,
-            h,
-            [0, 255, 0],
-        );
+        draw_hollow_rect_static(result_img.as_mut(), width, height, x, y, w, h, [0, 255, 0]);
     }
 
     // 保存结果
