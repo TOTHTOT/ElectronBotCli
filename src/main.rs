@@ -7,6 +7,7 @@ mod llm;
 mod media;
 mod model_manager;
 mod robot;
+mod test_mode;
 mod ui;
 mod ui_components;
 mod vision;
@@ -53,6 +54,11 @@ fn main() -> anyhow::Result<()> {
             f,
         )])
         .ok();
+    }
+
+    // 测试模式, 根据配置的环境变量做测试功能, 执行完直接退出
+    if test_mode::run_test_mode()? {
+        return Ok(());
     }
 
     let mut stdout = io::stdout();

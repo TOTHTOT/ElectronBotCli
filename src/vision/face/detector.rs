@@ -133,13 +133,16 @@ pub fn preprocess_image(
     let mut canvas = RgbImage::from_pixel(input_width, input_height, Rgb([114, 114, 114]));
     image::imageops::overlay(&mut canvas, &resized, 0, 0);
 
-    // NCHW 格式
+    // NHWC 格式 (Height, Width, Channel) - 使用 0-255 范围
     let mut input = vec![0.0f32; (3 * input_width * input_height) as usize];
     let area = (input_width * input_height) as usize;
     for (i, pixel) in canvas.pixels().enumerate() {
-        input[i] = pixel.0[0] as f32 / 255.0;
-        input[i + area] = pixel.0[1] as f32 / 255.0;
-        input[i + 2 * area] = pixel.0[2] as f32 / 255.0;
+        let x = (i as u32) % input_width;
+        let y = (i as u32) / input_width;
+        let idx = (y * input_width + x) as usize;
+        input[idx] = pixel.0[0] as f32;
+        input[idx + area] = pixel.0[1] as f32;
+        input[idx + 2 * area] = pixel.0[2] as f32;
     }
 
     Ok(input)

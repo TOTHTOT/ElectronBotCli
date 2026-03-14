@@ -20,13 +20,13 @@ if ! scp target/$TARGET/release/ele_bot $DEVICE:$REMOTE_DIR/ele_bot; then
 fi
 
 # 复制 assets 目录（如果存在）
-if [ -d "assets" ]; then
-    echo "=== 复制 assets 目录 ==="
-    if ! scp -r assets $DEVICE:$REMOTE_DIR/; then
-        echo "复制 assets 失败！"
-        exit 1
-    fi
-fi
+#if [ -d "assets" ]; then
+#    echo "=== 复制 assets 目录 ==="
+#    if ! scp -r assets $DEVICE:$REMOTE_DIR/; then
+#        echo "复制 assets 失败！"
+#        exit 1
+#    fi
+#fi
 
 echo "=== 部署完成 ==="
 echo ""

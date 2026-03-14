@@ -1,5 +1,5 @@
 //! RKNN 人脸检测后端 (仅支持 Linux aarch64)
-use super::detector::{self, FaceDetectionResult, FaceDetectorTrait};
+use super::detector::{self, draw_hollow_rect_static, FaceDetectionResult, FaceDetectorTrait};
 use rknn_rs::prelude::{Rknn, RknnInput, RknnOutput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
 
@@ -48,7 +48,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
             buf: input_data,
             pass_through: false,
             type_: RknnTensorType::Float32,
-            fmt: RknnTensorFormat::NCHW,
+            fmt: RknnTensorFormat::NHWC,
         };
         self.rknn.input_set(&mut input)?;
         self.rknn.run()?;
@@ -68,4 +68,62 @@ impl FaceDetectorTrait for RknnFaceDetector {
             self.conf_threshold,
         ))
     }
+}
+
+/// 测试人脸检测功能
+pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::Result<()> {
+    let model_path = PathBuf::from(model_path);
+    let test_image_path = PathBuf::from(test_image_path);
+
+    log::info!("Testing RKNN face detection");
+    log::info!("Model: {:?}", model_path);
+    log::info!("Test image: {:?}", test_image_path);
+
+    // 加载图片
+    let img = image::open(&test_image_path)?;
+    let rgb_img = img.to_rgb8();
+    let (width, height) = rgb_img.dimensions();
+    log::info!("Image dimensions: {}x{}", width, height);
+
+    // 创建检测器
+    let mut detector = RknnFaceDetector::new(model_path)?;
+
+    // 运行检测
+    let results = detector.detect_multiple(rgb_img.as_raw(), width, height)?;
+    log::info!("Detected {} faces", results.len());
+
+    // 绘制结果 (坐标是归一化的，需要转换为像素坐标)
+    let mut result_img = rgb_img.clone();
+    for (i, face) in results.iter().enumerate() {
+        let x = (face.x * width as f32) as i32;
+        let y = (face.y * height as f32) as i32;
+        let w = (face.width * width as f32) as u32;
+        let h = (face.height * height as f32) as u32;
+        log::info!(
+            "Face {}: x={}, y={}, w={}, h={}, confidence={:.2}",
+            i + 1,
+            x,
+            y,
+            w,
+            h,
+            face.confidence
+        );
+        draw_hollow_rect_static(
+            result_img.as_mut(),
+            width,
+            height,
+            x,
+            y,
+            w,
+            h,
+            [0, 255, 0],
+        );
+    }
+
+    // 保存结果
+    let output_path = PathBuf::from("rknn_test_result.png");
+    result_img.save(&output_path)?;
+    log::info!("Result saved to: {:?}", output_path);
+
+    Ok(())
 }
