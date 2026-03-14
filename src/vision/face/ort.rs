@@ -1,6 +1,6 @@
 //! ONNX 人脸检测后端
 
-use super::detector::{self, nms_filter, FaceDetectionResult, FaceDetectorTrait};
+use super::detector::{nms_filter, FaceDetectionResult, FaceDetectorTrait};
 use image::{DynamicImage, Rgb, RgbImage};
 use std::path::PathBuf;
 
