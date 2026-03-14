@@ -1,10 +1,10 @@
 //! RKNN 人脸检测后端 (仅支持 Linux aarch64)
 use super::detector::{
-    self, draw_hollow_rect_static, nms_filter, FaceDetectionResult, FaceDetectorTrait,
+    draw_hollow_rect_static, nms_filter, FaceDetectionResult, FaceDetectorTrait,
 };
-use image::{DynamicImage, RgbImage};
 use rknn_rs::prelude::{Rknn, RknnInput, RknnOutput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
+use std::time::Instant;
 
 pub struct RknnFaceDetector {
     rknn: Rknn,
@@ -34,10 +34,8 @@ impl FaceDetectorTrait for RknnFaceDetector {
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
-        let scale =
-            (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
-
-        let input_data = preprocess_image(
+        // 1. 快速 Letterbox 预处理
+        let input_data = preprocess_image_letterbox(
             image_data,
             width,
             height,
@@ -45,92 +43,104 @@ impl FaceDetectorTrait for RknnFaceDetector {
             self.input_height,
         )?;
 
-        // RKNN 推理
+        let start = Instant::now();
+        // 2. RKNN 推理
         let mut input = RknnInput {
             index: 0,
             buf: input_data,
-            pass_through: false,
-            type_: RknnTensorType::Float32,
+            pass_through: false, // 让 NPU 处理模型内置的 mean/std
+            type_: RknnTensorType::Uint8,
             fmt: RknnTensorFormat::NHWC,
         };
+
         self.rknn.input_set(&mut input)?;
         self.rknn.run()?;
+
         let rknn_output: RknnOutput<f32> = self.rknn.outputs_get()?;
+        log::debug!("rknn used time: {:?}", start.elapsed());
 
         if rknn_output.is_empty() {
             return Ok(Vec::new());
         }
 
-        let outputs: Vec<f32> = rknn_output.to_vec();
-
+        // 3. 后处理（包含坐标还原）
         Ok(postprocess_output(
-            &outputs,
-            scale,
+            &rknn_output.to_vec(),
             width,
             height,
+            self.input_width,
+            self.input_height,
             self.conf_threshold,
         ))
     }
 }
 
-fn preprocess_image(
+/// 使用 Letterbox 方式将图像放入模型输入框，不进行 CPU 缩放以节省性能
+fn preprocess_image_letterbox(
     image_data: &[u8],
     img_width: u32,
     img_height: u32,
     input_width: u32,
     input_height: u32,
-) -> anyhow::Result<Vec<f32>> {
-    let img_buffer = RgbImage::from_raw(img_width, img_height, image_data.to_vec())
-        .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
-    let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
+) -> anyhow::Result<Vec<u8>> {
+    let start = Instant::now();
+    let mut canvas = vec![0u8; (input_width * input_height * 3) as usize];
 
-    // 缩放图片
-    let resized = dynamic_img
-        .resize_exact(
-            input_width,
-            input_height,
-            image::imageops::FilterType::Triangle,
-        )
-        .to_rgb8();
+    let x_offset = (input_width.saturating_sub(img_width)) / 2;
+    let y_offset = (input_height.saturating_sub(img_height)) / 2;
 
-    let mut input = Vec::with_capacity((3 * input_width * input_height) as usize);
+    let src_stride = (img_width * 3) as usize;
+    let dst_stride = (input_width * 3) as usize;
+    let x_offset_bytes = (x_offset * 3) as usize;
 
-    for pixel in resized.pixels() {
-        input.push(pixel.0[0] as f32);
-        input.push(pixel.0[1] as f32);
-        input.push(pixel.0[2] as f32);
+    // 逐行拷贝内存
+    for y in 0..(img_height as usize).min(input_height as usize) {
+        let src_start = y * src_stride;
+        let dst_start = (y + y_offset as usize) * dst_stride + x_offset_bytes;
+
+        // 核心提速：copy_from_slice 是 CPU 拷贝的最快路径
+        canvas[dst_start..dst_start + src_stride].copy_from_slice(&image_data[src_start..src_start + src_stride]);
     }
 
-    Ok(input)
+    log::debug!("preprocess_image (Letterbox) used time: {:?}", start.elapsed());
+    Ok(canvas)
 }
 
 fn postprocess_output(
     output_slice: &[f32],
-    _scale: f32, // 如果用了 resize_exact，scale 其实就是 input/img_size
-    img_width: u32,
-    img_height: u32,
+    orig_width: u32,
+    orig_height: u32,
+    model_w: u32,
+    model_h: u32,
     conf_threshold: f32,
 ) -> Vec<FaceDetectionResult> {
+    let start = Instant::now();
     let num_anchors = 8400;
     let mut results = Vec::new();
 
+    // 计算预处理时的偏移量，用于坐标还原
+    let x_offset = (model_w as f32 - orig_width as f32) / 2.0;
+    let y_offset = (model_h as f32 - orig_height as f32) / 2.0;
+
     for i in 0..num_anchors {
-        let x_center = output_slice[i];
-        let y_center = output_slice[num_anchors + i];
-        let w = output_slice[2 * num_anchors + i];
-        let h = output_slice[3 * num_anchors + i];
         let score = output_slice[4 * num_anchors + i];
 
         if score > conf_threshold {
-            let x1 = (x_center - w / 2.0) / 640.0;
-            let y1 = (y_center - h / 2.0) / 640.0;
-            let norm_w = w / 640.0;
-            let norm_h = h / 640.0;
+            let x_center = output_slice[i];
+            let y_center = output_slice[num_anchors + i];
+            let w = output_slice[2 * num_anchors + i];
+            let h = output_slice[3 * num_anchors + i];
+
+            // 坐标还原：减去 Letterbox 的黑边偏移，再归一化到原始图像尺寸
+            let real_x = (x_center - x_offset - w / 2.0) / orig_width as f32;
+            let real_y = (y_center - y_offset - h / 2.0) / orig_height as f32;
+            let norm_w = w / orig_width as f32;
+            let norm_h = h / orig_height as f32;
 
             results.push(FaceDetectionResult {
                 has_face: true,
-                x: x1,
-                y: y1,
+                x: real_x,
+                y: real_y,
                 width: norm_w,
                 height: norm_h,
                 confidence: score,
@@ -138,8 +148,11 @@ fn postprocess_output(
         }
     }
 
-    nms_filter(results, 0.45)
+    let nms = nms_filter(results, 0.45);
+    log::debug!("NMS filter used time: {:?}", start.elapsed());
+    nms
 }
+
 /// 测试人脸检测功能
 pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::Result<()> {
     let model_path = PathBuf::from(model_path);

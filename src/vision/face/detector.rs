@@ -21,7 +21,9 @@ pub trait FaceDetectorTrait: Send + Sync {
         width: u32,
         height: u32,
     ) -> anyhow::Result<FaceDetectionResult> {
+        let start_time = std::time::Instant::now();
         let results = self.detect_multiple(image_data, width, height)?;
+        log::debug!("detect used time: {:?}", start_time.elapsed());
         Ok(results.into_iter().next().unwrap_or_default())
     }
 

@@ -14,7 +14,7 @@ use nokhwa::utils::{
 use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-
+use std::time::Instant;
 use anyhow::Context;
 #[cfg(feature = "fps-counter")]
 use std::time::Instant;
@@ -248,6 +248,7 @@ fn capture_frames(
                 continue;
             }
         };
+        let start_time = Instant::now();
         // 拿到原始的图像数据然后根据格式处理帧数据
         let frame_data = process_frame_by_format(
             frame,
@@ -259,6 +260,7 @@ fn capture_frames(
             height,
             &mut face_detector,
         );
+        log::debug!("process used time: {:?}", start_time.elapsed());
 
         // 计算帧率
         #[cfg(feature = "fps-counter")]
@@ -281,7 +283,9 @@ fn process_and_rotate(
     face_detector: &mut Box<dyn FaceDetectorTrait>,
     rotate_angle: RotateAngle,
 ) -> FrameData {
+    let start_time = Instant::now();
     let processed = process_frame(bgr, width, height, face_detector);
+    log::debug!("process_frame used time: {:?}", start_time.elapsed());
     let rotated = if rotate_angle == RotateAngle::None {
         processed
     } else {

@@ -15,6 +15,7 @@ use image::{ImageBuffer, Rgb};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::time::Instant;
 
 /// LCD 帧缓存
 type LcdFrameCache = Arc<Mutex<Option<Vec<u8>>>>;
@@ -117,14 +118,15 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
                 if jpeg.is_empty() {
                     log::warn!("Empty JPEG, skipping frame");
                 } else {
-                    log::debug!("JPEG encoded: {} bytes", jpeg.len());
+                    let start = Instant::now();
                     // 将 JPEG 转换为 Base64 字符串, 后续优化了 直接发图片数据
                     let encoded = base64::engine::general_purpose::STANDARD.encode(&jpeg);
+                    log::debug!("JPEG encoded: {} bytes, used time: {:?}", jpeg.len(), start.elapsed());
                     yield Ok::<_, Infallible>(Event::default().data(encoded));
                 }
             }
 
-            tokio::time::sleep(tokio::time::Duration::from_millis(33)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(330)).await;
         }
     };
 

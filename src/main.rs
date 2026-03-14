@@ -49,7 +49,7 @@ fn main() -> anyhow::Result<()> {
     let log_file = File::create("ele_bot.log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
-            simplelog::LevelFilter::Info,
+            simplelog::LevelFilter::Debug,
             Config::default(),
             f,
         )])

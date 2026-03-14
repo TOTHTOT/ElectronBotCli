@@ -51,10 +51,11 @@ def main():
     if ret != 0:
         print('Load RKNN model failed')
         return
-
     # 2. 初始化环境
     print('--> Init runtime environment on RK3566')
     ret = rknn.init_runtime(target='rk3566')
+    sdk_version = rknn.get_sdk_version()
+    print("sdk_version: ", sdk_version)
     if ret != 0:
         print('Init runtime failed')
         return
