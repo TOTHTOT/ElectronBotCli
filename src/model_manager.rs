@@ -38,10 +38,12 @@ impl ModelManager {
         // 如果 rknn_path 为空或不存在，则使用 hf 默认地址
         let models: Vec<ModelConfig> = vec![
             ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn"),
-            ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", "./model/deepghs/silero-vad-onnx/silero_vad.rknn"),
+            ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", ""),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
             ("tokenizer", "onnx-community/Qwen2.5-0.5B-Instruct", "tokenizer.json", ""),
-            ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", "./model/deepghs/yolo-face/yolo_face.rknn"),
+            ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", ""),
+            ("retinaface_rknn", "ElectronBotCli/retinaface_rknn", "model/RetinaFace.rknn", ""),
+            ("retinaface_test_img", "ElectronBotCli/retinaface_rknn", "model/test.jpg", ""),
         ];
 
         log::info!("--- 正在检查系统模型资源 ---");

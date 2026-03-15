@@ -1,7 +1,5 @@
-//! RKNN 人脸检测后端 (仅支持 Linux aarch64)
-use super::detector::{
-    draw_hollow_rect_static, nms_filter, FaceDetectionResult, FaceDetectorTrait,
-};
+//! 兼容原有接口的 RetinaFace 增强后端
+use super::detector::{nms_filter, FaceDetectionResult, FaceDetectorTrait};
 use rknn_rs::prelude::{Rknn, RknnInput, RknnOutput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
 use std::time::Instant;
@@ -11,70 +9,28 @@ pub struct RknnFaceDetector {
     input_width: u32,
     input_height: u32,
     conf_threshold: f32,
+    // 新增：预生成的先验框，避免每次推理都计算
+    priors: Vec<[f32; 4]>,
 }
 
 impl RknnFaceDetector {
     pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
-        log::info!("Loading RKNN model: {:?}", model_path);
         let rknn = Rknn::new(&model_path)?;
-        log::info!("RKNN model loaded successfully");
+        let input_width = 320; // 建议 RK3566 用 320
+        let input_height = 320;
+
+        // 初始化时一次性生成 priors
+        let priors = generate_priors(input_width, input_height);
+
         Ok(Self {
             rknn,
-            input_width: 640,
-            input_height: 640,
-            conf_threshold: 0.35,
+            input_width,
+            input_height,
+            conf_threshold: 0.5,
+            priors,
         })
     }
 }
-
-impl FaceDetectorTrait for RknnFaceDetector {
-    fn detect_multiple(
-        &mut self,
-        image_data: &[u8],
-        width: u32,
-        height: u32,
-    ) -> anyhow::Result<Vec<FaceDetectionResult>> {
-        // 1. 快速 Letterbox 预处理
-        let input_data = preprocess_image_letterbox(
-            image_data,
-            width,
-            height,
-            self.input_width,
-            self.input_height,
-        )?;
-
-        let start = Instant::now();
-        // 2. RKNN 推理
-        let mut input = RknnInput {
-            index: 0,
-            buf: input_data,
-            pass_through: false, // 让 NPU 处理模型内置的 mean/std
-            type_: RknnTensorType::Uint8,
-            fmt: RknnTensorFormat::NHWC,
-        };
-
-        self.rknn.input_set(&mut input)?;
-        self.rknn.run()?;
-
-        let rknn_output: RknnOutput<f32> = self.rknn.outputs_get()?;
-        log::debug!("rknn used time: {:?}", start.elapsed());
-
-        if rknn_output.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        // 3. 后处理（包含坐标还原）
-        Ok(postprocess_output(
-            &rknn_output.to_vec(),
-            width,
-            height,
-            self.input_width,
-            self.input_height,
-            self.conf_threshold,
-        ))
-    }
-}
-
 /// 使用 Letterbox 方式将图像放入模型输入框，不进行 CPU 缩放以节省性能
 fn preprocess_image_letterbox(
     image_data: &[u8],
@@ -99,66 +55,154 @@ fn preprocess_image_letterbox(
         let dst_start = (y + y_offset as usize) * dst_stride + x_offset_bytes;
 
         // 核心提速：copy_from_slice 是 CPU 拷贝的最快路径
-        canvas[dst_start..dst_start + src_stride].copy_from_slice(&image_data[src_start..src_start + src_stride]);
+        canvas[dst_start..dst_start + src_stride]
+            .copy_from_slice(&image_data[src_start..src_start + src_stride]);
     }
 
-    log::debug!("preprocess_image (Letterbox) used time: {:?}", start.elapsed());
+    log::debug!(
+        "preprocess_image (Letterbox) used time: {:?}",
+        start.elapsed()
+    );
     Ok(canvas)
 }
+impl FaceDetectorTrait for RknnFaceDetector {
+    fn detect_multiple(
+        &mut self,
+        image_data: &[u8],
+        width: u32,
+        height: u32,
+    ) -> anyhow::Result<Vec<FaceDetectionResult>> {
+        // 1. 预处理 (计算缩放比例和偏移量)
+        let scale =
+            (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
+        let pad_x = (self.input_width as f32 - width as f32 * scale) / 2.0;
+        let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
 
-fn postprocess_output(
-    output_slice: &[f32],
-    orig_width: u32,
-    orig_height: u32,
+        // 此处调用你之前的 preprocess_image_letterbox
+        let input_data = preprocess_image_letterbox(
+            image_data,
+            width,
+            height,
+            self.input_width,
+            self.input_height,
+        )?;
+
+        // 2. RKNN 推理
+        let mut input = RknnInput {
+            index: 0,
+            buf: input_data,
+            pass_through: false,
+            type_: RknnTensorType::Uint8,
+            fmt: RknnTensorFormat::NHWC,
+        };
+        self.rknn.input_set(&mut input)?;
+        self.rknn.run()?;
+
+        // 3. 获取输出 Tensor (loc, conf, landmarks)
+        let rknn_output: RknnOutput<f32> = self.rknn.outputs_get()?;
+        let output_slice = rknn_output.to_vec();
+
+        // 4. 后处理 (兼容原有接口)
+        Ok(postprocess_retinaface(
+            &output_slice,
+            &self.priors,
+            width,
+            height,
+            self.input_width,
+            self.input_height,
+            scale,
+            pad_x,
+            pad_y,
+            self.conf_threshold,
+        ))
+    }
+}
+
+/// 核心后处理：将 RetinaFace 的输出解码为标准结果
+fn postprocess_retinaface(
+    output: &[f32],
+    priors: &[[f32; 4]],
+    orig_w: u32,
+    orig_h: u32,
     model_w: u32,
     model_h: u32,
-    conf_threshold: f32,
+    scale: f32,
+    pad_x: f32,
+    pad_y: f32,
+    conf_thresh: f32,
 ) -> Vec<FaceDetectionResult> {
-    let start = Instant::now();
-    let num_anchors = 8400;
+    let n = priors.len();
     let mut results = Vec::new();
+    let variances = [0.1, 0.2];
 
-    // 计算预处理时的偏移量，用于坐标还原
-    let x_offset = (model_w as f32 - orig_width as f32) / 2.0;
-    let y_offset = (model_h as f32 - orig_height as f32) / 2.0;
+    // RetinaFace 输出布局通常为:
+    // [0..n*4] 是 loc, [n*4..n*6] 是 conf, [n*6..n*16] 是 landmarks
+    let conf_base = n * 4;
 
-    for i in 0..num_anchors {
-        let score = output_slice[4 * num_anchors + i];
+    for i in 0..n {
+        let score = output[conf_base + i * 2 + 1];
+        if score > conf_thresh {
+            let p = &priors[i];
 
-        if score > conf_threshold {
-            let x_center = output_slice[i];
-            let y_center = output_slice[num_anchors + i];
-            let w = output_slice[2 * num_anchors + i];
-            let h = output_slice[3 * num_anchors + i];
+            // 解码中心点和宽高
+            let cx = p[0] + output[i * 4 + 0] * variances[0] * p[2];
+            let cy = p[1] + output[i * 4 + 1] * variances[0] * p[3];
+            let w = (output[i * 4 + 2] * variances[1]).exp() * p[2];
+            let h = (output[i * 4 + 3] * variances[1]).exp() * p[3];
 
-            // 坐标还原：减去 Letterbox 的黑边偏移，再归一化到原始图像尺寸
-            let real_x = (x_center - x_offset - w / 2.0) / orig_width as f32;
-            let real_y = (y_center - y_offset - h / 2.0) / orig_height as f32;
-            let norm_w = w / orig_width as f32;
-            let norm_h = h / orig_height as f32;
+            // 转换回原始图像坐标系 (归一化 0~1)
+            let x1 = (cx - w / 2.0) * model_w as f32;
+            let y1 = (cy - h / 2.0) * model_h as f32;
+
+            let real_x = (x1 - pad_x) / scale / orig_w as f32;
+            let real_y = (y1 - pad_y) / scale / orig_h as f32;
+            let real_w = (w * model_w as f32) / scale / orig_w as f32;
+            let real_h = (h * model_h as f32) / scale / orig_h as f32;
 
             results.push(FaceDetectionResult {
                 has_face: true,
-                x: real_x,
-                y: real_y,
-                width: norm_w,
-                height: norm_h,
+                x: real_x.max(0.0),
+                y: real_y.max(0.0),
+                width: real_w,
+                height: real_h,
                 confidence: score,
+                // 如果你的 FaceDetectionResult 结构体支持，可以在这里添加 landmarks
             });
         }
     }
 
-    let nms = nms_filter(results, 0.45);
-    log::debug!("NMS filter used time: {:?}", start.elapsed());
-    nms
+    // 调用你原来的 NMS
+    nms_filter(results, 0.45)
 }
 
-/// 测试人脸检测功能
-pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::Result<()> {
-    let model_path = PathBuf::from(model_path);
-    let test_image_path = PathBuf::from(test_image_path);
+/// 生成 PriorBox 逻辑 (只需在初始化时运行一次)
+fn generate_priors(mw: u32, mh: u32) -> Vec<[f32; 4]> {
+    let mut priors = Vec::new();
+    let steps = [8, 16, 32];
+    let min_sizes = [vec![16, 32], vec![64, 128], vec![256, 512]];
+    for (k, step) in steps.iter().enumerate() {
+        let fw = (mw as f32 / *step as f32).ceil() as u32;
+        let fh = (mh as f32 / *step as f32).ceil() as u32;
+        for i in 0..fh {
+            for j in 0..fw {
+                for ms in &min_sizes[k] {
+                    let sx = *ms as f32 / mw as f32;
+                    let sy = *ms as f32 / mh as f32;
+                    let cx = (j as f32 + 0.5) * *step as f32 / mw as f32;
+                    let cy = (i as f32 + 0.5) * *step as f32 / mh as f32;
+                    priors.push([cx, cy, sx, sy]);
+                }
+            }
+        }
+    }
+    priors
+}
 
-    log::info!("Testing RKNN face detection");
+/// 测试 RetinaFace 检测
+pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow::Result<()> {
+    use super::detector::draw_hollow_rect_static;
+
+    log::info!("Testing RetinaFace RKNN detection");
     log::info!("Model: {:?}", model_path);
     log::info!("Test image: {:?}", test_image_path);
 
@@ -175,7 +219,7 @@ pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::R
     let results = detector.detect_multiple(rgb_img.as_raw(), width, height)?;
     log::info!("Detected {} faces", results.len());
 
-    // 绘制结果 (坐标是归一化的，需要转换为像素坐标)
+    // 绘制结果
     let mut result_img = rgb_img.clone();
     for (i, face) in results.iter().enumerate() {
         let x = (face.x * width as f32) as i32;
@@ -195,7 +239,7 @@ pub fn test_face_detection(model_path: &str, test_image_path: &str) -> anyhow::R
     }
 
     // 保存结果
-    let output_path = PathBuf::from("rknn_test_result.png");
+    let output_path = PathBuf::from("retinaface_test_result.png");
     result_img.save(&output_path)?;
     log::info!("Result saved to: {:?}", output_path);
 
