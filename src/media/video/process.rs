@@ -1,10 +1,11 @@
 //! 视频模块 - 图像处理
 
 use crate::vision::face::{draw_hollow_rect_static, FaceDetectorTrait};
+use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
 /// 旋转角度
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub enum RotateAngle {
     #[default]
     None,

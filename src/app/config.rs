@@ -1,5 +1,4 @@
 use crate::media::video::process::RotateAngle;
-use nokhwa::utils::CameraIndex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -8,7 +7,7 @@ use std::path::Path;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub speech_name: String,
-    pub camera_index: CameraIndex,
+    pub camera_index: String,
     pub rotation: RotateAngle,
     pub wifi_ssid: String,
     pub wifi_password: String,
@@ -19,7 +18,7 @@ impl Default for AppConfig {
         Self {
             speech_name: "麦克风阵列".to_string(),
             rotation: RotateAngle::Rotate270,
-            camera_index: CameraIndex::Index(0),
+            camera_index: "0".to_string(),
             wifi_ssid: "".to_string(),
             wifi_password: "".to_string(),
         }
@@ -28,12 +27,8 @@ impl Default for AppConfig {
 
 #[allow(dead_code)]
 impl AppConfig {
-    /// 配置文件路径
     const CONFIG_PATH: &'static str = "config.toml";
 
-    /// 加载配置
-    ///
-    /// 如果配置文件不存在或解析失败，返回默认配置
     pub fn load() -> Self {
         match fs::read_to_string(Self::CONFIG_PATH) {
             Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
@@ -43,16 +38,12 @@ impl AppConfig {
             Err(e) => {
                 log::info!("Config file not found: {e}, using default");
                 let config = Self::default();
-                // 保存默认配置
-                if let Err(e) = config.save() {
-                    log::warn!("Failed to save default config: {e}");
-                }
+                let _ = config.save();
                 config
             }
         }
     }
 
-    /// 保存配置
     pub fn save(&self) -> anyhow::Result<()> {
         let content = toml::to_string_pretty(self)?;
         fs::write(Path::new(Self::CONFIG_PATH), content)?;
@@ -60,13 +51,11 @@ impl AppConfig {
         Ok(())
     }
 
-    /// 更新麦克风配置并保存
     pub fn set_speech_name(&mut self, name: String) {
         self.speech_name = name;
         let _ = self.save();
     }
 
-    /// 更新 WiFi 配置并保存
     pub fn set_wifi(&mut self, ssid: String, password: String) {
         self.wifi_ssid = ssid;
         self.wifi_password = password;

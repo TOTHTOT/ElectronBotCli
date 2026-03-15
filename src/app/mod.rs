@@ -12,14 +12,12 @@ use std::sync::{Arc, Mutex};
 // 导出菜单
 pub use menu::*;
 
-use crate::media::video::process::RotateAngle;
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
 use crate::media::voice::VoiceManager;
 use crate::vision::face::create_face_detector;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
-use nokhwa::utils::CameraIndex;
 use ratatui::widgets::ListState;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender, SyncSender};
@@ -133,8 +131,13 @@ impl App {
             None
         };
 
-        let mut video_capture =
-            VideoCapture::new(config.camera_index, face_detector, config.rotation);
+        let camera_index: nokhwa::utils::CameraIndex =
+            if let Ok(idx) = config.camera_index.parse::<u32>() {
+                nokhwa::utils::CameraIndex::Index(idx)
+            } else {
+                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
+            };
+        let mut video_capture = VideoCapture::new(camera_index, face_detector, config.rotation);
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),

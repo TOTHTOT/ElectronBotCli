@@ -6,6 +6,7 @@ use image::RgbImage;
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
 use crate::vision::face::FaceDetectorTrait;
+use anyhow::Context;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{
     ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
@@ -15,7 +16,6 @@ use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
-use anyhow::Context;
 #[cfg(feature = "fps-counter")]
 use std::time::Instant;
 

@@ -71,15 +71,20 @@ impl FaceDetectorTrait for RknnFaceDetector {
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
         let total_start = Instant::now();
 
-        // 1. 预处理
         let preprocess_start = Instant::now();
-        let scale = (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
+        let scale =
+            (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
         let pad_x = (self.input_width as f32 - width as f32 * scale) / 2.0;
         let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
-        let input_data = preprocess_image_letterbox(image_data, width, height, self.input_width, self.input_height);
+        let input_data = preprocess_image_letterbox(
+            image_data,
+            width,
+            height,
+            self.input_width,
+            self.input_height,
+        );
         let preprocess_time = preprocess_start.elapsed();
 
-        // 2. RKNN 推理
         let inference_start = Instant::now();
         let mut input = RknnInput {
             index: 0,
@@ -92,7 +97,6 @@ impl FaceDetectorTrait for RknnFaceDetector {
         self.rknn.run()?;
         let inference_time = inference_start.elapsed();
 
-        // 3. 获取输出
         let output_start = Instant::now();
         let loc_output = self.rknn.outputs_get_by_index::<f32>(0, true)?;
         let conf_output = self.rknn.outputs_get_by_index::<f32>(1, true)?;
@@ -101,17 +105,24 @@ impl FaceDetectorTrait for RknnFaceDetector {
         let conf = conf_output.to_vec();
         let output_time = output_start.elapsed();
 
-        // 4. 后处理
         let postprocess_start = Instant::now();
         let results = postprocess_retinaface(
-            &loc, &conf, &self.priors,
-            width, height, self.input_width, self.input_height,
-            scale, pad_x, pad_y, self.conf_threshold,
+            &loc,
+            &conf,
+            &self.priors,
+            width,
+            height,
+            self.input_width,
+            self.input_height,
+            scale,
+            pad_x,
+            pad_y,
+            self.conf_threshold,
         );
         let postprocess_time = postprocess_start.elapsed();
 
         let total_time = total_start.elapsed();
-        log::info!(
+        log::debug!(
             "RKNN: preprocess={:.1}ms, inference={:.1}ms, output={:.1}ms, postprocess={:.1}ms, total={:.1}ms",
             preprocess_time.as_secs_f64() * 1000.0,
             inference_time.as_secs_f64() * 1000.0,
@@ -213,7 +224,15 @@ pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow:
         let y = (face.y * height as f32) as i32;
         let w = (face.width * width as f32) as u32;
         let h = (face.height * height as f32) as u32;
-        log::info!("Face {}: x={}, y={}, w={}, h={}, confidence={:.2}", i + 1, x, y, w, h, face.confidence);
+        log::info!(
+            "Face {}: x={}, y={}, w={}, h={}, confidence={:.2}",
+            i + 1,
+            x,
+            y,
+            w,
+            h,
+            face.confidence
+        );
         draw_hollow_rect_static(result_img.as_mut(), width, height, x, y, w, h, [0, 255, 0]);
     }
 

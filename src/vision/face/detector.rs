@@ -86,12 +86,6 @@ pub fn draw_hollow_rect_static(
 /// 动态创建人脸检测器
 /// 根据模型文件后缀自动选择后端
 pub fn create_face_detector(model_path: PathBuf) -> anyhow::Result<Box<dyn FaceDetectorTrait>> {
-    let ext = model_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("")
-        .to_lowercase();
-
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         log::info!("Creating RKNN face detector: {:?}", model_path);
