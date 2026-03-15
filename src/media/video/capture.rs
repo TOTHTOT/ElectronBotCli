@@ -277,14 +277,14 @@ fn capture_frames(
 
 /// 处理帧并应用旋转
 fn process_and_rotate(
-    bgr: Vec<u8>,
+    rgb: Vec<u8>,
     width: u32,
     height: u32,
     face_detector: &mut Box<dyn FaceDetectorTrait>,
     rotate_angle: RotateAngle,
 ) -> FrameData {
     let start_time = Instant::now();
-    let processed = process_frame(bgr, width, height, face_detector);
+    let processed = process_frame(rgb, width, height, face_detector);
     log::debug!("process_frame used time: {:?}", start_time.elapsed());
     let start_time = Instant::now();
     let rotated = if rotate_angle == RotateAngle::None {

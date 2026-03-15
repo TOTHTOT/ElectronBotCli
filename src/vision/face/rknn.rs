@@ -76,6 +76,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
         let pad_x = (self.input_width as f32 - width as f32 * scale) / 2.0;
         let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
+        // 缩放到模型支持的320*320, 并且调转为rgb像素
         let input_data = preprocess_image_letterbox(
             image_data,
             width,

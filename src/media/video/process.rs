@@ -120,13 +120,13 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 
 /// 处理视频帧, 添加人脸检测和框
 pub fn process_frame(
-    mut bgr_data: Vec<u8>,
+    mut rgb_data: Vec<u8>,
     width: u32,
     height: u32,
     face_detector: &mut Box<dyn FaceDetectorTrait>,
 ) -> Vec<u8> {
     // 尝试检测人脸
-    match face_detector.detect(&bgr_data, width, height) {
+    match face_detector.detect(&rgb_data, width, height) {
         Ok(result) => {
             if result.has_face {
                 // log::info!(
@@ -138,7 +138,7 @@ pub fn process_frame(
                 // );
                 // 绘制人脸框
                 draw_face_box(
-                    &mut bgr_data,
+                    &mut rgb_data,
                     width,
                     height,
                     result.x,
@@ -152,6 +152,5 @@ pub fn process_frame(
             log::warn!("Face detection error: {}", e);
         }
     }
-
-    bgr_data
+    rgb_data
 }
