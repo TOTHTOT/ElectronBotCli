@@ -103,11 +103,16 @@ impl App {
         });
 
         // 初始化人脸检测器
-        log::info!("start load yolo face");
-        let Some(yolo_path) = mm.get("yolo_face") else {
+        log::info!("start load face detector");
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let Some(face_detect) = mm.get("retinaface_rknn") else {
+            anyhow::bail!("retinaface_rknn not found");
+        };
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+        let Some(face_detect) = mm.get("yolo_face") else {
             anyhow::bail!("yolo_face not found");
         };
-        let face_detector = create_face_detector(yolo_path)?;
+        let face_detector = create_face_detector(face_detect)?;
 
         // 从 ModelManager 获取模型路径并创建 VoiceManager
         log::info!("start load voice manager");
@@ -129,7 +134,7 @@ impl App {
         };
 
         let mut video_capture =
-            VideoCapture::new(CameraIndex::Index(0), face_detector, RotateAngle::Rotate270);
+            VideoCapture::new(config.camera_index, face_detector, config.rotation);
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),

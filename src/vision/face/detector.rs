@@ -92,18 +92,17 @@ pub fn create_face_detector(model_path: PathBuf) -> anyhow::Result<Box<dyn FaceD
         .unwrap_or("")
         .to_lowercase();
 
-    match ext.as_str() {
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        "rknn" => {
-            log::info!("Creating RKNN face detector: {:?}", model_path);
-            let detector = super::rknn::RknnFaceDetector::new(model_path)?;
-            Ok(Box::new(detector))
-        }
-        _ => {
-            log::info!("Creating ONNX face detector: {:?}", model_path);
-            let detector = super::ort::OrtFaceDetector::new(model_path)?;
-            Ok(Box::new(detector))
-        }
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        log::info!("Creating RKNN face detector: {:?}", model_path);
+        let detector = super::rknn::RknnFaceDetector::new(model_path)?;
+        Ok(Box::new(detector))
+    }
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+    {
+        log::info!("Creating ONNX face detector: {:?}", model_path);
+        let detector = super::ort::OrtFaceDetector::new(model_path)?;
+        Ok(Box::new(detector))
     }
 }
 

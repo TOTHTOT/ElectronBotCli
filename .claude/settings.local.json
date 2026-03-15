@@ -104,7 +104,9 @@
       "Bash(source:*)",
       "Bash(CROSS_CONTAINER_ENGINE_NO_BUILDKIT=1 cross build:*)",
       "Bash(python3:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(./scripts/deploy_rk3566.sh build:*)",
+      "Bash(./scripts/deploy_rk3566.sh:*)"
     ]
   }
 }

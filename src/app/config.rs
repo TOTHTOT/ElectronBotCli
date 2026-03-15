@@ -1,3 +1,5 @@
+use crate::media::video::process::RotateAngle;
+use nokhwa::utils::CameraIndex;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -6,6 +8,8 @@ use std::path::Path;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
     pub speech_name: String,
+    pub camera_index: CameraIndex,
+    pub rotation: RotateAngle,
     pub wifi_ssid: String,
     pub wifi_password: String,
 }
@@ -14,6 +18,8 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             speech_name: "麦克风阵列".to_string(),
+            rotation: RotateAngle::Rotate270,
+            camera_index: CameraIndex::Index(0),
             wifi_ssid: "".to_string(),
             wifi_password: "".to_string(),
         }
