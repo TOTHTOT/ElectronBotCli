@@ -1,4 +1,5 @@
 //! ONNX 人脸检测后端
+#![allow(dead_code)]
 
 use super::detector::{nms_filter, FaceDetectionResult, FaceDetectorTrait};
 use image::{DynamicImage, Rgb, RgbImage};

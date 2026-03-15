@@ -1,7 +1,7 @@
 //! 视频模块 - 类型定义
 
 use bytes::Bytes;
-use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 
 /// 帧数据 - 使用 Bytes 避免内存复制
 #[derive(Debug, Clone)]
@@ -36,8 +36,9 @@ impl FrameData {
     }
 }
 
-/// 帧缓存类型 - 使用共享缓存
-pub type FrameCache = Arc<Mutex<Option<FrameData>>>;
+/// 帧缓存类型 - 使用 tokio broadcast 通道实现事件驱动
+/// Sender 用于发送帧，Receiver 用于接收帧
+pub type FrameCache = broadcast::Sender<FrameData>;
 
 /// 摄像头支持的格式和分辨率
 #[allow(dead_code)]

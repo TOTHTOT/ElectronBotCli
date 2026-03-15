@@ -2,6 +2,7 @@ pub mod config;
 pub mod menu;
 
 use crate::llm::QwenLlm;
+use crate::media::video::types::FrameData;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
@@ -21,6 +22,7 @@ use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
 use ratatui::widgets::ListState;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender, SyncSender};
+use tokio::sync::broadcast;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
@@ -140,13 +142,16 @@ impl App {
             } else {
                 nokhwa::utils::CameraIndex::String(config.camera_index.clone())
             };
-        let mut video_capture = VideoCapture::new(camera_index, face_detector, config.rotation);
-        video_capture.start_capture_frames_thread();
-        let web_preview = WebPreview::new(
-            8080,
-            video_capture.frame_cache(),
-            video_capture.resolution_arc(),
+        // 创建 broadcast 通道用于帧传递（带背压缓冲）
+        let (frame_tx, _frame_rx) = broadcast::channel::<FrameData>(100);
+        let mut video_capture = VideoCapture::new(
+            camera_index,
+            frame_tx.clone(),
+            face_detector,
+            config.rotation,
         );
+        video_capture.start_capture_frames_thread();
+        let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
 
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 

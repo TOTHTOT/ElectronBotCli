@@ -15,6 +15,7 @@ use image::{ImageBuffer, Rgb};
 use std::convert::Infallible;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use tokio::sync::broadcast;
 use tokio::time::Instant;
 
 /// LCD 帧缓存
@@ -88,44 +89,51 @@ async fn lcd_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRespo
 
 /// 摄像头流路由
 async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoResponse {
-    let camera_frame = state.camera_frame.clone();
+    // 订阅摄像头帧通道
+    let mut rx = state.camera_frame.subscribe();
     // 获取已知分辨率
     let resolution = state.camera_resolution.clone();
 
     let frame = async_stream::stream! {
         loop {
-            let frame_data = {
-                let guard = camera_frame.lock().unwrap();
-                guard.clone()
-            };
-
-            if let Some(frame) = frame_data {
-                // 根据数据类型获取 JPEG
-                let jpeg = if let Some(jpeg_data) = frame.as_jpeg() {
-                    // 已经是 JPEG, 直接使用
-                    jpeg_data.clone()
-                } else if let Some(rgb_data) = frame.as_raw_rgb() {
-                    // 需要编码为 JPEG
-                    let (width, height) = *resolution.lock().unwrap();
-                    rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {
-                        log::warn!("To jpeg failed: {e}");
+            // 等待接收新帧（事件驱动，无需轮询）
+            match rx.recv().await {
+                Ok(frame) => {
+                    // 根据数据类型获取 JPEG
+                    let jpeg = if let Some(jpeg_data) = frame.as_jpeg() {
+                        // 已经是 JPEG, 直接使用
+                        jpeg_data.clone()
+                    } else if let Some(rgb_data) = frame.as_raw_rgb() {
+                        // 需要编码为 JPEG
+                        let (width, height) = *resolution.lock().unwrap();
+                        rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {
+                            log::warn!("To jpeg failed: {e}");
+                            Bytes::new()
+                        })
+                    } else {
                         Bytes::new()
-                    })
-                } else {
-                    Bytes::new()
-                };
+                    };
 
-                if jpeg.is_empty() {
-                    log::warn!("Empty JPEG, skipping frame");
-                } else {
-                    let start = Instant::now();
-                    // 将 JPEG 转换为 Base64 字符串, 后续优化了 直接发图片数据
-                    let encoded = base64::engine::general_purpose::STANDARD.encode(&jpeg);
-                    log::debug!("JPEG encoded: {} bytes, used time: {:?}", jpeg.len(), start.elapsed());
-                    yield Ok::<_, Infallible>(Event::default().data(encoded));
+                    if jpeg.is_empty() {
+                        log::warn!("Empty JPEG, skipping frame");
+                    } else {
+                        let start = Instant::now();
+                        // 将 JPEG 转换为 Base64 字符串, 后续优化了 直接发图片数据
+                        let encoded = base64::engine::general_purpose::STANDARD.encode(&jpeg);
+                        log::debug!("JPEG encoded: {} bytes, used time: {:?}", jpeg.len(), start.elapsed());
+                        yield Ok::<_, Infallible>(Event::default().data(encoded));
+                    }
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => {
+                    // 跳过滞后帧
+                    log::debug!("Camera frame lagged, skipped {} frames", n);
+                }
+                Err(broadcast::error::RecvError::Closed) => {
+                    // 通道关闭，退出循环
+                    log::info!("Camera frame channel closed");
+                    break;
                 }
             }
-            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
     };
 

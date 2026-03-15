@@ -84,6 +84,7 @@ impl VideoCapture {
     /// 创建新的视频捕获器
     pub fn new(
         camera_index: CameraIndex,
+        frame_cache: FrameCache,
         face_detector: Box<dyn FaceDetectorTrait>,
         rotate_angle: RotateAngle,
     ) -> Self {
@@ -92,7 +93,7 @@ impl VideoCapture {
         );
 
         Self {
-            frame_cache: Arc::new(Mutex::new(None)),
+            frame_cache,
             running: Arc::new(AtomicBool::new(false)),
             camera_index,
             resolution: Arc::new(Mutex::new((0, 0))),
@@ -283,9 +284,9 @@ fn capture_frames(
         if let Some(fps) = fps_counter.tick() {
             log::info!("Camera FPS: {:.1}", fps);
         }
-        // 写入帧缓存
-        let mut guard = frame_cache.lock().unwrap();
-        *guard = Some(frame_data);
+        // 通过通道发送帧
+        // 使用 broadcast
+        let _ = frame_cache.send(frame_data);
     }
 
     log::info!("Video capture loop stopped");
