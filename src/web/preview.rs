@@ -125,8 +125,7 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
                     yield Ok::<_, Infallible>(Event::default().data(encoded));
                 }
             }
-
-            tokio::time::sleep(tokio::time::Duration::from_millis(330)).await;
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
         }
     };
 

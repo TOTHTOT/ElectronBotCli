@@ -154,7 +154,7 @@ fn postprocess_retinaface(
     let variances = [0.1, 0.2];
 
     for i in 0..n {
-        let score = conf[i * 2 + 1]; // class 1 = face
+        let score = conf[i * 2 + 1];
         if score > conf_thresh {
             let p = &priors[i];
             let cx = p[0] + loc[i * 4 + 0] * variances[0] * p[2];
@@ -162,19 +162,22 @@ fn postprocess_retinaface(
             let w = (loc[i * 4 + 2] * variances[1]).exp() * p[2];
             let h = (loc[i * 4 + 3] * variances[1]).exp() * p[3];
 
-            let x1 = (cx - w / 2.0) * model_w as f32;
-            let y1 = (cy - h / 2.0) * model_h as f32;
-            let real_x = (x1 - pad_x) / scale / orig_w as f32;
-            let real_y = (y1 - pad_y) / scale / orig_h as f32;
-            let real_w = (w * model_w as f32) / scale / orig_w as f32;
-            let real_h = (h * model_h as f32) / scale / orig_h as f32;
+            let model_x = cx * model_w as f32;
+            let model_y = cy * model_h as f32;
+            let model_box_w = w * model_w as f32;
+            let model_box_h = h * model_h as f32;
+
+            let real_x_px = (model_x - pad_x) / scale;
+            let real_y_px = (model_y - pad_y) / scale;
+            let real_w_px = model_box_w / scale;
+            let real_h_px = model_box_h / scale;
 
             results.push(FaceDetectionResult {
                 has_face: true,
-                x: real_x.max(0.0),
-                y: real_y.max(0.0),
-                width: real_w,
-                height: real_h,
+                x: real_x_px / orig_w as f32, // 中心点 X
+                y: real_y_px / orig_h as f32, // 中心点 Y
+                width: real_w_px / orig_w as f32,
+                height: real_h_px / orig_h as f32,
                 confidence: score,
             });
         }

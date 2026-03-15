@@ -286,11 +286,13 @@ fn process_and_rotate(
     let start_time = Instant::now();
     let processed = process_frame(bgr, width, height, face_detector);
     log::debug!("process_frame used time: {:?}", start_time.elapsed());
+    let start_time = Instant::now();
     let rotated = if rotate_angle == RotateAngle::None {
         processed
     } else {
         rotate_by_angle(&processed, width, height, rotate_angle)
     };
+    log::debug!("process_and_rotate time: {:?}", start_time.elapsed());
     FrameData::RawRgb(Bytes::from(rotated))
 }
 
