@@ -15,6 +15,7 @@ use nokhwa::utils::{
 use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::Instant;
 #[cfg(feature = "fps-counter")]
 use std::time::Instant;
@@ -63,6 +64,19 @@ pub struct VideoCapture {
     rotate_angle: RotateAngle,
     /// 人脸检测器
     face_detector: Option<Box<dyn FaceDetectorTrait>>,
+    /// 捕获线程句柄
+    capture_thread: Option<JoinHandle<()>>,
+}
+/// Drop 时自动停止视频捕获线程并等待结束
+impl Drop for VideoCapture {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+        if let Some(handle) = self.capture_thread.take() {
+            log::info!("Dropping VideoCapture, waiting for thread...");
+            let _ = handle.join();
+            log::info!("VideoCapture dropped");
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -84,6 +98,7 @@ impl VideoCapture {
             resolution: Arc::new(Mutex::new((0, 0))),
             rotate_angle,
             face_detector: Some(face_detector),
+            capture_thread: None,
         }
     }
 
@@ -133,7 +148,7 @@ impl VideoCapture {
             .take()
             .expect("take face_detector failed");
 
-        std::thread::spawn(move || {
+        let handle = std::thread::spawn(move || {
             capture_frames(
                 camera_index,
                 frame_cache,
@@ -143,6 +158,7 @@ impl VideoCapture {
                 face_detector,
             );
         });
+        self.capture_thread = Some(handle);
 
         log::info!("Video capture started");
     }

@@ -56,6 +56,9 @@ pub struct App {
 
     /// LCD 帧缓存（用于 Web 预览）
     lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+
+    /// 视频捕获器
+    video_capture: Option<VideoCapture>,
 }
 
 #[allow(dead_code)]
@@ -138,12 +141,12 @@ impl App {
                 nokhwa::utils::CameraIndex::String(config.camera_index.clone())
             };
         let mut video_capture = VideoCapture::new(camera_index, face_detector, config.rotation);
+        video_capture.start_capture_frames_thread();
         let web_preview = WebPreview::new(
             8080,
             video_capture.frame_cache(),
             video_capture.resolution_arc(),
         );
-        video_capture.start_capture_frames_thread();
 
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 
@@ -183,6 +186,7 @@ impl App {
             comm_tx: None,
             _web_preview: Some(web_preview_arc),
             lcd_frame_cache,
+            video_capture: Some(video_capture),
         })
     }
 
