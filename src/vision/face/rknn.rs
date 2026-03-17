@@ -98,7 +98,7 @@ fn preprocess_image(
 impl FaceDetectorTrait for RknnFaceDetector {
     fn detect_multiple(
         &mut self,
-        image_data: &[u8],
+        rgb_data: &[u8],
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
@@ -111,7 +111,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
         let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
         // 缩放到模型支持的320*320, 并且调转为rgb像素
         let input_data = preprocess_image(
-            image_data,
+            rgb_data,
             width,
             height,
             self.input_width,

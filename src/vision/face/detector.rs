@@ -17,12 +17,12 @@ pub trait FaceDetectorTrait: Send + Sync {
     /// 检测单个人脸（默认实现：返回检测到的第一个人脸）
     fn detect(
         &mut self,
-        image_data: &[u8],
+        rgb_data: &[u8],
         width: u32,
         height: u32,
     ) -> anyhow::Result<FaceDetectionResult> {
         let start_time = std::time::Instant::now();
-        let results = self.detect_multiple(image_data, width, height)?;
+        let results = self.detect_multiple(rgb_data, width, height)?;
         log::debug!("detect used time: {:?}", start_time.elapsed());
         Ok(results.into_iter().next().unwrap_or_default())
     }
