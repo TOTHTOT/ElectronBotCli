@@ -160,16 +160,9 @@ pub fn process_frame(
     face_detector: &mut Box<dyn FaceDetectorTrait>,
 ) -> Vec<u8> {
     // 尝试检测人脸
-    match face_detector.detect(&rgb_data, width, height) {
+    match face_detector.detect(rgb_data.clone(), width, height) {
         Ok(result) => {
             if result.has_face {
-                // log::info!(
-                //     "Face detected at ({:.2}, {:.2}) size {:.2}x{:.2}",
-                //     result.x,
-                //     result.y,
-                //     result.width,
-                //     result.height
-                // );
                 // 绘制人脸框
                 draw_face_box(
                     &mut rgb_data,

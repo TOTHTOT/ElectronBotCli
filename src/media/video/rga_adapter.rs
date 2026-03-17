@@ -2,6 +2,7 @@
 //! 提供基于 librga 的图像旋转和缩放功能
 
 use librga::{ops::resize::ResizeOptions, usage::Rotation, PixelFormat, RgaBuffer};
+use std::time::Instant;
 
 /// RGA 硬件加速辅助类
 pub struct RgaHelper {
@@ -39,23 +40,24 @@ impl RgaHelper {
 
         let dst_capacity = (dst_width * dst_height * 3) as usize;
 
-        // 创建源缓冲区
+        let t0 = Instant::now();
         let (src_buf, _src_owned) =
-            match RgaBuffer::from_vec(src_data, width as i32, height as i32, PixelFormat::Bgr888) {
+            match RgaBuffer::from_vec(src_data, width as i32, height as i32, PixelFormat::Rgb888) {
                 Ok(buf) => buf,
                 Err(e) => {
                     log::warn!("Failed to create RGA src buffer: {:?}", e);
                     return None;
                 }
             };
+        let t1 = Instant::now();
 
-        // 创建目标缓冲区 (可变)
+        let t2 = Instant::now();
         let dst_data = vec![0u8; dst_capacity];
         let (mut dst_buf, dst_owned) = match RgaBuffer::from_vec_mut(
             dst_data,
             dst_width as i32,
             dst_height as i32,
-            PixelFormat::Bgr888,
+            PixelFormat::Rgb888,
         ) {
             Ok(buf) => buf,
             Err(e) => {
@@ -63,19 +65,26 @@ impl RgaHelper {
                 return None;
             }
         };
+        let t3 = Instant::now();
 
-        // 执行旋转
-        match librga::rotate(&src_buf, &mut dst_buf, rotation, true) {
-            Ok(_) => {
-                log::debug!(
-                    "RGA rotate {}x{} -> {}x{} success",
-                    width,
-                    height,
-                    dst_width,
-                    dst_height
-                );
-                Some(dst_owned)
-            }
+        let t4 = Instant::now();
+        let result = librga::rotate(&src_buf, &mut dst_buf, rotation, true);
+        let t5 = Instant::now();
+
+        log::debug!("rga rotate step1 create src buffer: {:?}", t1 - t0);
+        log::debug!("rga rotate step2 create dst buffer: {:?}", t3 - t2);
+        log::debug!("rga rotate step3 exec rotate: {:?}", t5 - t4);
+        log::debug!(
+            "rga rotate total: {}x{} -> {}x{}: {:?}",
+            width,
+            height,
+            dst_width,
+            dst_height,
+            t5 - t0
+        );
+
+        match result {
+            Ok(_) => Some(dst_owned),
             Err(e) => {
                 log::warn!("RGA rotate failed: {:?}", e);
                 None
@@ -99,23 +108,24 @@ impl RgaHelper {
 
         let dst_capacity = (dst_w * dst_h * 3) as usize;
 
-        // 创建源缓冲区
+        let t0 = Instant::now();
         let (src_buf, _src_owned) =
-            match RgaBuffer::from_vec(src_data, src_w as i32, src_h as i32, PixelFormat::Bgr888) {
+            match RgaBuffer::from_vec(src_data, src_w as i32, src_h as i32, PixelFormat::Rgb888) {
                 Ok(buf) => buf,
                 Err(e) => {
                     log::warn!("Failed to create RGA src buffer for resize: {:?}", e);
                     return None;
                 }
             };
+        let t1 = Instant::now();
 
-        // 创建目标缓冲区 (可变)
+        let t2 = Instant::now();
         let dst_data = vec![0u8; dst_capacity];
         let (mut dst_buf, dst_owned) = match RgaBuffer::from_vec_mut(
             dst_data,
             dst_w as i32,
             dst_h as i32,
-            PixelFormat::Bgr888,
+            PixelFormat::Rgb888,
         ) {
             Ok(buf) => buf,
             Err(e) => {
@@ -123,24 +133,33 @@ impl RgaHelper {
                 return None;
             }
         };
+        let t3 = Instant::now();
 
-        // 计算缩放比例
+        let t4 = Instant::now();
         let scale_x = dst_w as f64 / src_w as f64;
         let scale_y = dst_h as f64 / src_h as f64;
         let options = ResizeOptions::with_scale(scale_x, scale_y);
+        let t5 = Instant::now();
 
-        // 执行缩放
-        match librga::resize(&src_buf, &mut dst_buf, options) {
-            Ok(_) => {
-                log::debug!(
-                    "RGA resize {}x{} -> {}x{} success",
-                    src_w,
-                    src_h,
-                    dst_w,
-                    dst_h
-                );
-                Some(dst_owned)
-            }
+        let t6 = Instant::now();
+        let result = librga::resize(&src_buf, &mut dst_buf, options);
+        let t7 = Instant::now();
+
+        log::debug!("rga resize step1 create src buffer: {:?}", t1 - t0);
+        log::debug!("rga resize step2 create dst buffer: {:?}", t3 - t2);
+        log::debug!("rga resize step3 calc scale: {:?}", t5 - t4);
+        log::debug!("rga resize step4 exec resize: {:?}", t7 - t6);
+        log::debug!(
+            "rga resize total: {}x{} -> {}x{}: {:?}",
+            src_w,
+            src_h,
+            dst_w,
+            dst_h,
+            t7 - t0
+        );
+
+        match result {
+            Ok(_) => Some(dst_owned),
             Err(e) => {
                 log::warn!("RGA resize failed: {:?}", e);
                 None

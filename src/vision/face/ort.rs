@@ -39,7 +39,7 @@ impl OrtFaceDetector {
 impl FaceDetectorTrait for OrtFaceDetector {
     fn detect_multiple(
         &mut self,
-        image_data: &[u8],
+        image_data: Vec<u8>,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
@@ -72,13 +72,13 @@ impl FaceDetectorTrait for OrtFaceDetector {
 }
 
 pub fn preprocess_image(
-    image_data: &[u8],
+    image_data: Vec<u8>,
     img_width: u32,
     img_height: u32,
     input_width: u32,
     input_height: u32,
 ) -> anyhow::Result<Vec<f32>> {
-    let img_buffer = RgbImage::from_raw(img_width, img_height, image_data.to_vec())
+    let img_buffer = RgbImage::from_raw(img_width, img_height, image_data)
         .ok_or_else(|| anyhow::anyhow!("Failed to create image buffer"))?;
     let dynamic_img = DynamicImage::ImageRgb8(img_buffer);
 

@@ -17,7 +17,7 @@ pub trait FaceDetectorTrait: Send + Sync {
     /// 检测单个人脸（默认实现：返回检测到的第一个人脸）
     fn detect(
         &mut self,
-        rgb_data: &[u8],
+        rgb_data: Vec<u8>,
         width: u32,
         height: u32,
     ) -> anyhow::Result<FaceDetectionResult> {
@@ -30,7 +30,7 @@ pub trait FaceDetectorTrait: Send + Sync {
     /// 检测多个人脸
     fn detect_multiple(
         &mut self,
-        image_data: &[u8],
+        image_data: Vec<u8>,
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>>;
