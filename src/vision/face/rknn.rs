@@ -60,32 +60,34 @@ fn preprocess_image(
         return result;
     }
 
-    // 非 aarch64 平台: 回退到软件实现
-    // image_data 在这里仍然是 Vec<u8>，可以当作 &[u8] 使用
-    let image_ref: &[u8] = &image_data;
-    let mut canvas = vec![0u8; (dst_width * dst_height * 3) as usize];
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+    {
+        let image_ref: &[u8] = &image_data;
+        let mut canvas = vec![0u8; (dst_width * dst_height * 3) as usize];
 
-    let scale = (dst_width as f32 / src_width as f32).min(dst_height as f32 / src_height as f32);
-    let new_width = (src_width as f32 * scale) as u32;
-    let new_height = (src_height as f32 * scale) as u32;
-    let x_offset = (dst_width - new_width) / 2;
-    let y_offset = (dst_height - new_height) / 2;
+        let scale =
+            (dst_width as f32 / src_width as f32).min(dst_height as f32 / src_height as f32);
+        let new_width = (src_width as f32 * scale) as u32;
+        let new_height = (src_height as f32 * scale) as u32;
+        let x_offset = (dst_width - new_width) / 2;
+        let y_offset = (dst_height - new_height) / 2;
 
-    for dy in 0..new_height {
-        for dx in 0..new_width {
-            let sx = (dx as f32 / scale) as u32;
-            let sy = (dy as f32 / scale) as u32;
-            let src_idx = ((sy * src_width + sx) * 3) as usize;
-            let dst_idx = (((dy + y_offset) * dst_width + dx + x_offset) * 3) as usize;
+        for dy in 0..new_height {
+            for dx in 0..new_width {
+                let sx = (dx as f32 / scale) as u32;
+                let sy = (dy as f32 / scale) as u32;
+                let src_idx = ((sy * src_width + sx) * 3) as usize;
+                let dst_idx = (((dy + y_offset) * dst_width + dx + x_offset) * 3) as usize;
 
-            if src_idx + 2 < image_ref.len() && dst_idx + 2 < canvas.len() {
-                canvas[dst_idx + 0] = image_ref[src_idx + 2]; // B -> R
-                canvas[dst_idx + 1] = image_ref[src_idx + 1];
-                canvas[dst_idx + 2] = image_ref[src_idx + 0]; // R -> B
+                if src_idx + 2 < image_ref.len() && dst_idx + 2 < canvas.len() {
+                    canvas[dst_idx + 0] = image_ref[src_idx + 2]; // B -> R
+                    canvas[dst_idx + 1] = image_ref[src_idx + 1];
+                    canvas[dst_idx + 2] = image_ref[src_idx + 0]; // R -> B
+                }
             }
         }
+        canvas
     }
-    canvas
 }
 
 impl FaceDetectorTrait for RknnFaceDetector {
@@ -234,7 +236,6 @@ fn generate_priors(mw: u32, mh: u32) -> Vec<[f32; 4]> {
 /// 测试 RetinaFace 检测
 pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow::Result<()> {
     use super::detector::draw_hollow_rect_static;
-    use std::time::Instant;
 
     let img = image::open(&test_image_path)?;
     let rgb_img = img.to_rgb8();
@@ -242,29 +243,8 @@ pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow:
 
     let mut detector = RknnFaceDetector::new(model_path)?;
 
-    let iterations = 10;
-    let mut total_sum = 0.0f64;
-
     let rgb_data = rgb_img.as_raw().to_vec();
-    for i in 0..iterations {
-        let start = Instant::now();
-        let results = detector.detect_multiple(rgb_data.clone(), width, height)?;
-        let total = start.elapsed();
-
-        if i == iterations - 1 {
-            log::info!("Last detection result: {} faces detected", results.len());
-        }
-
-        total_sum += total.as_secs_f64() * 1000.0;
-    }
-
-    let avg_total = total_sum / iterations as f64;
-    log::info!(
-        "Average time ({} iterations): total={:.1}ms",
-        iterations,
-        avg_total
-    );
-
+    test_detector_speed(width, height, &mut detector, &rgb_data)?;
     let results = detector.detect_multiple(rgb_data.clone(), width, height)?;
 
     let mut result_img = rgb_img.clone();
@@ -286,5 +266,34 @@ pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow:
     }
 
     result_img.save("retinaface_test_result.png")?;
+    Ok(())
+}
+
+fn test_detector_speed(
+    width: u32,
+    height: u32,
+    detector: &mut RknnFaceDetector,
+    rgb_data: &Vec<u8>,
+) -> anyhow::Result<()> {
+    let mut total_sum: f64 = 0.0;
+    let iterations = 10;
+    for i in 0..iterations {
+        let start = Instant::now();
+        let results = detector.detect_multiple(rgb_data.clone(), width, height)?;
+        let total = start.elapsed();
+
+        if i == iterations - 1 {
+            log::info!("Last detection result: {} faces detected", results.len());
+        }
+
+        total_sum += total.as_secs_f64() * 1000.0;
+    }
+
+    let avg_total = total_sum / iterations as f64;
+    log::info!(
+        "Average time ({} iterations): total={:.1}ms",
+        iterations,
+        avg_total
+    );
     Ok(())
 }

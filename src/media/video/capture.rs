@@ -293,6 +293,7 @@ fn capture_frames(
 }
 
 /// 处理帧并应用旋转
+/// 新流程: 先旋转 -> 后检测 (坐标无需转换)
 fn process_and_rotate(
     rgb: Vec<u8>,
     width: u32,
@@ -301,16 +302,23 @@ fn process_and_rotate(
     rotate_angle: RotateAngle,
 ) -> FrameData {
     let start_time = Instant::now();
-    let processed = process_frame(rgb, width, height, face_detector);
-    log::debug!("process_frame used time: {:?}", start_time.elapsed());
-    let start_time = Instant::now();
     let rotated = if rotate_angle == RotateAngle::None {
-        processed
+        rgb
     } else {
-        rotate_by_angle(&processed, width, height, rotate_angle)
+        rotate_by_angle(&rgb, width, height, rotate_angle)
     };
-    log::debug!("process_and_rotate time: {:?}", start_time.elapsed());
-    FrameData::RawRgb(Bytes::from(rotated))
+    let (new_width, new_height) = if rotate_angle.needs_swap() {
+        (height, width)
+    } else {
+        (width, height)
+    };
+    log::debug!("rotate used time: {:?}", start_time.elapsed());
+
+    let detect_start = Instant::now();
+    let processed = process_frame(rotated, new_width, new_height, face_detector);
+    log::debug!("process_frame used time: {:?}", detect_start.elapsed());
+
+    FrameData::RawRgb(Bytes::from(processed))
 }
 
 /// 根据帧格式处理数据
