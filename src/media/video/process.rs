@@ -4,6 +4,17 @@ use crate::vision::face::{draw_hollow_rect_static, FaceDetectorTrait};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use crate::media::video::rga_adapter::RgaHelper;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use librga::usage::Rotation;
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use std::sync::OnceLock;
+
+// RGA 辅助单例 (仅在 aarch64 Linux 上存在)
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+static RGA_HELPER: OnceLock<RgaHelper> = OnceLock::new();
+
 /// 旋转角度
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub enum RotateAngle {
@@ -84,7 +95,30 @@ pub fn rotate_270_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 }
 
 /// 根据旋转角度处理图像
+/// 优先使用 RGA 硬件加速，失败时回退到软件实现
 pub fn rotate_by_angle(bgr_data: &[u8], width: u32, height: u32, angle: RotateAngle) -> Vec<u8> {
+    // 尝试 RGA 硬件加速 (仅在 aarch64 Linux 上可用)
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        if angle != RotateAngle::None {
+            let rotation = match angle {
+                RotateAngle::Rotate90 => Some(Rotation::Rot90),
+                RotateAngle::Rotate180 => Some(Rotation::Rot180),
+                RotateAngle::Rotate270 => Some(Rotation::Rot270),
+                RotateAngle::None => None,
+            };
+
+            if let Some(rot) = rotation {
+                let helper = RGA_HELPER.get_or_init(RgaHelper::new);
+                if let Some(result) = helper.rotate(bgr_data.to_vec(), width, height, rot) {
+                    log::debug!("Using RGA hardware rotation for {:?}", angle);
+                    return result;
+                }
+            }
+        }
+    }
+
+    // 回退到软件实现
     match angle {
         RotateAngle::None => bgr_data.to_vec(),
         RotateAngle::Rotate90 => rotate_90_cw(bgr_data, width, height),

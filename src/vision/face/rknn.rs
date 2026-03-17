@@ -2,7 +2,15 @@
 use super::detector::{nms_filter, FaceDetectionResult, FaceDetectorTrait};
 use rknn_rs::prelude::{Rknn, RknnInput, RknnTensorFormat, RknnTensorType};
 use std::path::PathBuf;
+use std::sync::OnceLock;
 use std::time::Instant;
+
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+use crate::media::video::rga_adapter::RgaHelper;
+
+// RGA 辅助单例 (仅在 aarch64 Linux 上存在)
+#[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+static RGA_HELPER: OnceLock<RgaHelper> = OnceLock::new();
 
 pub struct RknnFaceDetector {
     rknn: Rknn,
@@ -30,13 +38,38 @@ impl RknnFaceDetector {
 }
 
 /// Letterbox 预处理: 缩放 + BGR->RGB
-fn preprocess_image_letterbox(
+fn preprocess_image(
     image_data: &[u8],
     src_width: u32,
     src_height: u32,
     dst_width: u32,
     dst_height: u32,
 ) -> Vec<u8> {
+    // 尝试使用 RGA 硬件加速
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        let helper = RGA_HELPER.get_or_init(RgaHelper::new);
+        if let Some(result) = helper.resize(
+            image_data.to_vec(),
+            src_width,
+            src_height,
+            dst_width,
+            dst_height,
+        ) {
+            // RGA 输出是 BGR，需要转换为 RGB
+            let mut rgb_data = Vec::with_capacity(result.len());
+            for chunk in result.chunks(3) {
+                if chunk.len() == 3 {
+                    rgb_data.push(chunk[2]); // B -> R
+                    rgb_data.push(chunk[1]); // G
+                    rgb_data.push(chunk[0]); // R -> B
+                }
+            }
+            return rgb_data;
+        }
+    }
+
+    // 回退到软件实现
     let mut canvas = vec![0u8; (dst_width * dst_height * 3) as usize];
 
     let scale = (dst_width as f32 / src_width as f32).min(dst_height as f32 / src_height as f32);
@@ -77,7 +110,7 @@ impl FaceDetectorTrait for RknnFaceDetector {
         let pad_x = (self.input_width as f32 - width as f32 * scale) / 2.0;
         let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
         // 缩放到模型支持的320*320, 并且调转为rgb像素
-        let input_data = preprocess_image_letterbox(
+        let input_data = preprocess_image(
             image_data,
             width,
             height,
