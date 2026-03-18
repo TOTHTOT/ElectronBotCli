@@ -107,7 +107,8 @@
       "Bash(bash:*)",
       "Bash(./scripts/deploy_rk3566.sh build:*)",
       "Bash(./scripts/deploy_rk3566.sh:*)",
-      "mcp__fs__read_text_file"
+      "mcp__fs__read_text_file",
+      "Bash(identify:*)"
     ]
   }
 }

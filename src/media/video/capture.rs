@@ -2,6 +2,8 @@
 
 use bytes::Bytes;
 use image::RgbImage;
+use std::path::Path;
+use std::process::Command;
 
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
@@ -9,16 +11,15 @@ use crate::vision::face::FaceDetectorTrait;
 use anyhow::Context;
 use nokhwa::pixel_format::RgbFormat;
 use nokhwa::utils::{
-    ApiBackend, CameraIndex, CameraInfo, FrameFormat, RequestedFormat, RequestedFormatType,
-    Resolution,
+    ApiBackend, CameraFormat, CameraIndex, CameraInfo, FrameFormat, RequestedFormat,
+    RequestedFormatType, Resolution,
 };
 use nokhwa::{query, Camera};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
+use std::thread;
 use std::thread::JoinHandle;
-use std::time::Instant;
-#[cfg(feature = "fps-counter")]
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 /// 帧率计算器
 #[cfg(feature = "fps-counter")]
@@ -149,7 +150,7 @@ impl VideoCapture {
             .take()
             .expect("take face_detector failed");
 
-        let handle = std::thread::spawn(move || {
+        let handle = thread::spawn(move || {
             capture_frames(
                 camera_index,
                 frame_cache,
@@ -198,14 +199,65 @@ impl VideoCapture {
     }
 }
 
+/// 重置摄像头状态, 在rk3566的环境中, 第一次插入摄像头底层驱动没有配置帧率导致nokhwa会报错
+/// `Could not get device property V4L2 FrameRate: Framerate not whole number: 1 / 0`
+/// 现在如果是rk3566平台打开摄像头是先初始化一下
+/// # Arguments
+///
+/// * `device_index`: 摄像头索引
+///
+/// returns: Result<(), Error>
+///
+/// # Examples
+///
+/// ```
+/// ensure_camera_ready(0)?;
+/// ```
+#[allow(dead_code)]
+fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<()> {
+    let CameraIndex::Index(idx) = device_index else {
+        anyhow::bail!("Device index does not exist");
+    };
+    let device_path = format!("/dev/video{}", idx);
+
+    if !Path::new(&device_path).exists() {
+        return Err(anyhow::anyhow!("can not find camera: {}", device_path));
+    }
+
+    log::info!("正在唤醒摄像头驱动 {} ...", device_path);
+
+    let status = Command::new("v4l2-ctl")
+        .args([
+            "-d",
+            &device_path,
+            "--set-fmt-video=width=640,height=480,pixelformat=YUYV",
+            "--set-parm=30",
+        ])
+        .status()?; // 获取执行状态
+
+    if !status.success() {
+        log::warn!("v4l2-ctl fail v4l-utils");
+    }
+
+    thread::sleep(Duration::from_millis(100));
+
+    Ok(())
+}
+
 /// 打开摄像头
 fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
     log::info!("Opening camera with index: {:?}", index);
-
-    let format_type = RequestedFormatType::HighestResolution(Resolution {
-        width_x: 640,
-        height_y: 480,
-    });
+    // 构建指定要求的摄像头参数 480p, yuyv格式, 30帧, 如果拿不到这个要求的配置直接报错, 修复了摄像头不配置帧率会报错的问题
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    let _ = ensure_camera_ready(&index);
+    let format_type = RequestedFormatType::Exact(CameraFormat::new(
+        Resolution {
+            width_x: 640,
+            height_y: 480,
+        },
+        FrameFormat::YUYV,
+        30,
+    ));
     let query = RequestedFormat::new::<RgbFormat>(format_type);
     Ok(Camera::new(index, query)?)
 }
@@ -261,7 +313,7 @@ fn capture_frames(
             Ok(f) => f,
             Err(e) => {
                 log::error!("Camera frame error: {:?}", e);
-                std::thread::sleep(std::time::Duration::from_millis(100));
+                thread::sleep(Duration::from_millis(100));
                 continue;
             }
         };
