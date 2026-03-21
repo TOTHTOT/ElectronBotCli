@@ -94,10 +94,10 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // 使用模式元组进行模式匹配
     match (
-        app.in_edit_settings_mode,
+        app.ui.in_edit_settings_mode,
         app.in_servo_mode,
-        app.in_settings,
-        app.in_llm_test_mode,
+        app.ui.in_settings,
+        app.ai.in_llm_test_mode,
     ) {
         // 编辑模式：处理设置项内容编辑
         (true, _, _, _) => handle_edit_settings_mode(app, code),
@@ -156,12 +156,12 @@ fn handle_menu_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 ///
 /// 对应的事件
 fn handle_menu_enter(app: &mut App) -> AppEvent {
-    match app.selected_menu {
+    match app.ui.selected_menu {
         MenuItem::DeviceControl => MenuEvent::EnterServoMode.into(),
         MenuItem::Settings => MenuEvent::EnterSettingMode.into(),
         MenuItem::LlmTest => {
-            app.in_llm_test_mode = true;
-            app.left_focused = false;
+            app.ai.in_llm_test_mode = true;
+            app.ui.left_focused = false;
             AppEvent::LlmTest(LlmTestEvent::None)
         }
         _ => MenuEvent::ConnectDevice.into(),
@@ -182,7 +182,7 @@ fn handle_menu_enter(app: &mut App) -> AppEvent {
 /// * `app` - 应用状态
 /// * `code` - 按键代码
 fn handle_servo_mode(app: &mut App, code: KeyCode) {
-    if app.left_focused {
+    if app.ui.left_focused {
         app.in_servo_mode = false;
         return;
     }
@@ -218,15 +218,15 @@ fn handle_servo_mode(app: &mut App, code: KeyCode) {
 /// * `app` - 应用状态
 /// * `code` - 按键代码
 fn handle_settings_mode(app: &mut App, code: KeyCode) {
-    if app.left_focused {
-        app.in_settings = false;
+    if app.ui.left_focused {
+        app.ui.in_settings = false;
         return;
     }
 
     let evt = match code {
         KeyCode::Esc => {
             app.toggle_focus();
-            app.in_settings = false;
+            app.ui.in_settings = false;
             SettingsEvent::Exit.into()
         }
         KeyCode::Enter => SettingsEvent::EnterEdit.into(),
@@ -254,10 +254,10 @@ fn handle_edit_settings_mode(app: &mut App, code: KeyCode) {
         KeyCode::Esc => app.cancel_settings_edit(),
         KeyCode::Enter => app.save_settings_edit(),
         KeyCode::Backspace => {
-            app.edit_buffer.pop();
+            app.ui.edit_buffer.pop();
         }
         KeyCode::Char(c) => {
-            app.edit_buffer.push(c);
+            app.ui.edit_buffer.push(c);
         }
         _ => {}
     }
@@ -278,7 +278,7 @@ fn handle_popup_mode(app: &mut App, code: KeyCode) {
 }
 
 fn handle_llm_test_mode(app: &mut App, code: KeyCode) {
-    if app.left_focused {
+    if app.ui.left_focused {
         if code == KeyCode::Tab
             || !matches!(
                 code,
@@ -288,10 +288,10 @@ fn handle_llm_test_mode(app: &mut App, code: KeyCode) {
             app.toggle_focus();
         }
     } else if code == KeyCode::Esc || code == KeyCode::Tab {
-        app.in_llm_test_mode = false;
-        app.llm_test_state.input_text.clear();
-        app.llm_test_state.output_text.clear();
-        app.llm_test_state.current_mood = None;
+        app.ai.in_llm_test_mode = false;
+        app.ai.llm_test_state.input_text.clear();
+        app.ai.llm_test_state.output_text.clear();
+        app.ai.llm_test_state.current_mood = None;
         app.toggle_focus();
     } else {
         handle(app, code);

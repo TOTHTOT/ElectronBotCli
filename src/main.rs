@@ -76,7 +76,7 @@ fn run(terminal: &mut Terminal<CrosstermBackend<Stdout>>) -> anyhow::Result<()> 
     let mut app = app::App::new()?;
 
     let tick_rate = Duration::from_millis(20);
-    while app.running {
+    while app.ui.running {
         if app.is_connected() {
             let _ = app.send_frame();
         }

@@ -15,7 +15,7 @@ pub enum MenuEvent {
 /// 处理菜单事件
 pub fn handle(app: &mut App, event: MenuEvent) {
     // 如果在舵机模式或设置模式中，不处理菜单事件
-    if app.in_servo_mode || app.in_settings {
+    if app.in_servo_mode || app.ui.in_settings {
         return;
     }
 
@@ -30,17 +30,17 @@ pub fn handle(app: &mut App, event: MenuEvent) {
             }
         }
         MenuEvent::EnterServoMode => {
-            if matches!(app.selected_menu, crate::app::MenuItem::DeviceControl) {
+            if matches!(app.ui.selected_menu, crate::app::MenuItem::DeviceControl) {
                 app.in_servo_mode = true;
                 // 进入设备控制页面时，焦点切换到右侧
-                app.left_focused = false;
+                app.ui.left_focused = false;
             }
         }
         MenuEvent::EnterSettingMode => {
-            if app.selected_menu == crate::app::MenuItem::Settings {
-                app.in_settings = true;
+            if app.ui.selected_menu == crate::app::MenuItem::Settings {
+                app.ui.in_settings = true;
                 // 进入设置页面时，焦点切换到右侧
-                app.left_focused = false;
+                app.ui.left_focused = false;
             }
         }
     }

@@ -13,26 +13,27 @@ pub enum LlmTestEvent {
 pub fn handle(app: &mut App, code: KeyCode) {
     match code {
         KeyCode::Char(c) => {
-            app.llm_test_state.input_text.push(c);
+            app.ai.llm_test_state.input_text.push(c);
         }
         KeyCode::Backspace => {
-            app.llm_test_state.input_text.pop();
+            app.ai.llm_test_state.input_text.pop();
         }
         KeyCode::Enter => {
-            let input = app.llm_test_state.input_text.clone();
+            let input = app.ai.llm_test_state.input_text.clone();
             if !input.is_empty() {
-                app.is_processing
+                app.ai
+                    .is_processing
                     .store(true, std::sync::atomic::Ordering::Relaxed);
-                app.llm_test_state.output_text = "正在分析...".to_string();
+                app.ai.llm_test_state.output_text = "正在分析...".to_string();
                 // 发送到 LLM 处理通道
-                let _ = app.text_tx.send(input);
+                let _ = app.ai.text_tx.send(input);
             }
         }
         KeyCode::Esc => {
             // 清除输入
-            app.llm_test_state.input_text.clear();
-            app.llm_test_state.output_text.clear();
-            app.llm_test_state.current_mood = None;
+            app.ai.llm_test_state.input_text.clear();
+            app.ai.llm_test_state.output_text.clear();
+            app.ai.llm_test_state.current_mood = None;
         }
         _ => {}
     }

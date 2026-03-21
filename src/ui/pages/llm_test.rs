@@ -51,7 +51,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App, border_color: Color)
         .split(inner_area);
     // 输入框
     let input_style = Style::default().fg(Color::Yellow);
-    let input_box = Paragraph::new(app.llm_test_state.input_text.as_str()).block(
+    let input_box = Paragraph::new(app.ai.llm_test_state.input_text.as_str()).block(
         Block::bordered()
             .title("输入 (按回车发送)")
             .style(input_style),
@@ -59,10 +59,10 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App, border_color: Color)
     frame.render_widget(input_box, chunks[0]);
 
     // 输出区域
-    let output_text = if app.llm_test_state.output_text.is_empty() {
+    let output_text = if app.ai.llm_test_state.output_text.is_empty() {
         "等待输入...".to_string()
     } else {
-        app.llm_test_state.output_text.clone()
+        app.ai.llm_test_state.output_text.clone()
     };
     let output_box = Paragraph::new(output_text)
         .block(Block::bordered().title("输出"))
@@ -70,9 +70,13 @@ pub fn render(frame: &mut Frame, area: Rect, app: &mut App, border_color: Color)
     frame.render_widget(output_box, chunks[1]);
 
     // 状态/情感显示
-    let status_text = if app.is_processing.load(std::sync::atomic::Ordering::Relaxed) {
+    let status_text = if app
+        .ai
+        .is_processing
+        .load(std::sync::atomic::Ordering::Relaxed)
+    {
         "状态: 处理中..."
-    } else if let Some(mood) = app.llm_test_state.current_mood {
+    } else if let Some(mood) = app.ai.llm_test_state.current_mood {
         match mood {
             Mood::Happy => "情感: 开心 😊",
             Mood::Sad => "情感: 难过 😢",

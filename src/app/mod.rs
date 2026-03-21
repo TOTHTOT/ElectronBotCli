@@ -26,41 +26,70 @@ use tokio::sync::broadcast;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
-/// 主应用
-#[allow(dead_code)]
-pub struct App {
+/// UI 状态 - 菜单、导航、设置等
+pub(crate) struct UiState {
     pub menu_state: ListState,
     pub selected_menu: MenuItem,
     pub running: bool,
-    pub joint: Joint,
-    pub in_servo_mode: bool,
+    pub left_focused: bool,
     pub in_settings: bool,
     pub settings_selected: usize,
     pub in_edit_settings_mode: bool,
     pub edit_buffer: String,
-    pub config: config::AppConfig,
-    pub lcd: Lcd,
-    pub popup: Popup,
+    pub in_llm_test_mode: bool,
+}
+
+/// AI 状态 - LLM、语音、情感识别
+pub(crate) struct AiState {
     pub voice_manager: Option<Arc<VoiceManager>>,
     voice_result_rx: Option<mpsc::Receiver<Mood>>,
-    pub left_focused: bool,
     pub is_processing: Arc<AtomicBool>,
-    pub in_llm_test_mode: bool,
-    pub llm_test_state: LlmTestState,
     pub text_tx: Sender<String>,
+    #[allow(dead_code)]
     llm: Option<Arc<Mutex<QwenLlm>>>,
-    comm_state: Option<CommState>,
-    comm_thread: Option<std::thread::JoinHandle<()>>,
-    comm_tx: Option<SyncSender<BotRecvType>>,
+    pub llm_test_state: LlmTestState,
+}
 
-    /// Web 预览服务器
-    _web_preview: Option<Arc<WebPreview>>,
+/// 通信状态
+pub(crate) struct Comm {
+    pub state: Option<CommState>,
+    pub thread: Option<std::thread::JoinHandle<()>>,
+    pub tx: Option<SyncSender<BotRecvType>>,
+}
 
+/// 视频/摄像头状态
+pub(crate) struct Video {
     /// LCD 帧缓存（用于 Web 预览）
     lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+    /// 视频捕获器, 这里需要持有他免得生命周期结束被释放了
+    _video_capture: VideoCapture,
+}
 
-    /// 视频捕获器
-    video_capture: Option<VideoCapture>,
+/// 主应用
+#[allow(dead_code)]
+pub struct App {
+    // UI 状态
+    pub ui: UiState,
+
+    // 硬件
+    pub joint: Joint,
+    pub in_servo_mode: bool,
+    pub lcd: Lcd,
+
+    // 弹窗
+    pub popup: Popup,
+
+    // 配置
+    pub config: config::AppConfig,
+
+    // AI 状态
+    pub ai: AiState,
+
+    // 通信
+    pub comm: Comm,
+
+    // 视频/摄像头
+    pub video: Video,
 }
 
 #[allow(dead_code)]
@@ -156,42 +185,49 @@ impl App {
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 
         // 启动 Web 服务器（异步运行）
-        let web_preview_arc = Arc::new(web_preview.clone());
-        let web_preview_for_thread = (*web_preview_arc).clone();
+        // let web_preview_arc = Arc::new(web_preview.clone());
+        // let web_preview_for_thread = (*web_preview_arc).clone();
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(web_preview_for_thread.run());
+            rt.block_on(web_preview.run());
         });
 
         log::info!("init app successfully");
 
         Ok(Self {
-            menu_state,
-            selected_menu: MenuItem::DeviceStatus,
-            running: true,
+            ui: UiState {
+                menu_state,
+                selected_menu: MenuItem::DeviceStatus,
+                running: true,
+                left_focused: true,
+                in_settings: false,
+                settings_selected: 0,
+                in_edit_settings_mode: false,
+                in_llm_test_mode: false,
+                edit_buffer: String::new(),
+            },
             joint: Joint::new(),
             in_servo_mode: false,
-            in_settings: false,
-            settings_selected: 0,
-            in_edit_settings_mode: false,
-            edit_buffer: String::new(),
-            config,
             lcd,
             popup: Popup::new(),
-            voice_manager,
-            voice_result_rx: Some(result_rx),
-            left_focused: true,
-            is_processing,
-            in_llm_test_mode: false,
-            llm_test_state: LlmTestState::default(),
-            text_tx,
-            llm: Some(llm_arc),
-            comm_state: None,
-            comm_thread: None,
-            comm_tx: None,
-            _web_preview: Some(web_preview_arc),
-            lcd_frame_cache,
-            video_capture: Some(video_capture),
+            config,
+            ai: AiState {
+                voice_manager,
+                voice_result_rx: Some(result_rx),
+                is_processing,
+                text_tx,
+                llm: Some(llm_arc),
+                llm_test_state: LlmTestState::default(),
+            },
+            comm: Comm {
+                state: None,
+                thread: None,
+                tx: None,
+            },
+            video: Video {
+                lcd_frame_cache,
+                _video_capture: video_capture,
+            },
         })
     }
 
@@ -240,9 +276,9 @@ impl App {
         let (tx, rx) = mpsc::sync_channel(1);
         match robot::start_comm_thread(rx) {
             Ok((state, handle)) => {
-                self.comm_state = Some(state);
-                self.comm_thread = Some(handle);
-                self.comm_tx = Some(tx);
+                self.comm.state = Some(state);
+                self.comm.thread = Some(handle);
+                self.comm.tx = Some(tx);
                 log::info!("Successfully connected to robot...");
             }
             Err(e) => {
@@ -254,25 +290,25 @@ impl App {
 
     /// 断开机器人连接
     pub fn stop_comm_thread(&mut self) {
-        if let Some(tx) = self.comm_tx.take() {
+        if let Some(tx) = self.comm.tx.take() {
             drop(tx);
         }
-        if let Some(state) = &self.comm_state {
+        if let Some(state) = &self.comm.state {
             robot::stop_comm_thread(state);
         }
-        if let Some(handle) = self.comm_thread.take() {
+        if let Some(handle) = self.comm.thread.take() {
             let _ = handle.join();
         }
-        self.comm_state = None;
+        self.comm.state = None;
         self.popup.hide();
     }
 
     /// 发送帧数据 (原始像素数据)
     pub fn send_frame(&mut self) -> anyhow::Result<()> {
-        if let Some(tx) = &self.comm_tx {
+        if let Some(tx) = &self.comm.tx {
             let pixels = self.lcd.frame_vec();
             // 发送 LCD 帧到 Web 预览服务器
-            if let Some(ref cache) = self.lcd_frame_cache {
+            if let Some(ref cache) = self.video.lcd_frame_cache {
                 if let Ok(mut guard) = cache.lock() {
                     *guard = Some(pixels.clone());
                 }
@@ -301,7 +337,7 @@ impl App {
     }
 
     pub fn quit(&mut self) {
-        self.running = false;
+        self.ui.running = false;
     }
 
     pub fn next_menu(&mut self) {
@@ -315,15 +351,15 @@ impl App {
     fn select_menu(&mut self, delta: isize) {
         let items = MenuItem::all();
         let len = items.len();
-        let current = self.menu_state.selected().unwrap_or(0);
+        let current = self.ui.menu_state.selected().unwrap_or(0);
         let new_i = (current as isize + delta).rem_euclid(len as isize) as usize;
-        self.menu_state.select(Some(new_i));
-        self.selected_menu = items[new_i];
+        self.ui.menu_state.select(Some(new_i));
+        self.ui.selected_menu = items[new_i];
     }
 
     /// 切换左右窗口焦点
     pub fn toggle_focus(&mut self) {
-        self.left_focused = !self.left_focused;
+        self.ui.left_focused = !self.ui.left_focused;
     }
 
     /// 设置项数量
@@ -341,33 +377,33 @@ impl App {
 
     fn move_settings(&mut self, delta: isize) {
         let count = self.settings_item_count();
-        self.settings_selected =
-            (self.settings_selected as isize + delta).rem_euclid(count as isize) as usize;
+        self.ui.settings_selected =
+            (self.ui.settings_selected as isize + delta).rem_euclid(count as isize) as usize;
     }
 
     /// 保存设置项编辑内容
     pub fn save_settings_edit(&mut self) {
-        match self.settings_selected {
-            0 => self.config.wifi_ssid = self.edit_buffer.clone(),
-            1 => self.config.wifi_password = self.edit_buffer.clone(),
-            2 => self.config.speech_name = self.edit_buffer.clone(),
+        match self.ui.settings_selected {
+            0 => self.config.wifi_ssid = self.ui.edit_buffer.clone(),
+            1 => self.config.wifi_password = self.ui.edit_buffer.clone(),
+            2 => self.config.speech_name = self.ui.edit_buffer.clone(),
             _ => {}
         }
         if let Err(e) = self.config.save() {
             log::error!("Failed to save settings: {e}");
         }
-        self.in_edit_settings_mode = false;
-        self.edit_buffer.clear();
+        self.ui.in_edit_settings_mode = false;
+        self.ui.edit_buffer.clear();
     }
 
     /// 取消设置项编辑
     pub fn cancel_settings_edit(&mut self) {
-        self.in_edit_settings_mode = false;
-        self.edit_buffer.clear();
+        self.ui.in_edit_settings_mode = false;
+        self.ui.edit_buffer.clear();
     }
 
     pub fn is_connected(&self) -> bool {
-        self.comm_state.is_some()
+        self.comm.state.is_some()
     }
 
     pub fn load_image_from_file(&mut self, path: &str) -> anyhow::Result<()> {
@@ -386,21 +422,23 @@ impl App {
     }
 
     pub fn poll_voice_input(&mut self) {
-        if let Some(rx) = &self.voice_result_rx {
+        if let Some(rx) = &self.ai.voice_result_rx {
             while let Ok(mood) = rx.try_recv() {
                 log::info!("Mood: {mood:?}");
                 // 更新 LLM 测试状态
-                if self.in_llm_test_mode {
-                    self.llm_test_state.current_mood = Some(mood);
-                    self.llm_test_state.output_text = format!("情感: {:?}", mood);
+                if self.ui.in_llm_test_mode {
+                    self.ai.llm_test_state.current_mood = Some(mood);
+                    self.ai.llm_test_state.output_text = format!("情感: {:?}", mood);
                 }
-                self.is_processing
+                self.ai
+                    .is_processing
                     .store(false, std::sync::atomic::Ordering::Relaxed);
                 self.lcd.set_eyes_mood(mood);
                 Self::play_beep_for_mood(mood);
             }
         }
         if self
+            .ai
             .is_processing
             .load(std::sync::atomic::Ordering::Relaxed)
         {
