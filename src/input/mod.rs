@@ -97,7 +97,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         app.ui.in_edit_settings_mode,
         app.in_servo_mode,
         app.ui.in_settings,
-        app.ai.in_llm_test_mode,
+        app.ui.in_llm_test_mode,
     ) {
         // 编辑模式：处理设置项内容编辑
         (true, _, _, _) => handle_edit_settings_mode(app, code),
@@ -160,7 +160,7 @@ fn handle_menu_enter(app: &mut App) -> AppEvent {
         MenuItem::DeviceControl => MenuEvent::EnterServoMode.into(),
         MenuItem::Settings => MenuEvent::EnterSettingMode.into(),
         MenuItem::LlmTest => {
-            app.ai.in_llm_test_mode = true;
+            app.ui.in_llm_test_mode = true;
             app.ui.left_focused = false;
             AppEvent::LlmTest(LlmTestEvent::None)
         }
@@ -288,7 +288,7 @@ fn handle_llm_test_mode(app: &mut App, code: KeyCode) {
             app.toggle_focus();
         }
     } else if code == KeyCode::Esc || code == KeyCode::Tab {
-        app.ai.in_llm_test_mode = false;
+        app.ui.in_llm_test_mode = false;
         app.ai.llm_test_state.input_text.clear();
         app.ai.llm_test_state.output_text.clear();
         app.ai.llm_test_state.current_mood = None;

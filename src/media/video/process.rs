@@ -6,6 +6,8 @@ use std::convert::TryFrom;
 
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 use crate::media::video::rga_adapter::RgaHelper;
+use crate::media::video::types::{FrameData, FrameInfo};
+use bytes::Bytes;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 use librga::usage::Rotation;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
@@ -158,26 +160,25 @@ pub fn process_frame(
     width: u32,
     height: u32,
     face_detector: &mut Box<dyn FaceDetectorTrait>,
-) -> Vec<u8> {
+) -> anyhow::Result<FrameInfo> {
     // 尝试检测人脸
-    match face_detector.detect(rgb_data.clone(), width, height) {
-        Ok(result) => {
-            if result.has_face {
-                // 绘制人脸框
-                draw_face_box(
-                    &mut rgb_data,
-                    width,
-                    height,
-                    result.x,
-                    result.y,
-                    result.width,
-                    result.height,
-                );
-            }
-        }
-        Err(e) => {
-            log::warn!("Face detection error: {}", e);
-        }
+    let result = face_detector.detect(rgb_data.clone(), width, height)?;
+    if result.has_face {
+        // 绘制人脸框
+        draw_face_box(
+            &mut rgb_data,
+            width,
+            height,
+            result.x,
+            result.y,
+            result.width,
+            result.height,
+        );
     }
-    rgb_data
+    Ok(FrameInfo {
+        face_info: result,
+        frame_data: FrameData::RawRgb(Bytes::from(rgb_data)),
+        focused: false,
+        emotion: boteyes::Mood::Default,
+    })
 }

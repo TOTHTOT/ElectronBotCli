@@ -100,10 +100,10 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
             match rx.recv().await {
                 Ok(frame) => {
                     // 根据数据类型获取 JPEG
-                    let jpeg = if let Some(jpeg_data) = frame.as_jpeg() {
+                    let jpeg = if let Some(jpeg_data) = frame.frame_data.as_jpeg() {
                         // 已经是 JPEG, 直接使用
                         jpeg_data.clone()
-                    } else if let Some(rgb_data) = frame.as_raw_rgb() {
+                    } else if let Some(rgb_data) = frame.frame_data.as_raw_rgb() {
                         // 需要编码为 JPEG
                         let (width, height) = *resolution.lock().unwrap();
                         rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {

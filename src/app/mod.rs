@@ -2,7 +2,7 @@ pub mod config;
 pub mod menu;
 
 use crate::llm::QwenLlm;
-use crate::media::video::types::FrameData;
+use crate::media::video::types::FrameInfo;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
@@ -172,7 +172,7 @@ impl App {
                 nokhwa::utils::CameraIndex::String(config.camera_index.clone())
             };
         // 创建 broadcast 通道用于帧传递（带背压缓冲）
-        let (frame_tx, _frame_rx) = broadcast::channel::<FrameData>(100);
+        let (frame_tx, _frame_rx) = broadcast::channel::<FrameInfo>(100);
         let mut video_capture = VideoCapture::new(
             camera_index,
             frame_tx.clone(),

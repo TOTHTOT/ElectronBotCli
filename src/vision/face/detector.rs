@@ -12,6 +12,12 @@ pub struct FaceDetectionResult {
     pub confidence: f32,
 }
 
+impl FaceDetectionResult {
+    #[allow(dead_code)]
+    pub fn get_center_coordinates(&self) -> (f32, f32) {
+        (self.x + self.width * 2.0, self.y + self.height * 2.0)
+    }
+}
 /// 人脸检测器 trait
 pub trait FaceDetectorTrait: Send + Sync {
     /// 检测单个人脸（默认实现：返回检测到的第一个人脸）

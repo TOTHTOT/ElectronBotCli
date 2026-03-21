@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
-use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameData};
+use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameInfo};
 use crate::vision::face::FaceDetectorTrait;
 use anyhow::Context;
 use nokhwa::pixel_format::RgbFormat;
@@ -319,7 +319,7 @@ fn capture_frames(
         };
         let start_time = Instant::now();
         // 拿到原始的图像数据然后根据格式处理帧数据
-        let frame_data = process_frame_by_format(
+        let Ok(frame_data) = process_frame_by_format(
             frame,
             out_width,
             out_height,
@@ -328,7 +328,9 @@ fn capture_frames(
             width,
             height,
             &mut face_detector,
-        );
+        ) else {
+            continue;
+        };
         log::debug!("process used time: {:?}", start_time.elapsed());
 
         // 计算帧率
@@ -352,7 +354,7 @@ fn process_and_rotate(
     height: u32,
     face_detector: &mut Box<dyn FaceDetectorTrait>,
     rotate_angle: RotateAngle,
-) -> FrameData {
+) -> anyhow::Result<FrameInfo> {
     let start_time = Instant::now();
     let rotated = if rotate_angle == RotateAngle::None {
         rgb
@@ -367,10 +369,9 @@ fn process_and_rotate(
     log::debug!("rotate used time: {:?}", start_time.elapsed());
 
     let detect_start = Instant::now();
-    let processed = process_frame(rotated, new_width, new_height, face_detector);
+    let processed = process_frame(rotated, new_width, new_height, face_detector)?;
     log::debug!("process_frame used time: {:?}", detect_start.elapsed());
-
-    FrameData::RawRgb(Bytes::from(processed))
+    Ok(processed)
 }
 
 /// 根据帧格式处理数据
@@ -403,57 +404,32 @@ fn process_frame_by_format(
     src_width: u32,
     src_height: u32,
     face_detector: &mut Box<dyn FaceDetectorTrait>,
-) -> FrameData {
+) -> anyhow::Result<FrameInfo> {
     match format {
-        FrameFormat::MJPEG => {
-            log::debug!(
-                "Frame: {out_width}x{out_height}, MJPEG, {} bytes",
-                frame.buffer().len()
-            );
-            // MJPEG 解码 -> 人脸检测 -> 重新编码
-            match decode_jpeg_to_rgb(frame.buffer()) {
-                Some(rgb_data) => {
-                    let processed = process_frame(rgb_data, src_width, src_height, face_detector);
-                    match encode_rgb_to_jpeg(&processed, src_width, src_height) {
-                        Some(jpeg_bytes) => FrameData::Jpeg(jpeg_bytes),
-                        None => FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer())),
-                    }
-                }
-                None => FrameData::Jpeg(Bytes::copy_from_slice(frame.buffer())),
-            }
-        }
         FrameFormat::YUYV | FrameFormat::NV12 => {
             log::debug!(
                 "Frame: {out_width}x{out_height}, len: {}, YUV, decoding...",
                 frame.buffer().len()
             );
-            let rgb_data = match frame.decode_image::<RgbFormat>() {
-                Ok(img_buf) => img_buf.into_raw(),
-                Err(e) => {
-                    log::warn!("Failed to decode YUV frame: {:?}", e);
-                    return FrameData::RawRgb(Bytes::new());
-                }
+            let Ok(rgb_data) = frame.decode_image::<RgbFormat>() else {
+                anyhow::bail!("failed to decode image");
             };
-            process_and_rotate(rgb_data, src_width, src_height, face_detector, rotate_angle)
+            process_and_rotate(
+                rgb_data.into_raw(),
+                src_width,
+                src_height,
+                face_detector,
+                rotate_angle,
+            )
         }
-        FrameFormat::RAWRGB | FrameFormat::RAWBGR => {
-            log::debug!("Frame: {}x{}, Raw RGB/BGR", out_width, out_height);
-            let rgb = if format == FrameFormat::RAWRGB {
-                frame.buffer().to_vec()
-            } else {
-                log::warn!("FrameFormat::RAWBGR not supported");
-                Vec::new()
-            };
-            process_and_rotate(rgb, src_width, src_height, face_detector, rotate_angle)
-        }
-        FrameFormat::GRAY => {
-            log::debug!("Frame: {}x{}, GRAY", out_width, out_height);
-            FrameData::RawRgb(Bytes::copy_from_slice(frame.buffer()))
+        _ => {
+            anyhow::bail!("Unsupported frame format {:?}", format);
         }
     }
 }
 
 /// 解码 JPEG 为 RGB 数据
+#[allow(dead_code)]
 fn decode_jpeg_to_rgb(jpeg_data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Cursor;
 
@@ -467,6 +443,7 @@ fn decode_jpeg_to_rgb(jpeg_data: &[u8]) -> Option<Vec<u8>> {
 }
 
 /// 将 RGB 数据编码为 JPEG
+#[allow(dead_code)]
 fn encode_rgb_to_jpeg(rgb_data: &[u8], width: u32, height: u32) -> Option<Bytes> {
     use image::codecs::jpeg::JpegEncoder;
     use std::io::Cursor;
