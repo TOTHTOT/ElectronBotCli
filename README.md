@@ -53,14 +53,11 @@ scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarc
 scp assets/tools/convert_all_models.py  radxa@192.168.2.202:~/ElectronBotCli
 ```
 
+### 待优化
+
+1. [ ] 优化人脸识别方面的, 减少内存拷贝并持久化一些变量, 免得重复开辟大量空间.
+2. [ ] 在rk3566情况下使用硬件rga进行旋转 缩放 格式转换.
+
 ## 备注
 -  ~~使用了`vosk`需要根据系统添加对应的动态库, 放在执行文件同一级目录, 比如:liberos.dll.~~
 - 电子的摄像头实际上只有480p8帧.
-
-### 资源下载 
-1. [qwen2-0.5b模型下载](https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_0.gguf)
-2. 文字转语音
-   - [rk3566静态链接RKNN推理](https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.26/sherpa-onnx-v1.12.26-rknn-linux-aarch64-static.tar.bz2)
-   - [rk3566动态链接RKNN推理](https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.26/sherpa-onnx-v1.12.26-rknn-linux-aarch64-shared.tar.bz2)
-   - [rk3566动态链接cpu推理](https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.26/sherpa-onnx-v1.12.26-linux-aarch64-shared-cpu.tar.bz2)
-   - [windows动态链接cpu推理, 用于测试](https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.12.26/sherpa-onnx-v1.12.26-win-x64-shared-MD-Release.tar.bz2)
