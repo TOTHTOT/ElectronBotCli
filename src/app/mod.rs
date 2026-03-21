@@ -1,27 +1,26 @@
 pub mod config;
+pub mod face_tracker;
 pub mod menu;
 
+use crate::app::face_tracker::{calculate_body_adjustment, smooth_adjustment};
 use crate::llm::QwenLlm;
 use crate::media::video::types::FrameInfo;
-use crate::model_manager::ModelManager;
-use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
-use crate::ui::pages::llm_test::LlmTestState;
-use crate::web::WebPreview;
-use std::default::Default;
-use std::sync::{Arc, Mutex};
-
-// 导出菜单
-pub use menu::*;
-
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
 use crate::media::voice::VoiceManager;
+use crate::model_manager::ModelManager;
+use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
+use crate::ui::pages::llm_test::LlmTestState;
 use crate::vision::face::create_face_detector;
+use crate::web::WebPreview;
 use boteyes::Mood;
 use electron_bot::{FRAME_HEIGHT, FRAME_WIDTH};
+pub use menu::*;
 use ratatui::widgets::ListState;
+use std::default::Default;
 use std::sync::atomic::AtomicBool;
 use std::sync::mpsc::{self, Sender, SyncSender};
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
@@ -63,6 +62,8 @@ pub(crate) struct Video {
     lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
     /// 视频捕获器, 这里需要持有他免得生命周期结束被释放了
     _video_capture: VideoCapture,
+    /// 帧通道接收端，用于获取人脸位置信息
+    frame_rx: Option<broadcast::Receiver<FrameInfo>>,
 }
 
 /// 主应用
@@ -90,6 +91,10 @@ pub struct App {
 
     // 视频/摄像头
     pub video: Video,
+
+    // 人脸追踪
+    pub face_tracking_enabled: bool,
+    last_face_adjustment: i32,
 }
 
 #[allow(dead_code)]
@@ -172,7 +177,7 @@ impl App {
                 nokhwa::utils::CameraIndex::String(config.camera_index.clone())
             };
         // 创建 broadcast 通道用于帧传递（带背压缓冲）
-        let (frame_tx, _frame_rx) = broadcast::channel::<FrameInfo>(100);
+        let (frame_tx, frame_rx) = broadcast::channel::<FrameInfo>(100);
         let mut video_capture = VideoCapture::new(
             camera_index,
             frame_tx.clone(),
@@ -227,7 +232,10 @@ impl App {
             video: Video {
                 lcd_frame_cache,
                 _video_capture: video_capture,
+                frame_rx: Some(frame_rx),
             },
+            face_tracking_enabled: false,
+            last_face_adjustment: 0,
         })
     }
 
@@ -305,18 +313,60 @@ impl App {
 
     /// 发送帧数据 (原始像素数据)
     pub fn send_frame(&mut self) -> anyhow::Result<()> {
-        if let Some(tx) = &self.comm.tx {
-            let pixels = self.lcd.frame_vec();
-            // 发送 LCD 帧到 Web 预览服务器
-            if let Some(ref cache) = self.video.lcd_frame_cache {
-                if let Ok(mut guard) = cache.lock() {
-                    *guard = Some(pixels.clone());
-                }
+        let pixels = self.lcd.frame_vec();
+        // 发送 LCD 帧到 Web 预览服务器
+        if let Some(ref cache) = self.video.lcd_frame_cache {
+            if let Ok(mut guard) = cache.lock() {
+                *guard = Some(pixels.clone());
             }
-            let config = self.joint.config();
+        }
+
+        // 获取当前关节配置
+        let mut config = self.joint.config();
+
+        // 如果开启了人脸追踪，获取人脸位置并应用调整
+        if self.face_tracking_enabled {
+            if let Some(face_x) = self.get_face_x_position() {
+                log::info!("face_y :{:?}", face_x);
+                // 计算需要的调整角度
+                let target_body = calculate_body_adjustment(face_x);
+
+                // 使用平滑处理
+                let smoothed = smooth_adjustment(self.last_face_adjustment, target_body, 0.3);
+                self.last_face_adjustment = smoothed;
+
+                config.angles[5] += smoothed as f32;
+                config.angles[5] = config.angles[5].clamp(-90.0, 90.0);
+            }
+        }
+
+        if let Some(tx) = &self.comm.tx {
             tx.try_send((pixels, config))?;
         }
         Ok(())
+    }
+
+    /// 获取当前人脸 x 坐标
+    fn get_face_x_position(&mut self) -> Option<f32> {
+        if let Some(rx) = &mut self.video.frame_rx {
+            // 尝试接收最新帧，忽略过期帧
+            while let Ok(frame_info) = rx.try_recv() {
+                if frame_info.face_info.has_face {
+                    return Some(frame_info.face_info.x);
+                }
+            }
+        }
+        None
+    }
+
+    /// 切换人脸追踪状态
+    pub fn toggle_face_tracking(&mut self) {
+        self.face_tracking_enabled = !self.face_tracking_enabled;
+        if !self.face_tracking_enabled {
+            // 关闭追踪时重置调整值
+            self.last_face_adjustment = 0;
+        }
+        log::info!("Face tracking enabled: {}", self.face_tracking_enabled);
     }
 
     /// 截图并保存为 BMP 文件

@@ -81,9 +81,6 @@ pub fn start_comm_thread(
         }
     }
     let handle = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(100));
-
-        // 主循环
         for (pixels, joint) in rx {
             if !running.load(Ordering::Relaxed) {
                 break;

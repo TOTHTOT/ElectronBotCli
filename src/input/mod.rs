@@ -201,6 +201,7 @@ fn handle_servo_mode(app: &mut App, code: KeyCode) {
         KeyCode::Left => handle_event(app, DeviceEvent::Decrease.into()),
         KeyCode::Right => handle_event(app, DeviceEvent::Increase.into()),
         KeyCode::Char('s') => handle_event(app, DeviceEvent::Screenshot.into()),
+        KeyCode::Char('f') | KeyCode::Char('F') => app.toggle_face_tracking(),
         _ => {}
     }
 }
