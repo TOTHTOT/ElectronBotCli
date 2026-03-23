@@ -2,6 +2,9 @@
 //!
 //! 提供 6 个舵机的角度控制和数据序列化
 
+use std::sync::Arc;
+use std::sync::Mutex;
+
 pub const SERVO_COUNT: usize = 6;
 
 // 舵机配置结构体
@@ -132,6 +135,13 @@ impl ServoState {
         self.values[self.selected] = (self.values[self.selected] - 1).max(min);
     }
 
+    /// 设置指定舵机角度
+    pub fn set_value(&mut self, index: usize, value: i16) {
+        if index < SERVO_COUNT {
+            self.values[index] = value;
+        }
+    }
+
     /// 转换为 JointConfig
     pub fn as_config(&self) -> JointConfig {
         JointConfig {
@@ -145,51 +155,82 @@ impl ServoState {
 
 /// 关节控制器
 ///
-/// 管理所有舵机的状态和配置
-#[derive(Debug, Default)]
+/// 管理所有舵机的状态和配置，使用 Arc<Mutex<ServoState>> 实现线程安全共享
+#[derive(Debug, Clone)]
 pub struct Joint {
-    state: ServoState,
+    state: Arc<Mutex<ServoState>>,
 }
 
 #[allow(dead_code)]
 impl Joint {
     /// 创建新的关节控制器
     pub fn new() -> Self {
-        Self::default()
+        Self {
+            state: Arc::new(Mutex::new(ServoState::default())),
+        }
+    }
+
+    /// 获取内部 Mutex 的 Arc 引用（供其他线程使用）
+    pub fn state_arc(&self) -> Arc<Mutex<ServoState>> {
+        self.state.clone()
+    }
+
+    /// 设置单个关节角度
+    pub fn set_angle(&self, index: usize, angle: f32) {
+        if let Ok(mut state) = self.state.lock() {
+            if index < SERVO_COUNT {
+                let clamped = angle.clamp(-180.0, 180.0) as i16;
+                state.values[index] = clamped;
+            }
+        }
     }
 
     /// 获取所有舵机值
-    pub fn values(&self) -> &[i16; SERVO_COUNT] {
-        &self.state.values
+    pub fn values(&self) -> [i16; SERVO_COUNT] {
+        self.state.lock().map(|s| s.values).unwrap_or_default()
     }
 
     /// 获取当前选中的舵机索引
     pub fn selected(&self) -> usize {
-        self.state.selected
+        self.state.lock().map(|s| s.selected).unwrap_or(0)
     }
 
     /// 切换到下一个舵机
-    pub fn next_servo(&mut self) {
-        self.state.next();
+    pub fn next_servo(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.next();
+        }
     }
 
     /// 切换到上一个舵机
-    pub fn prev_servo(&mut self) {
-        self.state.prev();
+    pub fn prev_servo(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.prev();
+        }
     }
 
     /// 增加当前舵机角度
-    pub fn increase(&mut self) {
-        self.state.increase();
+    pub fn increase(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.increase();
+        }
     }
 
     /// 减少当前舵机角度
-    pub fn decrease(&mut self) {
-        self.state.decrease();
+    pub fn decrease(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.decrease();
+        }
     }
 
     /// 获取当前关节配置
     pub fn config(&self) -> JointConfig {
-        self.state.as_config()
+        self.state.lock().map(|s| s.as_config()).unwrap_or_default()
+    }
+}
+
+impl Default for Joint {
+    fn default() -> Self {
+        Self::new()
     }
 }

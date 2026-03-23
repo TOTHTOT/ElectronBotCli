@@ -73,7 +73,7 @@ pub struct App {
     pub ui: UiState,
 
     // 硬件
-    pub joint: Joint,
+    pub joint: Arc<Joint>,
     pub in_servo_mode: bool,
     pub lcd: Lcd,
 
@@ -189,9 +189,7 @@ impl App {
 
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 
-        // 启动 Web 服务器（异步运行）
-        // let web_preview_arc = Arc::new(web_preview.clone());
-        // let web_preview_for_thread = (*web_preview_arc).clone();
+        // 启动 Web 服务器
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();
             rt.block_on(web_preview.run());
@@ -211,7 +209,7 @@ impl App {
                 in_llm_test_mode: false,
                 edit_buffer: String::new(),
             },
-            joint: Joint::new(),
+            joint: Arc::new(Joint::new()),
             in_servo_mode: false,
             lcd,
             popup: Popup::new(),
@@ -321,27 +319,22 @@ impl App {
             }
         }
 
-        // 获取当前关节配置
-        let mut config = self.joint.config();
-
-        // 如果开启了人脸追踪，获取人脸位置并应用调整
+        // 如果开启了人脸追踪，获取人脸位置并通过 set_angle 直接修改共享状态
         if self.face_tracking_enabled {
             if let Some(face_x) = self.get_face_x_position() {
                 log::info!("face_y :{:?}", face_x);
-                // 计算需要的调整角度
                 let target_body = calculate_body_adjustment(face_x);
-
-                // 使用平滑处理
                 let smoothed = smooth_adjustment(self.last_face_adjustment, target_body, 0.3);
                 self.last_face_adjustment = smoothed;
-
-                config.angles[5] += smoothed as f32;
-                config.angles[5] = config.angles[5].clamp(-90.0, 90.0);
+                let current = self.joint.config().angles[5]; // 只改身体部分的数据
+                let new_angle = (current + smoothed as f32).clamp(-90.0, 90.0);
+                self.joint.set_angle(5, new_angle);
             }
         }
 
+        // 发送时从共享状态读取最新的数据
         if let Some(tx) = &self.comm.tx {
-            tx.try_send((pixels, config))?;
+            tx.try_send((pixels, self.joint.config()))?;
         }
         Ok(())
     }
