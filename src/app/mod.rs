@@ -25,6 +25,9 @@ use tokio::sync::broadcast;
 
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
+/// LCD 帧缓存类型
+type LcdFrameCache = Option<Arc<Mutex<Option<Vec<u8>>>>>;
+
 /// UI 状态 - 菜单、导航、设置等
 pub(crate) struct UiState {
     pub menu_state: ListState,
@@ -59,7 +62,7 @@ pub(crate) struct Comm {
 /// 视频/摄像头状态
 pub(crate) struct Video {
     /// LCD 帧缓存（用于 Web 预览）
-    lcd_frame_cache: Option<Arc<Mutex<Option<Vec<u8>>>>>,
+    lcd_frame_cache: LcdFrameCache,
     /// 视频捕获器, 这里需要持有他免得生命周期结束被释放了
     _video_capture: VideoCapture,
     /// 帧通道接收端，用于获取人脸位置信息
@@ -218,16 +221,11 @@ impl App {
     }
 
     /// 初始化视频捕获
-    #[allow(clippy::type_complexity)]
     fn init_video(
         config: &config::AppConfig,
         _mm: ModelManager,
         face_detector: Box<dyn crate::vision::face::FaceDetectorTrait>,
-    ) -> anyhow::Result<(
-        VideoCapture,
-        Option<Arc<Mutex<Option<Vec<u8>>>>>,
-        broadcast::Receiver<FrameInfo>,
-    )> {
+    ) -> anyhow::Result<(VideoCapture, LcdFrameCache, broadcast::Receiver<FrameInfo>)> {
         let camera_index: nokhwa::utils::CameraIndex =
             if let Ok(idx) = config.camera_index.parse::<u32>() {
                 nokhwa::utils::CameraIndex::Index(idx)
