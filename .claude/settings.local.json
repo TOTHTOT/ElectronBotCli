@@ -108,7 +108,9 @@
       "Bash(./scripts/deploy_rk3566.sh build:*)",
       "Bash(./scripts/deploy_rk3566.sh:*)",
       "mcp__fs__read_text_file",
-      "Bash(identify:*)"
+      "Bash(identify:*)",
+      "mcp__fs__read_file",
+      "Bash(SSH_PASSWORD='radxa' sshpass:*)"
     ]
   }
 }
