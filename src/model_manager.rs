@@ -1,9 +1,13 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::OnceLock;
 
 pub struct ModelManager {
     paths: HashMap<String, PathBuf>,
 }
+
+/// 全局 ModelManager 实例 - 懒加载
+static MODEL_MANAGER: OnceLock<ModelManager> = OnceLock::new();
 
 /// 模型配置: (key, repo_id, filename, rknn_path)
 type ModelConfig = (&'static str, &'static str, &'static str, &'static str);
@@ -30,6 +34,11 @@ fn download_from_hf(
 }
 
 impl ModelManager {
+    /// 获取全局 ModelManager 实例（懒初始化）
+    pub fn global() -> &'static ModelManager {
+        MODEL_MANAGER.get_or_init(|| Self::init().expect("Failed to initialize ModelManager"))
+    }
+
     /// 初始化并同步所有模型
     pub fn init() -> anyhow::Result<Self> {
         let mut paths = HashMap::new();

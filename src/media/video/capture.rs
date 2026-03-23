@@ -7,6 +7,8 @@ use std::process::Command;
 
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameInfo};
+use crate::model_manager::ModelManager;
+use crate::vision::face::create_face_detector;
 use crate::vision::face::FaceDetectorTrait;
 use anyhow::Context;
 use nokhwa::pixel_format::RgbFormat;
@@ -63,7 +65,7 @@ pub struct VideoCapture {
     resolution: Arc<Mutex<(u32, u32)>>,
     /// 旋转角度
     rotate_angle: RotateAngle,
-    /// 人脸检测器
+    /// 人脸检测器（可选，为 None 时将在线程中懒加载）
     face_detector: Option<Box<dyn FaceDetectorTrait>>,
     /// 捕获线程句柄
     capture_thread: Option<JoinHandle<()>>,
@@ -83,10 +85,16 @@ impl Drop for VideoCapture {
 #[allow(dead_code)]
 impl VideoCapture {
     /// 创建新的视频捕获器
+    ///
+    /// # Arguments
+    /// * `camera_index` - 摄像头索引
+    /// * `frame_cache` - 帧缓存通道
+    /// * `face_detector` - 人脸检测器（可选，为 None 时将在线程中懒加载）
+    /// * `rotate_angle` - 旋转角度
     pub fn new(
         camera_index: CameraIndex,
         frame_cache: FrameCache,
-        face_detector: Box<dyn FaceDetectorTrait>,
+        face_detector: Option<Box<dyn FaceDetectorTrait>>,
         rotate_angle: RotateAngle,
     ) -> Self {
         log::info!(
@@ -99,7 +107,7 @@ impl VideoCapture {
             camera_index,
             resolution: Arc::new(Mutex::new((0, 0))),
             rotate_angle,
-            face_detector: Some(face_detector),
+            face_detector,
             capture_thread: None,
         }
     }
@@ -145,10 +153,7 @@ impl VideoCapture {
         let running = self.running.clone();
         let resolution = self.resolution.clone();
         let rotate_angle = self.rotate_angle;
-        let face_detector = self
-            .face_detector
-            .take()
-            .expect("take face_detector failed");
+        let face_detector = self.face_detector.take();
 
         let handle = thread::spawn(move || {
             capture_frames(
@@ -269,7 +274,7 @@ fn capture_frames(
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
-    mut face_detector: Box<dyn FaceDetectorTrait>,
+    face_detector: Option<Box<dyn FaceDetectorTrait>>,
 ) {
     let mut camera = match open_camera_default(camera_index) {
         Ok(mut c) => {
@@ -287,6 +292,12 @@ fn capture_frames(
     log::info!("camera info: {:?}", camera_fmt);
     let width = camera_fmt.width();
     let height = camera_fmt.height();
+
+    // 如果 face_detector 为 None，懒加载它
+    let mut face_detector = match get_face_detector(face_detector) {
+        Some(value) => value,
+        None => return,
+    };
 
     // 如果需要旋转 90 或 270 度，宽高交换
     let (out_width, out_height) = if rotate_angle.needs_swap() {
@@ -344,6 +355,51 @@ fn capture_frames(
     }
 
     log::info!("Video capture loop stopped");
+}
+
+/// 加载人脸识别的模型
+///
+/// # Arguments
+///
+/// * `face_detector`: Option包裹的人脸检测器, 如果未被初始化就程序初始化, 反之直接回传
+///
+/// returns: Option<Box<dyn FaceDetectorTrait, Global>>
+///
+/// # Examples
+///
+/// ```
+///
+/// ```
+fn get_face_detector(
+    face_detector: Option<Box<dyn FaceDetectorTrait>>,
+) -> Option<Box<dyn FaceDetectorTrait>> {
+    let face_detector = if let Some(detector) = face_detector {
+        detector
+    } else {
+        log::info!("Lazy loading face detector...");
+        let mm = ModelManager::global();
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let face_detect_path = mm.get("retinaface_rknn");
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+        let face_detect_path = mm.get("yolo_face");
+
+        if let Some(path) = face_detect_path {
+            match create_face_detector(path) {
+                Ok(detector) => {
+                    log::info!("Face detector loaded successfully");
+                    detector
+                }
+                Err(e) => {
+                    log::error!("Failed to load face detector: {}", e);
+                    return None;
+                }
+            }
+        } else {
+            log::error!("Face detector model not found");
+            return None;
+        }
+    };
+    Some(face_detector)
 }
 
 /// 处理帧并应用旋转

@@ -23,6 +23,11 @@ use std::sync::mpsc::{self, Sender, SyncSender};
 use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 
+// 全局模型实例 - 懒加载
+// 使用 Mutex<Option<...>> 模式，支持稳定 Rust 的错误处理
+static LLM_INSTANCE: Mutex<Option<Arc<Mutex<QwenLlm>>>> = Mutex::new(None);
+static VOICE_MANAGER_INSTANCE: Mutex<Option<Arc<VoiceManager>>> = Mutex::new(None);
+
 pub type BotRecvType = (Vec<u8>, JointConfig);
 
 /// LCD 帧缓存类型
@@ -105,16 +110,16 @@ impl App {
     pub fn new() -> anyhow::Result<Self> {
         let lcd = Lcd::new();
         let config = config::AppConfig::load();
-        let mm = ModelManager::init()?;
 
-        let llm_arc = Self::init_llm(&mm)?;
-        let face_detector = Self::init_face_detector(&mm)?;
-        let voice_manager = Self::init_voice_manager(&config, &mm)?;
+        // 只初始化 ModelManager, 检查/下载模型元数据
+        let _ = ModelManager::global();
 
-        let (video_capture, lcd_frame_cache, frame_rx) =
-            Self::init_video(&config, mm, face_detector)?;
+        // 启动 LLM 线程时按需加载
+        let (text_tx, result_rx) = Self::spawn_llm_thread_lazy()?;
 
-        let (text_tx, result_rx) = Self::spawn_llm_thread(llm_arc.clone())?;
+        // 视频捕获不再立即需要 face_detector，使用懒加载
+        let (video_capture, lcd_frame_cache, frame_rx) = Self::init_video_lazy(&config)?;
+
         Self::spawn_web_server(video_capture.resolution_arc())?;
 
         log::info!("init app successfully");
@@ -140,11 +145,11 @@ impl App {
             popup: Popup::new(),
             config,
             ai: AiState {
-                voice_manager,
+                voice_manager: None, // 语音管理器懒加载
                 voice_result_rx: Some(result_rx),
                 is_processing: Arc::new(AtomicBool::new(false)),
                 text_tx,
-                llm: Some(llm_arc),
+                llm: None, // LLM 懒加载
                 llm_test_state: LlmTestState::default(),
             },
             comm: Comm {
@@ -220,35 +225,6 @@ impl App {
         }
     }
 
-    /// 初始化视频捕获
-    fn init_video(
-        config: &config::AppConfig,
-        _mm: ModelManager,
-        face_detector: Box<dyn crate::vision::face::FaceDetectorTrait>,
-    ) -> anyhow::Result<(VideoCapture, LcdFrameCache, broadcast::Receiver<FrameInfo>)> {
-        let camera_index: nokhwa::utils::CameraIndex =
-            if let Ok(idx) = config.camera_index.parse::<u32>() {
-                nokhwa::utils::CameraIndex::Index(idx)
-            } else {
-                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
-            };
-
-        // 创建 broadcast 通道用于帧传递（带背压缓冲）
-        let (frame_tx, frame_rx) = broadcast::channel::<FrameInfo>(100);
-        let mut video_capture = VideoCapture::new(
-            camera_index,
-            frame_tx.clone(),
-            face_detector,
-            config.rotation,
-        );
-        video_capture.start_capture_frames_thread();
-
-        let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
-        let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
-
-        Ok((video_capture, lcd_frame_cache, frame_rx))
-    }
-
     /// 启动 LLM 处理线程
     fn spawn_llm_thread(
         llm: Arc<Mutex<QwenLlm>>,
@@ -264,6 +240,56 @@ impl App {
         });
 
         Ok((text_tx, result_rx))
+    }
+
+    /// 启动 LLM 处理线程（懒加载模式）
+    fn spawn_llm_thread_lazy() -> anyhow::Result<(Sender<String>, mpsc::Receiver<Mood>)> {
+        let (text_tx, text_rx) = mpsc::channel::<String>();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let is_processing = Arc::new(AtomicBool::new(false));
+        let is_processing_clone = is_processing.clone();
+
+        std::thread::spawn(move || {
+            // 线程内首次使用时加载模型
+            let llm = match Self::init_llm_lazy() {
+                Ok(llm) => llm,
+                Err(e) => {
+                    log::error!("Failed to load LLM: {}", e);
+                    return;
+                }
+            };
+            Self::llm_analysis_thread(llm, text_rx, result_tx, is_processing_clone);
+        });
+
+        Ok((text_tx, result_rx))
+    }
+
+    /// 初始化视频捕获（懒加载模式）
+    fn init_video_lazy(
+        config: &config::AppConfig,
+    ) -> anyhow::Result<(VideoCapture, LcdFrameCache, broadcast::Receiver<FrameInfo>)> {
+        let camera_index: nokhwa::utils::CameraIndex =
+            if let Ok(idx) = config.camera_index.parse::<u32>() {
+                nokhwa::utils::CameraIndex::Index(idx)
+            } else {
+                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
+            };
+
+        // 创建 broadcast 通道用于帧传递（带背压缓冲）
+        let (frame_tx, frame_rx) = broadcast::channel::<FrameInfo>(100);
+        let mut video_capture = VideoCapture::new(
+            camera_index,
+            frame_tx.clone(),
+            None, // face_detector 为 None，将在帧处理线程中懒加载
+            config.rotation,
+        );
+        video_capture.start_capture_frames_thread();
+
+        let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
+        let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
+
+        Ok((video_capture, lcd_frame_cache, frame_rx))
     }
 
     /// 启动 Web 服务器
@@ -424,6 +450,130 @@ impl App {
 
     pub fn quit(&mut self) {
         self.ui.running = false;
+    }
+
+    /// 使用 LLM 实例（懒加载）
+    ///
+    /// 如果 LLM 未初始化，会先尝试初始化。
+    /// 返回 `Some(R)` 如果成功，返回 `None` 如果初始化失败。
+    ///
+    /// # Example
+    /// ```
+    /// App::with_llm(|llm| {
+    ///     let mut guard = llm.lock().unwrap();
+    ///     guard.analyze_mood("你好")
+    /// });
+    /// ```
+    pub fn with_llm<F, R>(f: F) -> Option<R>
+    where
+        F: FnOnce(&Arc<Mutex<QwenLlm>>) -> R,
+    {
+        let mut guard = LLM_INSTANCE.lock().unwrap();
+        if guard.is_none() {
+            match Self::init_llm(ModelManager::global()) {
+                Ok(llm) => {
+                    *guard = Some(llm);
+                }
+                Err(e) => {
+                    log::error!("Failed to lazy load LLM: {}", e);
+                    return None;
+                }
+            }
+        }
+        guard.as_ref().map(f)
+    }
+
+    /// 初始化 LLM（首次调用时加载）
+    pub fn init_llm_lazy() -> anyhow::Result<Arc<Mutex<QwenLlm>>> {
+        let mut guard = LLM_INSTANCE.lock().unwrap();
+        if guard.is_none() {
+            let llm = Self::init_llm(ModelManager::global())?;
+            *guard = Some(llm);
+        }
+        Ok(guard.as_ref().unwrap().clone())
+    }
+
+    /// 使用语音管理器实例（懒加载）
+    ///
+    /// 如果语音管理器未初始化，会先尝试初始化。
+    /// 返回 `Some(R)` 如果成功，返回 `None` 如果初始化失败。
+    ///
+    /// # Example
+    /// ```
+    /// App::with_voice_manager(|vm| {
+    ///     vm.volume()
+    /// });
+    /// ```
+    pub fn with_voice_manager<F, R>(config: &config::AppConfig, f: F) -> Option<R>
+    where
+        F: FnOnce(&Arc<VoiceManager>) -> R,
+    {
+        let mut guard = VOICE_MANAGER_INSTANCE.lock().unwrap();
+        if guard.is_none() {
+            let mm = ModelManager::global();
+            let sense_voice_path = match mm.get("sense_voice") {
+                Some(p) => p,
+                None => {
+                    log::error!("sense_voice model not found");
+                    return None;
+                }
+            };
+            let silero_vad_path = match mm.get("silero_vad") {
+                Some(p) => p,
+                None => {
+                    log::error!("silero_vad model not found");
+                    return None;
+                }
+            };
+
+            // 创建临时 channel 用于初始化 VoiceManager
+            let (text_tx, _text_rx) = mpsc::channel::<String>();
+            match VoiceManager::new(
+                sense_voice_path,
+                silero_vad_path,
+                "".into(),
+                &config.speech_name,
+                text_tx,
+            ) {
+                Ok(vm) => {
+                    *guard = Some(Arc::new(vm));
+                }
+                Err(e) => {
+                    log::error!("Failed to initialize voice manager: {}", e);
+                    return None;
+                }
+            }
+        }
+        guard.as_ref().map(f)
+    }
+
+    /// 初始化语音管理器（首次调用时加载）
+    pub fn init_voice_manager_lazy(
+        config: &config::AppConfig,
+    ) -> anyhow::Result<Arc<VoiceManager>> {
+        let mut guard = VOICE_MANAGER_INSTANCE.lock().unwrap();
+        if guard.is_none() {
+            let mm = ModelManager::global();
+            let sense_voice_path = mm
+                .get("sense_voice")
+                .ok_or_else(|| anyhow::anyhow!("sense_voice model not found"))?;
+            let silero_vad_path = mm
+                .get("silero_vad")
+                .ok_or_else(|| anyhow::anyhow!("silero_vad model not found"))?;
+
+            // 创建临时 channel 用于初始化 VoiceManager
+            let (text_tx, _text_rx) = mpsc::channel::<String>();
+            let vm = VoiceManager::new(
+                sense_voice_path,
+                silero_vad_path,
+                "".into(),
+                &config.speech_name,
+                text_tx,
+            )
+            .map_err(|e| anyhow::anyhow!("Failed to initialize voice manager: {}", e))?;
+            *guard = Some(Arc::new(vm));
+        }
+        Ok(guard.as_ref().unwrap().clone())
     }
 
     pub fn next_menu(&mut self) {
