@@ -30,20 +30,25 @@ impl AppConfig {
     const CONFIG_PATH: &'static str = "config.toml";
 
     pub fn load() -> Self {
-        match fs::read_to_string(Self::CONFIG_PATH) {
-            Ok(content) => toml::from_str(&content).unwrap_or_else(|e| {
-                log::warn!("Failed to parse config: {e}, using default");
-                Self::default()
-            }),
+        let (config, needs_save) = match fs::read_to_string(Self::CONFIG_PATH) {
+            Ok(content) => match toml::from_str::<Self>(&content) {
+                Ok(config) => (config, false),
+                Err(e) => {
+                    log::warn!("Failed to parse config: {e}, using default");
+                    (Self::default(), true)
+                }
+            },
             Err(e) => {
-                log::info!("Config file not found: {e}, using default");
-                let config = Self::default();
-                let _ = config.save();
-                config
+                log::warn!("Config file not found: {e}, using default");
+                (Self::default(), true)
             }
-        }
-    }
+        };
 
+        if needs_save {
+            let _ = config.save();
+        }
+        config
+    }
     pub fn save(&self) -> anyhow::Result<()> {
         let content = toml::to_string_pretty(self)?;
         fs::write(Path::new(Self::CONFIG_PATH), content)?;

@@ -113,7 +113,8 @@
       "Bash(SSH_PASSWORD='radxa' sshpass:*)",
       "mcp__fs__write_file",
       "mcp__fs__directory_tree",
-      "mcp__fs__read_multiple_files"
+      "mcp__fs__read_multiple_files",
+      "mcp__fs__edit_file"
     ]
   }
 }
