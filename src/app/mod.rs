@@ -120,8 +120,6 @@ impl App {
         // 视频捕获不再立即需要 face_detector，使用懒加载
         let (video_capture, lcd_frame_cache, frame_rx) = Self::init_video_lazy(&config)?;
 
-        Self::spawn_web_server(video_capture.resolution_arc())?;
-
         log::info!("init app successfully");
 
         let mut menu_state = ListState::default();
@@ -289,21 +287,19 @@ impl App {
         let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
         let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
 
-        Ok((video_capture, lcd_frame_cache, frame_rx))
-    }
-
-    /// 启动 Web 服务器
-    fn spawn_web_server(resolution: Arc<Mutex<(u32, u32)>>) -> anyhow::Result<()> {
-        // 创建新的 channel 用于 WebPreview
-        let (frame_tx, _frame_rx) = broadcast::channel::<FrameInfo>(100);
-        let web_preview = WebPreview::new(8080, frame_tx, resolution);
-
+        // 启动 Web 服务器（使用正确的 frame_tx，确保能接收到视频帧）
         std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
+            let rt = match tokio::runtime::Runtime::new() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    log::error!("Failed to create tokio runtime: {}", e);
+                    return;
+                }
+            };
             rt.block_on(web_preview.run());
         });
 
-        Ok(())
+        Ok((video_capture, lcd_frame_cache, frame_rx))
     }
 
     /// 大语言模型线程, vosk返回的语音消息会丢入此线程解析, 当没联网时使用本地的qwen模型

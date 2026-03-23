@@ -132,10 +132,7 @@ impl VideoCapture {
 
     /// 获取实际分辨率
     pub fn resolution(&self) -> (u32, u32) {
-        self.resolution
-            .lock()
-            .map(|guard| *guard)
-            .unwrap_or((0, 0))
+        self.resolution.lock().map(|guard| *guard).unwrap_or((0, 0))
     }
 
     /// 获取分辨率的 Arc 句柄（用于跨线程共享）
