@@ -102,100 +102,22 @@ impl App {
     pub fn new() -> anyhow::Result<Self> {
         let lcd = Lcd::new();
         let config = config::AppConfig::load();
-
         let mm = ModelManager::init()?;
-        // 初始化 LLM
-        log::info!("start load llm");
-        let Some(qw_tokenizer_path) = mm.get("tokenizer") else {
-            anyhow::bail!("tokenizer not found");
-        };
-        let Some(qw_path) = mm.get("qwen") else {
-            anyhow::bail!("qwen not found");
-        };
-        let mut llm = QwenLlm::load(qw_path);
-        llm.load_tokenizer(qw_tokenizer_path)?;
-        llm.preload()?;
-        let llm_arc = Arc::new(Mutex::new(llm));
+
+        let llm_arc = Self::init_llm(&mm)?;
+        let face_detector = Self::init_face_detector(&mm)?;
+        let voice_manager = Self::init_voice_manager(&config, &mm)?;
+
+        let (video_capture, lcd_frame_cache, frame_rx) =
+            Self::init_video(&config, mm, face_detector)?;
+
+        let (text_tx, result_rx) = Self::spawn_llm_thread(llm_arc.clone())?;
+        Self::spawn_web_server(video_capture.resolution_arc())?;
+
+        log::info!("init app successfully");
 
         let mut menu_state = ListState::default();
         menu_state.select(Some(0));
-
-        let is_processing = Arc::new(AtomicBool::new(false));
-        let is_processing_clone = is_processing.clone();
-        let (result_tx, result_rx) = mpsc::channel();
-
-        let (text_tx, text_rx) = mpsc::channel::<String>();
-        let text_tx_clone = text_tx.clone();
-
-        // 启动 LLM 处理线程
-        let llm_for_thread = llm_arc.clone();
-        let result_tx_for_llm = result_tx.clone();
-        std::thread::spawn(move || {
-            Self::llm_analysis_thread(
-                llm_for_thread,
-                text_rx,
-                result_tx_for_llm,
-                is_processing_clone,
-            );
-        });
-
-        // 初始化人脸检测器
-        log::info!("start load face detector");
-        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-        let Some(face_detect) = mm.get("retinaface_rknn") else {
-            anyhow::bail!("retinaface_rknn not found");
-        };
-        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
-        let Some(face_detect) = mm.get("yolo_face") else {
-            anyhow::bail!("yolo_face not found");
-        };
-        let face_detector = create_face_detector(face_detect)?;
-
-        // 从 ModelManager 获取模型路径并创建 VoiceManager
-        log::info!("start load voice manager");
-        let voice_manager = if let (Some(sense_voice_path), Some(silero_vad_path)) =
-            (mm.get("sense_voice"), mm.get("silero_vad"))
-        {
-            VoiceManager::new(
-                sense_voice_path,
-                silero_vad_path,
-                "".into(),
-                &config.speech_name,
-                text_tx_clone,
-            )
-            .map(Arc::new)
-            .ok()
-        } else {
-            log::warn!("Voice model not available");
-            None
-        };
-
-        let camera_index: nokhwa::utils::CameraIndex =
-            if let Ok(idx) = config.camera_index.parse::<u32>() {
-                nokhwa::utils::CameraIndex::Index(idx)
-            } else {
-                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
-            };
-        // 创建 broadcast 通道用于帧传递（带背压缓冲）
-        let (frame_tx, frame_rx) = broadcast::channel::<FrameInfo>(100);
-        let mut video_capture = VideoCapture::new(
-            camera_index,
-            frame_tx.clone(),
-            face_detector,
-            config.rotation,
-        );
-        video_capture.start_capture_frames_thread();
-        let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
-
-        let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
-
-        // 启动 Web 服务器
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            rt.block_on(web_preview.run());
-        });
-
-        log::info!("init app successfully");
 
         Ok(Self {
             ui: UiState {
@@ -217,7 +139,7 @@ impl App {
             ai: AiState {
                 voice_manager,
                 voice_result_rx: Some(result_rx),
-                is_processing,
+                is_processing: Arc::new(AtomicBool::new(false)),
                 text_tx,
                 llm: Some(llm_arc),
                 llm_test_state: LlmTestState::default(),
@@ -235,6 +157,123 @@ impl App {
             face_tracking_enabled: false,
             last_face_adjustment: 0,
         })
+    }
+
+    /// 初始化 LLM
+    fn init_llm(mm: &ModelManager) -> anyhow::Result<Arc<Mutex<QwenLlm>>> {
+        log::info!("start load llm");
+        let Some(qw_tokenizer_path) = mm.get("tokenizer") else {
+            anyhow::bail!("tokenizer not found");
+        };
+        let Some(qw_path) = mm.get("qwen") else {
+            anyhow::bail!("qwen not found");
+        };
+        let mut llm = QwenLlm::load(qw_path);
+        llm.load_tokenizer(qw_tokenizer_path)?;
+        llm.preload()?;
+        Ok(Arc::new(Mutex::new(llm)))
+    }
+
+    /// 初始化人脸检测器
+    fn init_face_detector(mm: &ModelManager) -> anyhow::Result<Box<dyn crate::vision::face::FaceDetectorTrait>>
+    {
+        log::info!("start load face detector");
+        #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+        let Some(face_detect) = mm.get("retinaface_rknn") else {
+            anyhow::bail!("retinaface_rknn not found");
+        };
+        #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+        let Some(face_detect) = mm.get("yolo_face") else {
+            anyhow::bail!("yolo_face not found");
+        };
+        create_face_detector(face_detect)
+    }
+
+    /// 初始化语音管理器
+    fn init_voice_manager(
+        config: &config::AppConfig,
+        mm: &ModelManager,
+    ) -> anyhow::Result<Option<Arc<VoiceManager>>> {
+        log::info!("start load voice manager");
+        if let (Some(sense_voice_path), Some(silero_vad_path)) =
+            (mm.get("sense_voice"), mm.get("silero_vad"))
+        {
+            // 创建临时 channel 用于初始化 VoiceManager
+            let (text_tx, _text_rx) = mpsc::channel::<String>();
+            let voice_manager = VoiceManager::new(
+                sense_voice_path,
+                silero_vad_path,
+                "".into(),
+                &config.speech_name,
+                text_tx,
+            )
+            .map(Arc::new)
+            .ok();
+            Ok(voice_manager)
+        } else {
+            log::warn!("Voice model not available");
+            Ok(None)
+        }
+    }
+
+    /// 初始化视频捕获
+    fn init_video(
+        config: &config::AppConfig,
+        _mm: ModelManager,
+        face_detector: Box<dyn crate::vision::face::FaceDetectorTrait>,
+    ) -> anyhow::Result<(VideoCapture, Option<Arc<Mutex<Option<Vec<u8>>>>>, broadcast::Receiver<FrameInfo>)> {
+        let camera_index: nokhwa::utils::CameraIndex =
+            if let Ok(idx) = config.camera_index.parse::<u32>() {
+                nokhwa::utils::CameraIndex::Index(idx)
+            } else {
+                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
+            };
+
+        // 创建 broadcast 通道用于帧传递（带背压缓冲）
+        let (frame_tx, frame_rx) = broadcast::channel::<FrameInfo>(100);
+        let mut video_capture = VideoCapture::new(
+            camera_index,
+            frame_tx.clone(),
+            face_detector,
+            config.rotation,
+        );
+        video_capture.start_capture_frames_thread();
+
+        let web_preview = WebPreview::new(8080, frame_tx, video_capture.resolution_arc());
+        let lcd_frame_cache = Some(web_preview.lcd_frame_cache());
+
+        Ok((video_capture, lcd_frame_cache, frame_rx))
+    }
+
+    /// 启动 LLM 处理线程
+    fn spawn_llm_thread(
+        llm: Arc<Mutex<QwenLlm>>,
+    ) -> anyhow::Result<(Sender<String>, mpsc::Receiver<Mood>)> {
+        let (text_tx, text_rx) = mpsc::channel::<String>();
+        let (result_tx, result_rx) = mpsc::channel();
+
+        let is_processing = Arc::new(AtomicBool::new(false));
+        let is_processing_clone = is_processing.clone();
+
+        std::thread::spawn(move || {
+            Self::llm_analysis_thread(llm, text_rx, result_tx, is_processing_clone);
+        });
+
+        Ok((text_tx, result_rx))
+    }
+
+    /// 启动 Web 服务器
+    fn spawn_web_server(resolution: Arc<Mutex<(u32, u32)>>) -> anyhow::Result<()> {
+        // 创建新的 channel 用于 WebPreview
+        let (frame_tx, _frame_rx) = broadcast::channel::<FrameInfo>(100);
+        let web_preview = WebPreview::new(8080, frame_tx, resolution);
+
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().unwrap();
+            rt.block_on(web_preview.run());
+        });
+
+        Ok(())
     }
 
     /// 大语言模型线程, vosk返回的语音消息会丢入此线程解析, 当没联网时使用本地的qwen模型
