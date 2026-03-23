@@ -110,7 +110,10 @@
       "mcp__fs__read_text_file",
       "Bash(identify:*)",
       "mcp__fs__read_file",
-      "Bash(SSH_PASSWORD='radxa' sshpass:*)"
+      "Bash(SSH_PASSWORD='radxa' sshpass:*)",
+      "mcp__fs__write_file",
+      "mcp__fs__directory_tree",
+      "mcp__fs__read_multiple_files"
     ]
   }
 }

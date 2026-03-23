@@ -1,7 +1,11 @@
 pub mod pages;
 mod sidebar;
+mod viewmodel;
 
 use crate::app::{App, MenuItem};
+use crate::ui::viewmodel::{
+    DeviceControlViewModel, DeviceStatusViewModel, LlmTestViewModel, SettingsViewModel,
+};
 use crate::ui_components::PopupWidget;
 use ratatui::prelude::*;
 
@@ -27,24 +31,31 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         Color::Green
     };
 
+    // 创建 ViewModel, 每一帧都会重新创建, 这样值就是最新的,
+    // 通过 ViewModel 让 ui 渲染基本摆脱了 app.
+    let status_vm = DeviceStatusViewModel::from_app(app);
+    let control_vm = DeviceControlViewModel::from_app(app);
+    let llm_vm = LlmTestViewModel::from_app(app);
+    let settings_vm = SettingsViewModel::from_app(app);
+
     match app.ui.selected_menu {
         MenuItem::DeviceStatus => {
-            pages::device_status::render(frame, chunks[1], app, right_border_color)
+            pages::device_status::render(frame, chunks[1], &status_vm, right_border_color)
         }
         MenuItem::DeviceControl => {
-            pages::device_control::render(frame, chunks[1], app, right_border_color)
+            pages::device_control::render(frame, chunks[1], &control_vm, right_border_color)
         }
         MenuItem::Settings => pages::settings::render(
             frame,
             chunks[1],
-            app.ui.settings_selected,
+            settings_vm.selected_index,
             &app.config,
-            app.ui.in_edit_settings_mode,
-            &app.ui.edit_buffer,
+            settings_vm.in_edit_mode,
+            &settings_vm.edit_buffer,
             right_border_color,
         ),
         MenuItem::About => pages::about::render(frame, chunks[1], right_border_color),
-        MenuItem::LlmTest => pages::llm_test::render(frame, chunks[1], app, right_border_color),
+        MenuItem::LlmTest => pages::llm_test::render(frame, chunks[1], &llm_vm, right_border_color),
     }
 
     // 渲染弹窗

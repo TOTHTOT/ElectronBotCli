@@ -175,8 +175,9 @@ impl App {
     }
 
     /// 初始化人脸检测器
-    fn init_face_detector(mm: &ModelManager) -> anyhow::Result<Box<dyn crate::vision::face::FaceDetectorTrait>>
-    {
+    fn init_face_detector(
+        mm: &ModelManager,
+    ) -> anyhow::Result<Box<dyn crate::vision::face::FaceDetectorTrait>> {
         log::info!("start load face detector");
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         let Some(face_detect) = mm.get("retinaface_rknn") else {
@@ -217,11 +218,16 @@ impl App {
     }
 
     /// 初始化视频捕获
+    #[allow(clippy::type_complexity)]
     fn init_video(
         config: &config::AppConfig,
         _mm: ModelManager,
         face_detector: Box<dyn crate::vision::face::FaceDetectorTrait>,
-    ) -> anyhow::Result<(VideoCapture, Option<Arc<Mutex<Option<Vec<u8>>>>>, broadcast::Receiver<FrameInfo>)> {
+    ) -> anyhow::Result<(
+        VideoCapture,
+        Option<Arc<Mutex<Option<Vec<u8>>>>>,
+        broadcast::Receiver<FrameInfo>,
+    )> {
         let camera_index: nokhwa::utils::CameraIndex =
             if let Ok(idx) = config.camera_index.parse::<u32>() {
                 nokhwa::utils::CameraIndex::Index(idx)

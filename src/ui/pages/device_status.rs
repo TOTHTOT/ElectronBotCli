@@ -1,14 +1,6 @@
-use crate::app::App;
+use crate::ui::viewmodel::DeviceStatusViewModel;
 use crate::ui_components::create_block;
 use ratatui::{prelude::*, widgets::*};
-
-fn get_pc_battery() -> u32 {
-    85
-}
-
-fn get_network_status() -> &'static str {
-    "已连接"
-}
 
 fn status_color(ok: bool) -> Color {
     if ok {
@@ -18,48 +10,40 @@ fn status_color(ok: bool) -> Color {
     }
 }
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
-    let is_connected = app.is_connected();
-    let volume = app
-        .ai
-        .voice_manager
-        .as_ref()
-        .map(|v| v.volume())
-        .unwrap_or(0);
-
+pub fn render(frame: &mut Frame, area: Rect, vm: &DeviceStatusViewModel, border_color: Color) {
     // 使用 Table 实现网格布局
     let table = Table::new(
         vec![
             Row::new(vec![
                 Cell::from(Span::styled("连接状态", Style::new().fg(Color::Yellow))),
                 Cell::from(Span::styled(
-                    if is_connected {
+                    if vm.is_connected {
                         "已连接"
                     } else {
                         "未连接"
                     },
-                    Style::new().fg(status_color(is_connected)).bold(),
+                    Style::new().fg(status_color(vm.is_connected)).bold(),
                 )),
             ]),
             Row::new(vec![
                 Cell::from(Span::styled("上位机电量", Style::new().fg(Color::Yellow))),
                 Cell::from(Span::styled(
-                    format!("{}%", get_pc_battery()),
-                    Style::new().fg(status_color(get_pc_battery() > 50)),
+                    format!("{}%", vm.battery),
+                    Style::new().fg(status_color(vm.battery > 50)),
                 )),
             ]),
             Row::new(vec![
                 Cell::from(Span::styled("网络状态", Style::new().fg(Color::Yellow))),
                 Cell::from(Span::styled(
-                    get_network_status(),
-                    Style::new().fg(status_color(get_network_status() == "已连接")),
+                    vm.network,
+                    Style::new().fg(status_color(vm.network == "已连接")),
                 )),
             ]),
             Row::new(vec![
                 Cell::from(Span::styled("输入音量", Style::new().fg(Color::Yellow))),
                 // 音量条
                 Cell::from(Span::styled(
-                    format!("{:─<20}", "│".repeat((volume / 5) as usize)),
+                    format!("{:-<20}", "│".repeat((vm.volume / 5) as usize)),
                     Style::new().fg(Color::Cyan),
                 )),
             ]),
@@ -69,7 +53,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
                     Style::new().fg(Color::Gray),
                 )),
                 Cell::from(Span::styled(
-                    format!("{}", volume),
+                    format!("{}", vm.volume),
                     Style::new().fg(Color::Cyan),
                 )),
             ]),

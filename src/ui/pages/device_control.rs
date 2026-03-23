@@ -1,9 +1,9 @@
-use crate::app::App;
-use crate::robot::{ServoState, SERVO_COUNT};
+use crate::robot::SERVO_COUNT;
+use crate::ui::viewmodel::DeviceControlViewModel;
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Paragraph};
 
-pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
+pub fn render(frame: &mut Frame, area: Rect, vm: &DeviceControlViewModel, border_color: Color) {
     let outer_block = create_block("设备控制".to_string(), border_color, border_color);
 
     let inner_area = outer_block.inner(area);
@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
     .split(inner_area);
 
     render_info_bar(frame, chunks[0], border_color);
-    render_joint_gauges(frame, chunks[1], app, border_color);
+    render_joint_gauges(frame, chunks[1], vm, border_color);
 }
 
 fn render_info_bar(frame: &mut Frame, area: Rect, border_color: Color) {
@@ -33,7 +33,12 @@ fn render_info_bar(frame: &mut Frame, area: Rect, border_color: Color) {
     frame.render_widget(widget, inner_area);
 }
 
-fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
+fn render_joint_gauges(
+    frame: &mut Frame,
+    area: Rect,
+    vm: &DeviceControlViewModel,
+    border_color: Color,
+) {
     let outer_block = create_block("关节控制".to_string(), border_color, border_color);
 
     let servo_height = (area.height as usize) / SERVO_COUNT;
@@ -55,28 +60,27 @@ fn render_joint_gauges(frame: &mut Frame, area: Rect, app: &App, border_color: C
             row_height as u16,
         );
 
-        render_single_joint(frame, row_area, app, i);
+        render_single_joint(frame, row_area, vm, i);
     }
 }
 
-fn render_single_joint(frame: &mut Frame, area: Rect, app: &App, index: usize) {
-    let values = app.joint.values();
-    let is_selected = index == app.joint.selected() && app.in_servo_mode;
-    let value = values[index];
-    let name = ServoState::name(index);
-    let range_str = ServoState::range_str(index);
+fn render_single_joint(frame: &mut Frame, area: Rect, vm: &DeviceControlViewModel, index: usize) {
+    let is_selected = index == vm.selected_servo && vm.is_servo_mode;
+    let value = vm.joint_values[index];
+    let name = vm.servo_names[index];
+    let range_str = &vm.servo_ranges[index];
 
     let indicator = get_indicator(is_selected, is_selected); // 选中时作为编辑状态显示 ▶
 
-    let color = if is_selected && app.in_servo_mode {
+    let color = if is_selected && vm.is_servo_mode {
         Color::Cyan
     } else {
         Color::White
     };
 
     // 计算进度条
-    let min = ServoState::min_angle(index);
-    let max = ServoState::max_angle(index);
+    let min = crate::robot::ServoState::min_angle(index);
+    let max = crate::robot::ServoState::max_angle(index);
     let total_range = (max - min) as f32;
     let value_offset = (value - min) as f32;
     let percent = if total_range > 0.0 {
