@@ -333,8 +333,12 @@ impl App {
                 is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
                 let mood = llm
                     .lock()
-                    .unwrap()
-                    .analyze_mood(&text)
+                    .map_err(|e| {
+                        log::error!("Failed to lock LLM: {}", e);
+                        e
+                    })
+                    .ok()
+                    .and_then(|mut guard| guard.analyze_mood(&text).ok())
                     .unwrap_or(Mood::Default);
                 is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
                 let _ = result_tx.send(mood);
@@ -468,7 +472,7 @@ impl App {
     where
         F: FnOnce(&Arc<Mutex<QwenLlm>>) -> R,
     {
-        let mut guard = LLM_INSTANCE.lock().unwrap();
+        let mut guard = LLM_INSTANCE.lock().ok()?;
         if guard.is_none() {
             match Self::init_llm(ModelManager::global()) {
                 Ok(llm) => {
@@ -485,12 +489,17 @@ impl App {
 
     /// 初始化 LLM（首次调用时加载）
     pub fn init_llm_lazy() -> anyhow::Result<Arc<Mutex<QwenLlm>>> {
-        let mut guard = LLM_INSTANCE.lock().unwrap();
+        let mut guard = LLM_INSTANCE
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock LLM_INSTANCE: {}", e))?;
         if guard.is_none() {
             let llm = Self::init_llm(ModelManager::global())?;
             *guard = Some(llm);
         }
-        Ok(guard.as_ref().unwrap().clone())
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("LLM not initialized"))
     }
 
     /// 使用语音管理器实例（懒加载）
@@ -508,7 +517,7 @@ impl App {
     where
         F: FnOnce(&Arc<VoiceManager>) -> R,
     {
-        let mut guard = VOICE_MANAGER_INSTANCE.lock().unwrap();
+        let mut guard = VOICE_MANAGER_INSTANCE.lock().ok()?;
         if guard.is_none() {
             let mm = ModelManager::global();
             let sense_voice_path = match mm.get("sense_voice") {
@@ -551,7 +560,9 @@ impl App {
     pub fn init_voice_manager_lazy(
         config: &config::AppConfig,
     ) -> anyhow::Result<Arc<VoiceManager>> {
-        let mut guard = VOICE_MANAGER_INSTANCE.lock().unwrap();
+        let mut guard = VOICE_MANAGER_INSTANCE
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Failed to lock VOICE_MANAGER_INSTANCE: {}", e))?;
         if guard.is_none() {
             let mm = ModelManager::global();
             let sense_voice_path = mm
@@ -573,7 +584,10 @@ impl App {
             .map_err(|e| anyhow::anyhow!("Failed to initialize voice manager: {}", e))?;
             *guard = Some(Arc::new(vm));
         }
-        Ok(guard.as_ref().unwrap().clone())
+        guard
+            .as_ref()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Voice manager not initialized"))
     }
 
     pub fn next_menu(&mut self) {

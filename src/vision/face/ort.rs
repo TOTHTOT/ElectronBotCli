@@ -146,7 +146,11 @@ pub fn postprocess_output(
         }
     }
 
-    results.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap());
+    results.sort_by(|a, b| {
+        b.confidence
+            .partial_cmp(&a.confidence)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
     nms_filter(results, 0.5)
 }
 impl OrtFaceDetector {

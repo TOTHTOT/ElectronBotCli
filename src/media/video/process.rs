@@ -65,22 +65,19 @@ fn copy_pixel(src: &[u8], x: u32, y: u32, width: u32, dst: &mut Vec<u8>) {
 /// 原始 width x height -> 旋转后 height x width
 pub fn rotate_90_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
-    for x in 0..width {
-        for y in (0..height).rev() {
-            copy_pixel(bgr_data, x, y, width, &mut rotated);
-        }
-    }
+    (0..width)
+        .flat_map(|x| (0..height).rev().map(move |y| (x, y)))
+        .for_each(|(x, y)| copy_pixel(bgr_data, x, y, width, &mut rotated));
     rotated
 }
 
 /// 顺时针旋转 180 度
 pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity(bgr_data.len());
-    for y in (0..height).rev() {
-        for x in (0..width).rev() {
-            copy_pixel(bgr_data, x, y, width, &mut rotated);
-        }
-    }
+    (0..height)
+        .rev()
+        .flat_map(|y| (0..width).rev().map(move |x| (x, y)))
+        .for_each(|(x, y)| copy_pixel(bgr_data, x, y, width, &mut rotated));
     rotated
 }
 
@@ -88,11 +85,10 @@ pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 /// 原始 width x height -> 旋转后 height x width
 pub fn rotate_270_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
-    for x in (0..width).rev() {
-        for y in 0..height {
-            copy_pixel(bgr_data, x, y, width, &mut rotated);
-        }
-    }
+    (0..width)
+        .rev()
+        .flat_map(|x| (0..height).map(move |y| (x, y)))
+        .for_each(|(x, y)| copy_pixel(bgr_data, x, y, width, &mut rotated));
     rotated
 }
 

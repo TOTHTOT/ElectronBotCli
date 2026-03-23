@@ -109,8 +109,10 @@ impl ServoState {
 
     /// 获取舵机范围字符串
     pub fn range_str(index: usize) -> String {
-        let s = SERVOS.get(index).unwrap();
-        format!("{}° ~ {}°", s.min, s.max)
+        SERVOS
+            .get(index)
+            .map(|s| format!("{}° ~ {}°", s.min, s.max))
+            .unwrap_or_else(|| "Unknown".to_string())
     }
 
     /// 选择下一个舵机

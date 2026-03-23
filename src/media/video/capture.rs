@@ -132,7 +132,10 @@ impl VideoCapture {
 
     /// 获取实际分辨率
     pub fn resolution(&self) -> (u32, u32) {
-        *self.resolution.lock().unwrap()
+        self.resolution
+            .lock()
+            .map(|guard| *guard)
+            .unwrap_or((0, 0))
     }
 
     /// 获取分辨率的 Arc 句柄（用于跨线程共享）
@@ -278,7 +281,10 @@ fn capture_frames(
 ) {
     let mut camera = match open_camera_default(camera_index) {
         Ok(mut c) => {
-            c.open_stream().context("Failed to open stream").unwrap();
+            if let Err(e) = c.open_stream().context("Failed to open camera stream") {
+                log::error!("Could not open camera stream: {e}");
+                return;
+            }
             c
         }
         Err(e) => {
@@ -305,7 +311,9 @@ fn capture_frames(
     } else {
         (width, height)
     };
-    *resolution.lock().unwrap() = (out_width, out_height);
+    if let Ok(mut guard) = resolution.lock() {
+        *guard = (out_width, out_height);
+    }
     let format = camera_fmt.format();
     log::info!(
         "Camera resolution: {}x{} (rotate: {:?}, output: {}x{})",

@@ -67,8 +67,7 @@ async fn lcd_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRespo
     let frame = async_stream::stream! {
         loop {
             let frame_data = {
-                let guard = lcd_frame.lock().unwrap();
-                guard.clone()
+                lcd_frame.lock().ok().and_then(|guard| (*guard).clone())
             };
 
             if let Some(frame) = frame_data {
@@ -105,11 +104,17 @@ async fn camera_stream(State(state): State<Arc<WebPreviewState>>) -> impl IntoRe
                         jpeg_data.clone()
                     } else if let Some(rgb_data) = frame.frame_data.as_raw_rgb() {
                         // 需要编码为 JPEG
-                        let (width, height) = *resolution.lock().unwrap();
-                        rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {
-                            log::warn!("To jpeg failed: {e}");
+                        let jpeg = if let Ok(resolution_guard) = resolution.lock() {
+                            let (width, height) = *resolution_guard;
+                            rgb_to_jpeg_with_size(rgb_data, width, height).unwrap_or_else(|e| {
+                                log::warn!("To jpeg failed: {e}");
+                                Bytes::new()
+                            })
+                        } else {
+                            log::warn!("Failed to lock resolution mutex");
                             Bytes::new()
-                        })
+                        };
+                        jpeg
                     } else {
                         Bytes::new()
                     };
@@ -219,11 +224,19 @@ impl WebPreview {
 
         self.state.running.store(true, Ordering::Relaxed);
 
-        let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+        let listener = match tokio::net::TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                log::error!("Failed to bind web server to {}: {}", addr, e);
+                return;
+            }
+        };
         log::info!("Web server listening on {}", addr);
 
         // 运行服务器
-        axum::serve(listener, app).await.unwrap();
+        if let Err(e) = axum::serve(listener, app).await {
+            log::error!("Web server error: {}", e);
+        }
     }
 
     /// 停止服务器

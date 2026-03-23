@@ -214,7 +214,7 @@ fn postprocess_retinaface(
 fn generate_priors(mw: u32, mh: u32) -> Vec<[f32; 4]> {
     let mut priors = Vec::new();
     let steps = [8, 16, 32];
-    let min_sizes = [vec![16, 32], vec![64, 128], vec![256, 512]];
+    let min_sizes = [[16, 32], [64, 128], [256, 512]];
     for (k, step) in steps.iter().enumerate() {
         let fw = (mw as f32 / *step as f32).ceil() as u32;
         let fh = (mh as f32 / *step as f32).ceil() as u32;
