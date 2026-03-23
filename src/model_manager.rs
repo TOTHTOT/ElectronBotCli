@@ -35,14 +35,16 @@ impl ModelManager {
         let mut paths = HashMap::new();
 
         // 模型配置: (key, repo_id, filename, rknn_path)
-        // 如果 rknn_path 为空或不存在，则使用 hf 默认地址
         let models: Vec<ModelConfig> = vec![
             ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.int8.rknn"),
             ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", ""),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
             ("tokenizer", "onnx-community/Qwen2.5-0.5B-Instruct", "tokenizer.json", ""),
+            #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", ""),
+            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
             ("retinaface_rknn", "ElectronBotCli/retinaface_rknn", "model/RetinaFace.rknn", ""),
+            #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
             ("retinaface_test_img", "ElectronBotCli/retinaface_rknn", "model/test.jpg", ""),
         ];
 
