@@ -29,14 +29,22 @@ pub fn build_audio_stream(
     audio_tx: SyncSender<Vec<f32>>,
 ) -> anyhow::Result<Stream> {
     let config = device.default_input_config()?;
+    log::info!("Default input config: {:?}", config);
     let channels = config.channels() as usize;
-    let volume_clone = volume.clone();
 
-    let stream_config: cpal::StreamConfig = cpal::StreamConfig {
+    // 尝试请求 16kHz 采样率
+    let stream_config = cpal::StreamConfig {
         channels: config.channels(),
-        sample_rate: config.sample_rate(),
+        sample_rate: 16000,
         buffer_size: cpal::BufferSize::Fixed(512),
     };
+
+    log::info!(
+        "Using stream config: sample_rate={}, channels={}",
+        stream_config.sample_rate,
+        stream_config.channels
+    );
+    let volume_clone = volume.clone();
 
     Ok(device.build_input_stream(
         &stream_config,
@@ -89,13 +97,6 @@ pub fn recognition_thread(
         ..Default::default()
     };
 
-    // let mut recognizer = match SenseVoiceRecognizer::new(config) {
-    //     Ok(r) => r,
-    //     Err(e) => {
-    //         log::error!("Failed to create SenseVoice recognizer: {:?}", e);
-    //         return;
-    //     }
-    // };
     let mut buffer = Vec::new();
     // 加载静音检测模型
     let vad_config = SileroVadConfig {

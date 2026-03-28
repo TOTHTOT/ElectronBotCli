@@ -93,11 +93,18 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
         "input audio device: {:?}",
         devices.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
-    devices
+    let device = devices
         .iter()
         .find(|(name, _)| name == speech_name)
         .map(|(_, d)| d.clone())
-        .ok_or_else(|| anyhow!("No audio input device found: {}", speech_name))
+        .ok_or_else(|| anyhow!("No audio input device found: {}", speech_name))?;
+
+    // 打印设备配置信息
+    if let Ok(config) = device.default_input_config() {
+        log::info!("Selected audio device config: {config:?} ");
+    }
+
+    Ok(device)
 }
 
 /// Play a simple beep sound (for notifications)
