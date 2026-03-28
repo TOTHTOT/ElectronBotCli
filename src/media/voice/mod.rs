@@ -5,7 +5,7 @@ use crate::media::voice::asr::{build_audio_stream, recognition_thread};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
-use std::path::PathBuf;
+use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -43,18 +43,21 @@ impl VoiceManager {
     ///
     /// ```
     pub fn new(
-        sense_voice_model_path: PathBuf,
-        silero_vad_model_path: PathBuf,
-        _tts_tokens_path: PathBuf,
+        sense_voice_model_path: impl AsRef<Path>,
+        silero_vad_model_path: impl AsRef<Path>,
+        _tts_tokens_path: impl AsRef<Path>,
         speech_name: &str,
     ) -> Result<Self> {
-        let (text_tx, text_rx) = mpsc::channel::<String>();
         let device = find_input_device(speech_name)?; // 查找输入麦克风
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
         let stream = build_audio_stream(&device, volume.clone(), audio_tx)?;
         stream.play()?;
+        let sense_voice_model_path = sense_voice_model_path.as_ref().into();
+        let silero_vad_model_path = silero_vad_model_path.as_ref().into();
 
+        // 创建解析音频线程, 结果提供 text_rx 传递
+        let (text_tx, text_rx) = mpsc::channel::<String>();
         thread::spawn(move || {
             recognition_thread(
                 sense_voice_model_path,
@@ -86,7 +89,10 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
                 .map(|desc| (desc.name().to_string(), d))
         })
         .collect();
-    log::info!("input device: {:?}", devices.iter().map(|(name, _)| name).collect::<Vec<_>>());
+    log::info!(
+        "input audio device: {:?}",
+        devices.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    );
     devices
         .iter()
         .find(|(name, _)| name == speech_name)

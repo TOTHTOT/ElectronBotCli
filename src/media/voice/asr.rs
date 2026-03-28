@@ -82,13 +82,7 @@ pub fn recognition_thread(
     _result_tx: mpsc::Sender<String>,
 ) {
     let _config = SenseVoiceConfig {
-        model: match sense_voice_model_path.to_str() {
-            Some(path) => path.to_string(),
-            None => {
-                log::error!("Invalid sense_voice model path");
-                return;
-            }
-        },
+        model: sense_voice_model_path.to_string_lossy().into(),
         tokens: "".into(), // Will be auto-detected from model directory
         #[cfg(target_os = "windows")]
         provider: Some("cpu".into()),
@@ -105,13 +99,7 @@ pub fn recognition_thread(
     let mut buffer = Vec::new();
     // 加载静音检测模型
     let vad_config = SileroVadConfig {
-        model: match silero_vad_model_path.to_str() {
-            Some(path) => path.to_string(),
-            None => {
-                log::error!("Invalid silero_vad model path");
-                return;
-            }
-        },
+        model: silero_vad_model_path.to_string_lossy().into(),
         window_size: VAD_WINDOW_SIZE,
         ..Default::default()
     };
@@ -127,6 +115,7 @@ pub fn recognition_thread(
         vad.accept_waveform(samples.clone());
         if vad.is_speech() {
             buffer.extend(samples);
+            log::info!("detected speech");
         } else if !buffer.is_empty() {
             log::info!("received a audio msg, len: {}", buffer.len());
         }

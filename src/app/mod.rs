@@ -204,7 +204,7 @@ impl App {
             VoiceManager::new(
                 sense_voice_path,
                 silero_vad_path,
-                "".into(),
+                "",
                 &config.speech_name,
             )
         } else {

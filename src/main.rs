@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
     // RAII 守卫，作用域结束时自动恢复终端
     let _guard = TerminalGuard;
 
-    let log_file = File::create("ele_bot.log").ok();
+    let log_file = File::create("log").ok();
     if let Some(f) = log_file {
         CombinedLogger::init(vec![WriteLogger::new(
             simplelog::LevelFilter::Info,
