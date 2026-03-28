@@ -59,12 +59,14 @@ impl VoiceManager {
         // 创建解析音频线程, 结果提供 text_rx 传递
         let (text_tx, text_rx) = mpsc::channel::<String>();
         thread::spawn(move || {
-            recognition_thread(
+            if let Err(e) = recognition_thread(
                 sense_voice_model_path,
                 silero_vad_model_path,
                 audio_rx,
                 text_tx,
-            );
+            ) {
+                log::error!("recognition_thread failed: {e:?}");
+            }
         });
 
         Ok(Self {

@@ -201,12 +201,7 @@ impl App {
         if let (Some(sense_voice_path), Some(silero_vad_path)) =
             (mm.get("sense_voice"), mm.get("silero_vad"))
         {
-            VoiceManager::new(
-                sense_voice_path,
-                silero_vad_path,
-                "",
-                &config.speech_name,
-            )
+            VoiceManager::new(sense_voice_path, silero_vad_path, "", &config.speech_name)
         } else {
             anyhow::bail!("Voice model not available");
         }
