@@ -115,7 +115,10 @@
       "mcp__fs__directory_tree",
       "mcp__fs__read_multiple_files",
       "mcp__fs__edit_file",
-      "Bash(http_proxy=http://192.168.2.147:7890 https_proxy=http://192.168.2.147:7890 cross build:*)"
+      "Bash(http_proxy=http://192.168.2.147:7890 https_proxy=http://192.168.2.147:7890 cross build:*)",
+      "Bash(system_profiler:*)",
+      "Bash(./a.out:*)",
+      "Bash(afplay:*)"
     ]
   }
 }

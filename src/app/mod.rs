@@ -45,12 +45,10 @@ pub(crate) struct UiState {
 
 /// AI 状态 - LLM、语音、情感识别
 pub(crate) struct AiState {
-    pub voice_manager: Option<Arc<VoiceManager>>,
+    pub voice_manager: VoiceManager,
     voice_result_rx: Option<mpsc::Receiver<Mood>>,
     pub is_processing: Arc<AtomicBool>,
     pub text_tx: Sender<String>,
-    #[allow(dead_code)]
-    llm: Option<Arc<Mutex<QwenLlm>>>,
     pub llm_test_state: LlmTestState,
 }
 
@@ -119,7 +117,7 @@ impl App {
         let (video_capture, lcd_frame_cache, frame_rx) = Self::init_video(&config)?;
 
         // 初始化语音管理器
-        let voice_manager = Self::init_voice_manager(&config, ModelManager::global())?;
+        let voice_manager = Self::init_voice_manager(&config)?;
 
         log::info!("init app successfully");
 
@@ -148,7 +146,6 @@ impl App {
                 voice_result_rx: Some(result_rx),
                 is_processing: Arc::new(AtomicBool::new(false)),
                 text_tx,
-                llm: None,
                 llm_test_state: LlmTestState::default(),
             },
             comm: Comm {
@@ -198,29 +195,20 @@ impl App {
     }
 
     /// 初始化语音管理器
-    fn init_voice_manager(
-        config: &config::AppConfig,
-        mm: &ModelManager,
-    ) -> anyhow::Result<Option<Arc<VoiceManager>>> {
+    fn init_voice_manager(config: &config::AppConfig) -> anyhow::Result<VoiceManager> {
         log::info!("start load voice manager");
+        let mm = ModelManager::global();
         if let (Some(sense_voice_path), Some(silero_vad_path)) =
             (mm.get("sense_voice"), mm.get("silero_vad"))
         {
-            // 创建临时 channel 用于初始化 VoiceManager
-            let (text_tx, _text_rx) = mpsc::channel::<String>();
-            let voice_manager = VoiceManager::new(
+            VoiceManager::new(
                 sense_voice_path,
                 silero_vad_path,
                 "".into(),
                 &config.speech_name,
-                text_tx,
             )
-            .map(Arc::new)
-            .ok();
-            Ok(voice_manager)
         } else {
-            log::warn!("Voice model not available");
-            Ok(None)
+            anyhow::bail!("Voice model not available");
         }
     }
 

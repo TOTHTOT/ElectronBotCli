@@ -13,12 +13,7 @@ impl DeviceStatusViewModel {
             is_connected: app.is_connected(),
             battery: 85, // TODO: 后续获取真实电量
             network: "已连接",
-            volume: app
-                .ai
-                .voice_manager
-                .as_ref()
-                .map(|v| v.volume())
-                .unwrap_or(0),
+            volume: app.ai.voice_manager.volume(),
         }
     }
 }

@@ -26,7 +26,7 @@ case "$MODE" in
         ;;
     deploy)
         echo "=== 只传输模式 ==="
-        if ! scp target/$TARGET/release/ele_bot $DEVICE:$REMOTE_DIR/ele_bot; then
+        if ! sshpass -p "radxa" scp -o StrictHostKeyChecking=no target/$TARGET/release/ele_bot $DEVICE:$REMOTE_DIR/ele_bot; then
             echo "传输失败！"
             exit 1
         fi
@@ -44,7 +44,7 @@ case "$MODE" in
 
         echo "=== 编译成功 ==="
         echo "=== 传输到设备 ==="
-        if ! scp target/$TARGET/release/ele_bot $DEVICE:$REMOTE_DIR/ele_bot; then
+        if ! sshpass -p "radxa" scp -o StrictHostKeyChecking=no target/$TARGET/release/ele_bot $DEVICE:$REMOTE_DIR/ele_bot; then
             echo "传输失败！"
             exit 1
         fi

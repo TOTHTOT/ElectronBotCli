@@ -19,6 +19,7 @@ pub const SAMPLE_RATE: u32 = 16000;
 pub struct VoiceManager {
     _stream: Stream,
     volume: Arc<AtomicI32>,
+    pub rx: mpsc::Receiver<String>,
 }
 
 #[allow(dead_code)]
@@ -46,8 +47,8 @@ impl VoiceManager {
         silero_vad_model_path: PathBuf,
         _tts_tokens_path: PathBuf,
         speech_name: &str,
-        result_tx: mpsc::Sender<String>,
     ) -> Result<Self> {
+        let (text_tx, text_rx) = mpsc::channel::<String>();
         let device = find_input_device(speech_name)?; // 查找输入麦克风
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
@@ -59,13 +60,14 @@ impl VoiceManager {
                 sense_voice_model_path,
                 silero_vad_model_path,
                 audio_rx,
-                result_tx,
+                text_tx,
             );
         });
 
         Ok(Self {
             _stream: stream,
             volume,
+            rx: text_rx,
         })
     }
 
@@ -84,7 +86,7 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
                 .map(|desc| (desc.name().to_string(), d))
         })
         .collect();
-
+    log::info!("input device: {:?}", devices.iter().map(|(name, _)| name).collect::<Vec<_>>());
     devices
         .iter()
         .find(|(name, _)| name == speech_name)
