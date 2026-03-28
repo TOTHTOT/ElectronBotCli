@@ -249,6 +249,7 @@ fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
         FrameFormat::YUYV,
         30,
     ));
+    log::info!("cameras: {:#?}", VideoCapture::list_cameras());
     let query = RequestedFormat::new::<RgbFormat>(format_type);
     Ok(Camera::new(index, query)?)
 }
