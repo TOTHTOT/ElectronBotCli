@@ -45,7 +45,7 @@ pub(crate) struct UiState {
 
 /// AI 状态 - LLM、语音、情感识别
 pub(crate) struct AiState {
-    pub voice_manager: VoiceManager,
+    pub voice_manager: Option<VoiceManager>, // 允许音频设备不存在, 不放到里面不能延长生命周期, None时程序不崩溃
     voice_result_rx: Option<mpsc::Receiver<Mood>>,
     pub is_processing: Arc<AtomicBool>,
     pub text_tx: Sender<String>,
@@ -117,7 +117,13 @@ impl App {
         let (video_capture, lcd_frame_cache, frame_rx) = Self::init_video(&config)?;
 
         // 初始化语音管理器
-        let voice_manager = Self::init_voice_manager(&config)?;
+        let voice_manager = match Self::init_voice_manager(&config) {
+            Ok(m) => Some(m),
+            Err(e) => {
+                log::warn!("initial voice manager initialization failed: {e}");
+                None
+            }
+        };
 
         log::info!("init app successfully");
 
