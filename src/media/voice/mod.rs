@@ -45,7 +45,7 @@ impl VoiceManager {
     pub fn new(
         sense_voice_model_path: impl AsRef<Path>,
         silero_vad_model_path: impl AsRef<Path>,
-        _tts_tokens_path: impl AsRef<Path>,
+        tokens_path: impl AsRef<Path>,
         speech_name: &str,
     ) -> Result<Self> {
         let device = find_input_device(speech_name)?; // 查找输入麦克风
@@ -55,6 +55,7 @@ impl VoiceManager {
         stream.play()?;
         let sense_voice_model_path = sense_voice_model_path.as_ref().into();
         let silero_vad_model_path = silero_vad_model_path.as_ref().into();
+        let tokens_path = tokens_path.as_ref().into();
 
         // 创建解析音频线程, 结果提供 text_rx 传递
         let (text_tx, text_rx) = mpsc::channel::<String>();
@@ -62,6 +63,7 @@ impl VoiceManager {
             if let Err(e) = recognition_thread(
                 sense_voice_model_path,
                 silero_vad_model_path,
+                tokens_path,
                 audio_rx,
                 text_tx,
             ) {
