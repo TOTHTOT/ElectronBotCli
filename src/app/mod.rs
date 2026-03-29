@@ -3,7 +3,7 @@ pub mod face_tracker;
 pub mod menu;
 
 use crate::app::face_tracker::{calculate_body_adjustment, smooth_adjustment};
-use crate::llm::QwenLlm;
+use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::FrameInfo;
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
@@ -46,7 +46,7 @@ pub(crate) struct UiState {
 /// AI 状态 - LLM、语音、情感识别
 pub(crate) struct AiState {
     pub voice_manager: Option<VoiceManager>, // 允许音频设备不存在, 不放到里面不能延长生命周期, None时程序不崩溃
-    voice_result_rx: Option<mpsc::Receiver<Mood>>,
+    voice_result_rx: Option<mpsc::Receiver<LlmResponse>>,
     pub is_processing: Arc<AtomicBool>,
     pub text_tx: Sender<String>,
     pub llm_test_state: LlmTestState,
@@ -110,7 +110,7 @@ impl App {
         let _ = ModelManager::global();
 
         // 在创建 LLM 线程前直接初始化 LLM
-        let llm = Self::init_llm(ModelManager::global())?;
+        let llm = Self::init_llm(ModelManager::global(), &config)?;
         let (text_tx, result_rx) = Self::spawn_llm_thread(llm)?;
 
         // 初始化视频捕获
@@ -170,7 +170,7 @@ impl App {
     }
 
     /// 初始化 LLM
-    fn init_llm(mm: &ModelManager) -> anyhow::Result<Arc<Mutex<QwenLlm>>> {
+    fn init_llm(mm: &ModelManager, config: &config::AppConfig) -> anyhow::Result<LlmManager> {
         log::info!("start load llm");
         let Some(qw_tokenizer_path) = mm.get("tokenizer") else {
             anyhow::bail!("tokenizer not found");
@@ -178,10 +178,14 @@ impl App {
         let Some(qw_path) = mm.get("qwen") else {
             anyhow::bail!("qwen not found");
         };
-        let mut llm = QwenLlm::load(qw_path);
-        llm.load_tokenizer(qw_tokenizer_path)?;
-        llm.preload()?;
-        Ok(Arc::new(Mutex::new(llm)))
+
+        LlmManager::new(
+            &config.llm_api_base,
+            &config.llm_api_key,
+            &config.llm_model,
+            qw_path,
+            qw_tokenizer_path,
+        )
     }
 
     /// 初始化人脸检测器
@@ -222,10 +226,11 @@ impl App {
 
     /// 启动 LLM 处理线程
     fn spawn_llm_thread(
-        llm: Arc<Mutex<QwenLlm>>,
-    ) -> anyhow::Result<(Sender<String>, mpsc::Receiver<Mood>)> {
+        llm: LlmManager,
+    ) -> anyhow::Result<(Sender<String>, mpsc::Receiver<LlmResponse>)> {
         let (text_tx, text_rx) = mpsc::channel::<String>();
-        let (result_tx, result_rx) = mpsc::channel();
+        let (result_tx, result_rx): (Sender<LlmResponse>, mpsc::Receiver<LlmResponse>) =
+            mpsc::channel();
 
         let is_processing = Arc::new(AtomicBool::new(false));
         let is_processing_clone = is_processing.clone();
@@ -271,14 +276,14 @@ impl App {
         Ok((video_capture, lcd_frame_cache, frame_rx))
     }
 
-    /// 大语言模型线程, vosk返回的语音消息会丢入此线程解析, 当没联网时使用本地的qwen模型
-    /// 如果是联网的模型只要实现`analyze_mood()`方法就好了
+    /// llm解析文字功能, 通过 result_rx 接收结果
     ///
     /// # Arguments
     ///
-    /// * `llm`:
-    /// * `result_tx`:
-    /// * `vm`:
+    /// * `llm`: llm 句柄
+    /// * `text_rx`: 要处理的文字
+    /// * `result_tx`: 返回的结果, 目前只有表情
+    /// * `is_processing`: 是否在处理中, 是的话眼睛动画会表现在加载
     ///
     /// returns: ()
     ///
@@ -288,25 +293,20 @@ impl App {
     ///
     /// ```
     fn llm_analysis_thread(
-        llm: Arc<Mutex<QwenLlm>>,
+        llm: LlmManager,
         text_rx: mpsc::Receiver<String>,
-        result_tx: Sender<Mood>,
+        result_tx: Sender<LlmResponse>,
         is_processing: Arc<AtomicBool>,
     ) {
         for text in text_rx {
             if !text.is_empty() {
                 is_processing.store(true, std::sync::atomic::Ordering::Relaxed);
-                let mood = llm
-                    .lock()
-                    .map_err(|e| {
-                        log::error!("Failed to lock LLM: {}", e);
-                        e
-                    })
-                    .ok()
-                    .and_then(|mut guard| guard.analyze_mood(&text).ok())
-                    .unwrap_or(Mood::Default);
+                let response = llm.analyze_mood(&text).unwrap_or_else(|e| {
+                    log::warn!("analyze_mood filed: {e:?}");
+                    LlmResponse::default()
+                });
                 is_processing.store(false, std::sync::atomic::Ordering::Relaxed);
-                let _ = result_tx.send(mood);
+                let _ = result_tx.send(response);
             }
         }
     }
@@ -507,7 +507,8 @@ impl App {
 
     pub fn poll_voice_input(&mut self) {
         if let Some(rx) = &self.ai.voice_result_rx {
-            while let Ok(mood) = rx.try_recv() {
+            while let Ok(response) = rx.try_recv() {
+                let mood = response.mood;
                 log::info!("Mood: {mood:?}");
                 // 更新 LLM 测试状态
                 if self.ui.in_llm_test_mode {

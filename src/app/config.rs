@@ -11,6 +11,12 @@ pub struct AppConfig {
     pub rotation: RotateAngle,
     pub wifi_ssid: String,
     pub wifi_password: String,
+    /// 在线 LLM API 地址
+    pub llm_api_base: String,
+    /// 在线 LLM API Key
+    pub llm_api_key: String,
+    /// 在线 LLM 模型名称
+    pub llm_model: String,
 }
 
 impl Default for AppConfig {
@@ -21,6 +27,9 @@ impl Default for AppConfig {
             camera_index: "0".to_string(),
             wifi_ssid: "".to_string(),
             wifi_password: "".to_string(),
+            llm_api_base: "".to_string(),
+            llm_api_key: "".to_string(),
+            llm_model: "doubao-seed-1-6-251015".to_string(),
         }
     }
 }

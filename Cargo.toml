@@ -17,12 +17,13 @@ anyhow = "1.0"
 log = "0.4"
 simplelog = "0.12"
 electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git" }
-BotEyes = { git = "https://github.com/TOTHTOT/BotEyes" }
+BotEyes = { git = "https://github.com/TOTHTOT/BotEyes" , version = "0.1.2"}
 sherpa-rs = { version = "0.6", features = ["tts", "download-binaries"] }
 cpal = "0.17.1"
 rodio = "0.22.1"
 toml = "1.0.1"
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 candle-core = "0.9"
 candle-transformers = "0.9"
 tokenizers = "0.22.2"
@@ -30,12 +31,15 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 
 # Web server for preview
 axum = "0.8"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "time"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "time", "macros"] }
 futures-util = "0.3"
 base64 = "0.22"
 async-stream = "0.3"
 bytes = "1"
 hf-hub = "0.5.0"
+
+# Online LLM (使用 async-openai 调用)
+async-openai = { version = "0.34.0", features = ["_api", "chat-completion", "chat-completion-types"] }
 
 # Camera capture
 [target.'cfg(windows)'.dependencies]
