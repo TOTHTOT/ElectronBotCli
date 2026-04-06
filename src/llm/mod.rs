@@ -24,7 +24,7 @@ pub mod qwen;
 pub mod response;
 pub mod trait_;
 
-use crate::llm::online::OnlineLlmWrapper;
+use crate::llm::online::OnlineLlm;
 use crate::llm::qwen::QwenLlm;
 pub use crate::llm::response::LlmResponse;
 use crate::llm::trait_::LlmTrait;
@@ -65,7 +65,7 @@ impl LlmManager {
 
         let inner: Box<dyn LlmTrait> = if is_online && !api_base.is_empty() && !api_key.is_empty() {
             // 尝试创建在线 LLM
-            match OnlineLlmWrapper::new(api_base, api_key, model) {
+            match OnlineLlm::new(api_base, api_key, model) {
                 Ok(online) => {
                     log::info!("Using online LLM");
                     Box::new(online)

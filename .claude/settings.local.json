@@ -118,7 +118,8 @@
       "Bash(http_proxy=http://192.168.2.147:7890 https_proxy=http://192.168.2.147:7890 cross build:*)",
       "Bash(system_profiler:*)",
       "Bash(./a.out:*)",
-      "Bash(afplay:*)"
+      "Bash(afplay:*)",
+      "Bash(cat:*)"
     ]
   }
 }
