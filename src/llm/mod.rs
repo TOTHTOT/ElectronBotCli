@@ -36,7 +36,7 @@ use std::sync::{Arc, Mutex};
 pub struct LlmManager {
     inner: Arc<Mutex<Box<dyn LlmTrait>>>,
 }
-
+#[allow(dead_code)]
 impl LlmManager {
     /// 创建 LLM 管理器
     ///
@@ -65,7 +65,7 @@ impl LlmManager {
 
         let inner: Box<dyn LlmTrait> = if is_online && !api_base.is_empty() && !api_key.is_empty() {
             // 尝试创建在线 LLM
-            match OnlineLlm::new(api_base, api_key, model) {
+            match OnlineLlm::new(api_base, api_key, model, 20) {
                 Ok(online) => {
                     log::info!("Using online LLM");
                     Box::new(online)
@@ -111,15 +111,25 @@ impl LlmManager {
             .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
         guard.analyze_mood(user_input)
     }
-}
 
-// 为 QwenLlm 实现 LlmTrait
-impl LlmTrait for QwenLlm {
-    fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
-        let mood = QwenLlm::analyze_mood(self, user_input)?;
-        Ok(LlmResponse {
-            mood,
-            actions: Vec::new(),
-        })
+    /// 设置当前会话 ID
+    pub fn set_session_id(&self, session_id: &str) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.set_session_id(session_id);
+        }
+    }
+
+    /// 清除指定会话的历史记录
+    pub fn clear_session_history(&self, session_id: &str) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.clear_session_history(session_id);
+        }
+    }
+
+    /// 清除所有会话的历史记录
+    pub fn clear_all_histories(&self) {
+        if let Ok(mut guard) = self.inner.lock() {
+            guard.clear_all_histories();
+        }
     }
 }

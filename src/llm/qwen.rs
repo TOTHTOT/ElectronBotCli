@@ -1,4 +1,6 @@
 use crate::emotion::parse_mood;
+use crate::llm::trait_::LlmTrait;
+use crate::llm::LlmResponse;
 use anyhow::Result;
 use boteyes::Mood;
 use candle_core::quantized::gguf_file::Content;
@@ -93,6 +95,16 @@ impl QwenLlm {
     }
 }
 
+// 为 QwenLlm 实现 LlmTrait
+impl LlmTrait for QwenLlm {
+    fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
+        let mood = QwenLlm::analyze_mood(self, user_input)?;
+        Ok(LlmResponse {
+            mood,
+            actions: Vec::new(),
+        })
+    }
+}
 fn build_emotion_prompt(user_input: &str) -> String {
     format!(
         "<|im_start|>system\n分析用户输入的情感，只输出情感标签。\n情感选项：开心、难过、生气、困惑、害怕、中性\n输出格式：[情感]<|im_end|>\n<|im_start|>user\n{user_input}\n<|im_end|>\n<|im_start|>assistant\n"

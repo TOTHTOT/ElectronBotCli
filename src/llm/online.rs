@@ -13,10 +13,12 @@ use crate::llm::trait_::LlmTrait;
 use anyhow::{Context, Result};
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
+    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
     ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
     CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
+use std::collections::{HashMap, VecDeque};
 
 /// 在线 LLM 实现
 ///
@@ -29,6 +31,14 @@ pub struct OnlineLlm {
     client: Client<OpenAIConfig>,
     /// 模型名称
     model: String,
+    /// 对话历史记录：session_id -> 消息列表
+    histories: HashMap<String, VecDeque<ChatCompletionRequestMessage>>,
+    /// 当前会话 ID
+    current_session: String,
+    /// 历史消息容量
+    history_capacity: usize,
+    /// 预构建的系统消息
+    system_message: ChatCompletionRequestMessage,
 }
 
 impl OnlineLlm {
@@ -38,7 +48,13 @@ impl OnlineLlm {
     /// - `api_base`: API 基础 URL（如 `https://ark.cn-beijing.volces.com/api/v3`）
     /// - `api_key`: API 密钥
     /// - `model`: 模型名称（如 `doubao-voice-2025-01-25`）
-    pub fn new(api_base: &str, api_key: &str, model: &str) -> Result<Self> {
+    /// - `history_capacity`: 每个会话的历史消息最大数量
+    pub fn new(
+        api_base: &str,
+        api_key: &str,
+        model: &str,
+        history_capacity: usize,
+    ) -> Result<Self> {
         if api_base.is_empty() {
             anyhow::bail!("API base URL cannot be empty");
         }
@@ -52,9 +68,19 @@ impl OnlineLlm {
 
         let client = Client::with_config(config);
 
+        // 预构建系统消息
+        let system_message = ChatCompletionRequestSystemMessageArgs::default()
+            .content(Self::system_prompt())
+            .build()?
+            .into();
+
         Ok(Self {
             client,
             model: model.to_string(),
+            histories: HashMap::new(),
+            current_session: "default".to_string(),
+            history_capacity,
+            system_message,
         })
     }
 
@@ -65,9 +91,63 @@ impl OnlineLlm {
         "你是一个情感分析助手。请分析用户输入的情感，只输出情感标签。\n\n情感选项及输出格式：\n- 开心时请输出：[开心]\n- 难过时请输出：[难过]\n- 生气时请输出：[生气]\n- 惊讶时请输出：[惊讶]\n- 困惑时请输出：[困惑]\n- 其他或中性时输出：[中性]\n\n只输出情感标签，不要输出其他内容。"
     }
 
-    /// 构建用户输入的 prompt
-    fn build_user_prompt(&self, user_input: &str) -> String {
-        format!("用户输入：{}", user_input)
+    /// 确保会话存在，不存在则创建
+    fn ensure_session(&mut self) {
+        if !self.histories.contains_key(&self.current_session) {
+            self.histories
+                .insert(self.current_session.clone(), VecDeque::new());
+        }
+    }
+
+    /// 创建用户消息
+    fn create_user_message(content: &str) -> ChatCompletionRequestMessage {
+        ChatCompletionRequestUserMessageArgs::default()
+            .content(format!("用户输入：{}", content))
+            .build()
+            .map(|m| m.into())
+            .unwrap_or_else(|_| {
+                ChatCompletionRequestUserMessageArgs::default()
+                    .content(format!("用户输入：{}", content))
+                    .build()
+                    .unwrap()
+                    .into()
+            })
+    }
+
+    /// 创建助手消息
+    fn create_assistant_message(content: &str) -> ChatCompletionRequestMessage {
+        ChatCompletionRequestAssistantMessageArgs::default()
+            .content(content.to_string())
+            .build()
+            .map(|m| m.into())
+            .unwrap_or_else(|_| {
+                ChatCompletionRequestAssistantMessageArgs::default()
+                    .content(content.to_string())
+                    .build()
+                    .unwrap()
+                    .into()
+            })
+    }
+
+    /// 添加消息到历史记录
+    fn add_message_to_history(&mut self, msg: ChatCompletionRequestMessage) {
+        self.ensure_session();
+        let history = self.histories.get_mut(&self.current_session).unwrap();
+        history.push_back(msg);
+        // 超过容量时移除最旧的消息
+        while history.len() > self.history_capacity {
+            history.pop_front();
+        }
+    }
+
+    /// 构建完整的消息列表（含历史）
+    fn build_messages_with_history(&self, user_prompt: &str) -> Vec<ChatCompletionRequestMessage> {
+        let mut messages = vec![self.system_message.clone()];
+        if let Some(history) = self.histories.get(&self.current_session) {
+            messages.extend(history.iter().cloned());
+        }
+        messages.push(Self::create_user_message(user_prompt));
+        messages
     }
 
     /// 异步执行情感分析（内部实现）
@@ -77,24 +157,13 @@ impl OnlineLlm {
     /// - 网络连接问题
     /// - API 请求超时
     /// - API 返回错误（如认证失败、限流等）
-    async fn analyze_mood_async(&self, user_input: &str) -> Result<LlmResponse> {
-        let user_prompt = self.build_user_prompt(user_input);
-
-        // 构建消息
-        let system_msg = ChatCompletionRequestSystemMessageArgs::default()
-            .content(Self::system_prompt())
-            .build()?
-            .into();
-
-        let user_msg = ChatCompletionRequestUserMessageArgs::default()
-            .content(user_prompt)
-            .build()?
-            .into();
+    async fn analyze_mood_async(&mut self, user_input: &str) -> Result<LlmResponse> {
+        let messages = self.build_messages_with_history(user_input);
 
         // 构建请求
         let request = CreateChatCompletionRequestArgs::default()
             .model(&self.model)
-            .messages(vec![system_msg, user_msg])
+            .messages(messages.clone())
             .temperature(0.0)
             .max_tokens(256u32)
             .build()?;
@@ -124,6 +193,12 @@ impl OnlineLlm {
         // 解析情感
         let mood = parse_mood(&content);
 
+        // 保存 user message 到历史
+        self.add_message_to_history(Self::create_user_message(user_input));
+
+        // 保存 assistant message 到历史
+        self.add_message_to_history(Self::create_assistant_message(&content));
+
         Ok(LlmResponse {
             mood,
             actions: Vec::new(),
@@ -137,6 +212,21 @@ impl LlmTrait for OnlineLlm {
         // 需要创建新的 Tokio runtime 来执行异步代码
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(self.analyze_mood_async(user_input))
+    }
+
+    fn set_session_id(&mut self, session_id: &str) {
+        self.current_session = session_id.to_string();
+        self.ensure_session();
+    }
+
+    fn clear_session_history(&mut self, session_id: &str) {
+        if let Some(history) = self.histories.get_mut(session_id) {
+            history.clear();
+        }
+    }
+
+    fn clear_all_histories(&mut self) {
+        self.histories.clear();
     }
 }
 
