@@ -7,7 +7,7 @@
 //! - 使用 `tokio::task::block_in_place` 在同步上下文中执行异步代码
 //! - 请求默认超时 30 秒
 
-use crate::emotion::parse_mood;
+use crate::emotion::{parse_actions, parse_mood};
 use crate::llm::response::LlmResponse;
 use crate::llm::trait_::LlmTrait;
 use anyhow::{Context, Result};
@@ -88,7 +88,44 @@ impl OnlineLlm {
     fn system_prompt() -> &'static str {
         // 明确要求输出格式与 parse_mood 的解析逻辑一致
         // parse_mood 使用 starts_with("[开心]") 等方式匹配
-        "你是一个情感分析助手。请分析用户输入的情感，只输出情感标签。\n\n情感选项及输出格式：\n- 开心时请输出：[开心]\n- 难过时请输出：[难过]\n- 生气时请输出：[生气]\n- 惊讶时请输出：[惊讶]\n- 困惑时请输出：[困惑]\n- 其他或中性时输出：[中性]\n\n只输出情感标签，不要输出其他内容。"
+        r#"你是一个情感分析助手，同时负责生成机器人动作。
+
+## 情感输出（必须）
+根据用户输入判断情感，只输出情感标签：
+- 开心：[开心]
+- 难过：[难过]
+- 生气：[生气]
+- 惊讶：[惊讶]
+- 困惑：[困惑]
+- 中性或其他：[中性]
+
+## 动作输出（可选）
+根据用户输入生成动作，格式为JSON数组。
+**重要：动作必须包含完整的流程（抬起→执行→放下），每个动作完成后要恢复到0度。**
+
+### 舵机对应关系
+- 0: 头部 (范围: -15° ~ 15°)
+- 1: 左肩 (范围: -30° ~ 30°)
+- 2: 左臂 (范围: -180° ~ 180°)
+- 3: 右肩 (范围: -30° ~ 30°)
+- 4: 右臂 (范围: -180° ~ 180°)
+- 5: 身体 (范围: -90° ~ 90°)
+
+### 完整动作示例
+1. 右手挥手：抬起(90°) → 摆动1(60°) → 摆动2(90°) → 摆动3(60°) → 放下(0°)
+   [{"servo": 4, "angle": 90, "duration": 200}, {"servo": 4, "angle": 60, "duration": 150}, {"servo": 4, "angle": 90, "duration": 150}, {"servo": 4, "angle": 60, "duration": 150}, {"servo": 4, "angle": 0, "duration": 200}]
+2. 点头：低头(10°) → 抬起(-10°) → 恢复(0°)
+   [{"servo": 0, "angle": 10, "duration": 150}, {"servo": 0, "angle": -10, "duration": 150}, {"servo": 0, "angle": 0, "duration": 150}]
+3. 摇头：左转(15°) → 右转(-15°) → 恢复(0°)
+   [{"servo": 0, "angle": 15, "duration": 150}, {"servo": 0, "angle": -15, "duration": 150}, {"servo": 0, "angle": 0, "duration": 150}]
+4. 身体左转：左转(45°) → 恢复(0°)
+   [{"servo": 5, "angle": 45, "duration": 300}, {"servo": 5, "angle": 0, "duration": 300}]
+
+## 输出格式
+先输出情感标签，换行后输出动作JSON（无可用动作时输出 []）：
+[情感]
+[{"servo": X, "angle": Y, "duration": Z}, ...]
+"#
     }
 
     /// 确保会话存在，不存在则创建
@@ -165,7 +202,7 @@ impl OnlineLlm {
             .model(&self.model)
             .messages(messages.clone())
             .temperature(0.0)
-            .max_tokens(256u32)
+            .max_tokens(512u32)
             .build()?;
 
         log::debug!(
@@ -188,10 +225,17 @@ impl OnlineLlm {
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
 
-        log::debug!("Online LLM response: {}", content);
+        log::info!("Online LLM response: {}", content);
 
-        // 解析情感
-        let mood = parse_mood(&content);
+        // 分离情感和动作
+        let (mood_str, actions_str) = Self::split_response(&content);
+        let mood = parse_mood(mood_str);
+        let actions = parse_actions(actions_str);
+
+        log::info!("Mood: {:?}, Actions count: {}", mood, actions.len());
+        actions
+            .iter()
+            .for_each(|action| log::info!("Action: {action:?}"));
 
         // 保存 user message 到历史
         self.add_message_to_history(Self::create_user_message(user_input));
@@ -199,10 +243,20 @@ impl OnlineLlm {
         // 保存 assistant message 到历史
         self.add_message_to_history(Self::create_assistant_message(&content));
 
-        Ok(LlmResponse {
-            mood,
-            actions: Vec::new(),
-        })
+        Ok(LlmResponse { mood, actions })
+    }
+
+    /// 分离 LLM 输出中的情感标签和动作 JSON
+    fn split_response(content: &str) -> (&str, &str) {
+        // 查找第一个换行或动作 JSON 起始位置
+        let lines: Vec<&str> = content.lines().collect();
+        if lines.len() >= 2 {
+            (lines[0].trim(), lines[1].trim())
+        } else if content.contains('[') && content.contains("servo") {
+            ("[中性]", content.trim())
+        } else {
+            (content.trim(), "[]")
+        }
     }
 }
 

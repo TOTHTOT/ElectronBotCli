@@ -3,6 +3,7 @@ pub mod face_tracker;
 pub mod menu;
 
 use crate::app::face_tracker::{calculate_body_adjustment, smooth_adjustment};
+use crate::llm::response::Action;
 use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::FrameInfo;
 use crate::media::video::VideoCapture;
@@ -428,6 +429,31 @@ impl App {
         self.select_menu(1);
     }
 
+    /// 执行动作列表
+    fn execute_actions(&mut self, actions: &[Action]) {
+        for action in actions {
+            log::info!(
+                "Executing action: servo={}, angle={}, duration={}ms",
+                action.servo_index,
+                action.angle,
+                action.duration_ms
+            );
+
+            // 设置关节角度
+            self.joint
+                .set_angle(action.servo_index as usize, action.angle as f32);
+
+            // 发送帧到机器人
+            if let Err(e) = self.send_frame() {
+                log::warn!("Failed to send frame during action execution: {}", e);
+            }
+
+            // 等待动作完成
+            std::thread::sleep(std::time::Duration::from_millis(action.duration_ms as u64));
+        }
+        // LLM 返回的动作序列已包含完整的流程（抬起→执行→放下），无需额外重置
+    }
+
     pub fn prev_menu(&mut self) {
         self.select_menu(-1);
     }
@@ -506,22 +532,38 @@ impl App {
     }
 
     pub fn poll_voice_input(&mut self) {
-        if let Some(rx) = &self.ai.voice_result_rx {
+        // 收集待处理的响应，避免同时持有不可变和可变借用
+        let pending_actions: Vec<_> = if let Some(rx) = &self.ai.voice_result_rx {
+            let mut pending = Vec::new();
             while let Ok(response) = rx.try_recv() {
-                let mood = response.mood;
-                log::info!("Mood: {mood:?}");
-                // 更新 LLM 测试状态
-                if self.ui.in_llm_test_mode {
-                    self.ai.llm_test_state.current_mood = Some(mood);
-                    self.ai.llm_test_state.output_text = format!("情感: {:?}", mood);
-                }
-                self.ai
-                    .is_processing
-                    .store(false, std::sync::atomic::Ordering::Relaxed);
-                self.lcd.set_eyes_mood(mood);
-                Self::play_beep_for_mood(mood);
+                pending.push(response);
+            }
+            pending
+        } else {
+            Vec::new()
+        };
+
+        // 处理收集到的响应
+        for response in pending_actions {
+            let mood = response.mood;
+            log::info!("Mood: {mood:?}");
+            // 更新 LLM 测试状态
+            if self.ui.in_llm_test_mode {
+                self.ai.llm_test_state.current_mood = Some(mood);
+                self.ai.llm_test_state.output_text = format!("情感: {:?}", mood);
+            }
+            self.ai
+                .is_processing
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            self.lcd.set_eyes_mood(mood);
+            Self::play_beep_for_mood(mood);
+
+            // 处理动作
+            if !response.actions.is_empty() {
+                self.execute_actions(&response.actions);
             }
         }
+
         if self
             .ai
             .is_processing
