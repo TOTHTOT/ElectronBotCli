@@ -1,5 +1,5 @@
 pub mod asr;
-mod tts;
+pub mod tts;
 
 use crate::media::voice::asr::{build_audio_stream, recognition_thread};
 use anyhow::{anyhow, Result};
@@ -7,8 +7,15 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::OnceLock;
 use std::sync::{mpsc, Arc};
 use std::thread;
+
+use self::tts::{TtsHandler, TtsPlayer};
+
+/// Global TTS manager
+#[allow(dead_code)]
+static TTS_MANAGER: OnceLock<(TtsHandler, TtsPlayer)> = OnceLock::new();
 
 pub const VAD_WINDOW_SIZE: i32 = 512;
 #[allow(dead_code)]
@@ -192,4 +199,49 @@ fn play_output_samples(
     thread::sleep(std::time::Duration::from_millis(duration_ms as u64 + 50));
 
     Ok(())
+}
+
+/// Initialize TTS with the given model paths
+///
+/// # Arguments
+/// * `model_path` - Path to the VITS TTS model (.onnx)
+/// * `tokens_path` - Path to the tokens file (.txt)
+/// * `lexicon_path` - Path to the lexicon file (.txt)
+#[allow(dead_code)]
+pub fn init_tts(
+    model_path: impl AsRef<Path>,
+    tokens_path: impl AsRef<Path>,
+    lexicon_path: impl AsRef<Path>,
+) -> Result<()> {
+    let handler = TtsHandler::new(&model_path, &tokens_path, &lexicon_path)?;
+    let player = TtsPlayer::new()?;
+
+    TTS_MANAGER
+        .set((handler, player))
+        .map_err(|_| anyhow!("TTS already initialized"))?;
+
+    log::info!("TTS initialized successfully");
+    Ok(())
+}
+
+/// Speak text using TTS
+///
+/// # Arguments
+/// * `text` - Text to synthesize and play
+/// * `speed` - Speech speed (1.0 = normal)
+#[allow(dead_code)]
+pub fn speak(text: &str, speed: f32) -> Result<()> {
+    let (handler, player) = TTS_MANAGER
+        .get()
+        .ok_or_else(|| anyhow!("TTS not initialized"))?;
+
+    let audio = handler.synthesize(text, speed)?;
+    player.play(&audio)?;
+    Ok(())
+}
+
+/// Check if TTS is available and initialized
+#[allow(dead_code)]
+pub fn is_tts_available() -> bool {
+    TTS_MANAGER.get().is_some()
 }

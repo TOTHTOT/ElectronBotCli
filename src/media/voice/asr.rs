@@ -1,8 +1,12 @@
+#![allow(dead_code)]
+
 use crate::media::voice::VAD_WINDOW_SIZE;
 use cpal::traits::DeviceTrait;
 use cpal::{Device, SampleRate, Stream};
-use sherpa_rs::sense_voice::{SenseVoiceConfig, SenseVoiceRecognizer};
-use sherpa_rs::silero_vad::{SileroVad, SileroVadConfig};
+use sherpa_onnx::{
+    OfflineModelConfig, OfflineRecognizer, OfflineRecognizerConfig, OfflineSenseVoiceModelConfig,
+    VadModelConfig, VoiceActivityDetector,
+};
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -15,32 +19,47 @@ const PRE_ROLL_SAMPLES: usize = SAMPLE_RATE / 1000 * PRE_ROLL_MS;
 const SILENCE_THRESHOLD: usize = 120;
 const MIN_AUDIO_LEN: usize = SAMPLE_RATE / 2;
 
-/// 初始化 SenseVoice 识别器
-fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<SenseVoiceRecognizer> {
-    let config = SenseVoiceConfig {
-        model: model_path.to_string_lossy().into(),
-        tokens: tokens_path.to_string_lossy().into(),
-        #[cfg(target_os = "windows")]
-        provider: Some("cpu".into()),
+/// Initialize SenseVoice recognizer using sherpa-onnx
+fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<OfflineRecognizer> {
+    let config = OfflineRecognizerConfig {
+        model_config: OfflineModelConfig {
+            sense_voice: OfflineSenseVoiceModelConfig {
+                model: Some(model_path.to_string_lossy().to_string()),
+                language: Some("auto".to_string()),
+                use_itn: true,
+            },
+            tokens: Some(tokens_path.to_string_lossy().to_string()),
+            ..Default::default()
+        },
         ..Default::default()
     };
-    SenseVoiceRecognizer::new(config).map_err(|e| anyhow::anyhow!("SenseVoice failed: {e:?}"))
+
+    OfflineRecognizer::create(&config)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create SenseVoice recognizer"))
 }
 
-/// 初始化 Silero VAD
-fn init_silero_vad(model_path: &Path) -> anyhow::Result<SileroVad> {
-    let vad_config = SileroVadConfig {
-        model: model_path.to_string_lossy().into(),
-        window_size: VAD_WINDOW_SIZE,
+/// Initialize Silero VAD
+fn init_silero_vad(model_path: &Path) -> anyhow::Result<VoiceActivityDetector> {
+    let vad_config = VadModelConfig {
+        silero_vad: sherpa_onnx::SileroVadModelConfig {
+            model: Some(model_path.to_string_lossy().to_string()),
+            threshold: 0.5,
+            min_silence_duration: 0.3,
+            min_speech_duration: 0.3,
+            window_size: VAD_WINDOW_SIZE,
+            max_speech_duration: 30.0,
+        },
         ..Default::default()
     };
-    SileroVad::new(vad_config, 600.0).map_err(|e| anyhow::anyhow!("SileroVad failed: {e}"))
+
+    VoiceActivityDetector::create(&vad_config, 600.0)
+        .ok_or_else(|| anyhow::anyhow!("Failed to create VAD"))
 }
 
-/// 语音识别主循环：VAD 检测 + SenseVoice 识别
+/// Speech recognition main loop: VAD detection + SenseVoice recognition
 fn recognition_loop(
-    recognizer: &mut SenseVoiceRecognizer,
-    vad: &mut SileroVad,
+    recognizer: &mut OfflineRecognizer,
+    vad: &mut VoiceActivityDetector,
     audio_rx: Receiver<Vec<f32>>,
     result_tx: mpsc::Sender<String>,
 ) -> anyhow::Result<()> {
@@ -50,18 +69,27 @@ fn recognition_loop(
     let mut pre_roll: VecDeque<f32> = VecDeque::with_capacity(PRE_ROLL_SAMPLES);
 
     for samples in audio_rx {
-        // 滑动窗口：保留最近 500ms
+        // Sliding window: keep latest 500ms
         while pre_roll.len() >= PRE_ROLL_SAMPLES {
             pre_roll.pop_front();
         }
         pre_roll.extend(&samples);
 
-        // VAD 检测：使用 pre_roll（已包含当前 samples）
-        vad.accept_waveform(pre_roll.iter().copied().collect());
+        // VAD detection: use pre_roll (already includes current samples)
+        let is_speech = if pre_roll.len() >= VAD_WINDOW_SIZE as usize * 2 {
+            let all_samples: Vec<f32> = pre_roll.iter().copied().collect();
+            // Ensure we have enough samples for VAD
+            if all_samples.len() >= 512 {
+                vad.accept_waveform(&all_samples[..all_samples.len().min(512)]);
+            }
+            vad.detected()
+        } else {
+            false
+        };
 
-        if vad.is_speech() {
+        if is_speech {
             if !speaking {
-                log::info!(">>> 语音开始");
+                log::info!(">>> Speech start");
                 speaking = true;
                 buffer.extend(&pre_roll);
             }
@@ -73,16 +101,22 @@ fn recognition_loop(
 
             if silence_count > SILENCE_THRESHOLD {
                 log::info!(
-                    "<<< 语音结束，{:?}s",
+                    "<<< Speech end, {:?}s",
                     buffer.len() as f32 / SAMPLE_RATE as f32
                 );
 
                 if buffer.len() > MIN_AUDIO_LEN {
-                    let result = recognizer.transcribe(SAMPLE_RATE as u32, &buffer);
-                    let text = result.text.trim().to_string();
-                    if !text.is_empty() {
-                        log::info!("ASR: 【{}】", text);
-                        let _ = result_tx.send(text);
+                    // Use sherpa-onnx recognizer - create stream and feed audio
+                    let stream = recognizer.create_stream();
+                    stream.accept_waveform(SAMPLE_RATE as i32, &buffer);
+                    recognizer.decode(&stream);
+
+                    if let Some(result) = stream.get_result() {
+                        let text = result.text.trim().to_string();
+                        if !text.is_empty() {
+                            log::info!("ASR: 【{}】", text);
+                            let _ = result_tx.send(text);
+                        }
                     }
                 }
 
@@ -97,7 +131,7 @@ fn recognition_loop(
     Ok(())
 }
 
-/// 构建音频输入流
+/// Build audio input stream
 pub fn build_audio_stream(
     device: &Device,
     volume: Arc<AtomicI32>,
@@ -135,7 +169,7 @@ pub fn build_audio_stream(
     )?)
 }
 
-/// 语音识别线程入口
+/// Speech recognition thread entry
 pub fn recognition_thread(
     sense_voice_model_path: PathBuf,
     silero_vad_model_path: PathBuf,
@@ -148,7 +182,7 @@ pub fn recognition_thread(
     recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx)
 }
 
-/// 使用`cargo test test_recognition_with_audio_file -- --ignored --nocapture` 测试模块
+/// Use `cargo test test_recognition_with_audio_file -- --ignored --nocapture` to test
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,9 +212,10 @@ mod tests {
             .expect("failed to load wav");
         assert!(!samples.is_empty());
         assert!(samples.len() >= 16000);
-        for &s in &samples {
-            assert!(s >= -1.0 && s <= 1.0, "sample out of range: {}", s);
-        }
+        assert!(
+            samples.iter().all(|&s| s >= -1.0 && s <= 1.0),
+            "sample out of range"
+        );
     }
 
     #[test]
@@ -199,28 +234,28 @@ mod tests {
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
         let (result_tx, result_rx) = mpsc::channel::<String>();
 
+        // Feed audio in a separate thread since audio_tx doesn't implement Send
         let handle = std::thread::spawn(move || {
-            recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx)
+            let chunk_size = 1600;
+            for chunk in samples.chunks(chunk_size) {
+                audio_tx.send(chunk.to_vec()).expect("send failed");
+            }
+
+            // Send silence frames to give VAD time to detect end of speech
+            for _ in 0..150 {
+                audio_tx
+                    .send(vec![0.0f32; chunk_size])
+                    .expect("send failed");
+            }
+            drop(audio_tx);
         });
 
-        let chunk_size = 1600;
-        for chunk in samples.chunks(chunk_size) {
-            audio_tx.send(chunk.to_vec()).expect("send failed");
-        }
+        // Run recognition on main thread since recognizer/vad are not Send
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx);
 
-        // 发送静默帧，让 VAD 有时间检测到语音结束
-        let silence_chunk = vec![0.0f32; chunk_size];
-        for _ in 0..150 {
-            audio_tx.send(silence_chunk.clone()).expect("send failed");
-        }
-        drop(audio_tx);
+        handle.join().expect("thread panicked");
 
         let results: Vec<String> = result_rx.iter().collect();
-        handle
-            .join()
-            .expect("thread panicked")
-            .expect("loop failed");
-
         assert!(!results.is_empty(), "no recognition results");
         println!("Recognition results: {:?}", results);
     }

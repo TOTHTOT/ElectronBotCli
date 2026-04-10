@@ -50,6 +50,12 @@ impl ModelManager {
             ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", ""),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
             ("tokenizer", "onnx-community/Qwen2.5-0.5B-Instruct", "tokenizer.json", ""),
+            // VITS TTS 模型 (中文) - 使用 HuggingFace
+            ("vits_tts", "csukuangfj/sherpa-onnx-vits-zh-ll", "model.onnx", ""),
+            ("vits_tts_tokens", "csukuangfj/sherpa-onnx-vits-zh-ll", "tokens.txt", ""),
+            ("vits_tts_lexicon", "csukuangfj/sherpa-onnx-vits-zh-ll", "lexicon.txt", ""),
+            // 注意: Kokoro TTS 中文模型不在 HuggingFace, 仅在 GitHub releases
+            // 如需 Kokoro, 可从 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2 下载
             #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
             ("yolo_face", "deepghs/yolo-face", "yolov8n-face/model.onnx", ""),
             #[cfg(all(target_os = "linux", target_arch = "aarch64"))]

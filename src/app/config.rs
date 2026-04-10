@@ -17,6 +17,12 @@ pub struct AppConfig {
     pub llm_api_key: String,
     /// 在线 LLM 模型名称
     pub llm_model: String,
+    /// TTS 是否启用
+    pub tts_enabled: bool,
+    /// TTS 语速
+    pub tts_speed: f32,
+    /// TTS 语音
+    pub tts_voice: String,
 }
 
 impl Default for AppConfig {
@@ -30,6 +36,9 @@ impl Default for AppConfig {
             llm_api_base: "".to_string(),
             llm_api_key: "".to_string(),
             llm_model: "doubao-seed-1-6-251015".to_string(),
+            tts_enabled: true,
+            tts_speed: 1.0,
+            tts_voice: "af_sarah".to_string(),
         }
     }
 }
