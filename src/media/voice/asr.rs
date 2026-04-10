@@ -131,8 +131,8 @@ fn recognition_loop(
     Ok(())
 }
 
-/// Build audio input stream
-pub fn build_audio_stream(
+/// Build audio input stream for ASR
+pub fn build_asr_stream(
     device: &Device,
     volume: Arc<AtomicI32>,
     audio_tx: SyncSender<Vec<f32>>,

@@ -209,16 +209,29 @@ impl App {
     fn init_voice_manager(config: &config::AppConfig) -> anyhow::Result<VoiceManager> {
         log::info!("start load voice manager");
         let mm = ModelManager::global();
-        if let (Some(sense_voice_path), Some(silero_vad_path), Some(tokens_path)) = (
+        if let (
+            Some(sense_voice_path),
+            Some(silero_vad_path),
+            Some(tokens_path),
+            Some(tts_model_path),
+            Some(tts_tokens_path),
+            Some(tts_lexicon_path),
+        ) = (
             mm.get("sense_voice"),
             mm.get("silero_vad"),
             mm.get("sense_voice_tokens"),
+            mm.get("vits_tts"),
+            mm.get("vits_tts_tokens"),
+            mm.get("vits_tts_lexicon"),
         ) {
             VoiceManager::new(
                 sense_voice_path,
                 silero_vad_path,
                 tokens_path,
                 &config.speech_name,
+                tts_model_path,
+                tts_tokens_path,
+                tts_lexicon_path,
             )
         } else {
             anyhow::bail!("Voice model not available");

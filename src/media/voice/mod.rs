@@ -1,21 +1,16 @@
 pub mod asr;
 pub mod tts;
 
-use crate::media::voice::asr::{build_audio_stream, recognition_thread};
+use crate::media::voice::asr::{build_asr_stream, recognition_thread};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::path::Path;
 use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::OnceLock;
 use std::sync::{mpsc, Arc};
 use std::thread;
 
 use self::tts::{TtsHandler, TtsPlayer};
-
-/// Global TTS manager
-#[allow(dead_code)]
-static TTS_MANAGER: OnceLock<(TtsHandler, TtsPlayer)> = OnceLock::new();
 
 pub const VAD_WINDOW_SIZE: i32 = 512;
 #[allow(dead_code)]
@@ -27,38 +22,31 @@ pub struct VoiceManager {
     _stream: Stream,
     volume: Arc<AtomicI32>,
     pub rx: mpsc::Receiver<String>,
+    tts_handler: TtsHandler,
+    tts_player: Option<TtsPlayer>,
 }
 
 #[allow(dead_code)]
 impl VoiceManager {
     /// 创建voice模块, 通过静音检测截取有效实时音频数据,
     /// 完成后发送到解析线程
-    ///
-    /// # Arguments
-    ///
-    /// * `model_path`:
-    /// * `_tts_model_path`:
-    /// * `_tts_tokens_path`:
-    /// * `speech_name`:
-    /// * `result_tx`:
-    ///
-    /// returns: Result<VoiceManager, Error>
-    ///
-    /// # Examples
-    ///
-    /// ```
-    ///
-    /// ```
     pub fn new(
         sense_voice_model_path: impl AsRef<Path>,
         silero_vad_model_path: impl AsRef<Path>,
         tokens_path: impl AsRef<Path>,
         speech_name: &str,
+        tts_model_path: impl AsRef<Path>,
+        tts_tokens_path: impl AsRef<Path>,
+        tts_lexicon_path: impl AsRef<Path>,
     ) -> Result<Self> {
+        // 初始化 TTS
+        let tts_handler = TtsHandler::new(&tts_model_path, &tts_tokens_path, &tts_lexicon_path)?;
+        let tts_player = Some(TtsPlayer::new()?);
+
         let device = find_input_device(speech_name)?; // 查找输入麦克风
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
-        let stream = build_audio_stream(&device, volume.clone(), audio_tx)?;
+        let stream = build_asr_stream(&device, volume.clone(), audio_tx)?;
         stream.play()?;
         let sense_voice_model_path = sense_voice_model_path.as_ref().into();
         let silero_vad_model_path = silero_vad_model_path.as_ref().into();
@@ -82,11 +70,28 @@ impl VoiceManager {
             _stream: stream,
             volume,
             rx: text_rx,
+            tts_handler,
+            tts_player,
         })
     }
 
+    /// 获取实时音量
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
+    }
+
+    /// 使用 TTS 播放文本
+    pub fn speak(&self, text: &str, speed: f32) -> Result<()> {
+        let audio = self.tts_handler.synthesize(text, speed)?;
+        if let Some(player) = &self.tts_player {
+            player.play(&audio)?;
+        }
+        Ok(())
+    }
+
+    /// 检查 TTS 是否可用
+    pub fn is_tts_available(&self) -> bool {
+        self.tts_player.is_some()
     }
 }
 
@@ -206,49 +211,4 @@ pub fn write_audio_callback(
             *sample = samples.get(i).copied().unwrap_or(0.0);
         }
     }
-}
-
-/// Initialize TTS with the given model paths
-///
-/// # Arguments
-/// * `model_path` - Path to the VITS TTS model (.onnx)
-/// * `tokens_path` - Path to the tokens file (.txt)
-/// * `lexicon_path` - Path to the lexicon file (.txt)
-#[allow(dead_code)]
-pub fn init_tts(
-    model_path: impl AsRef<Path>,
-    tokens_path: impl AsRef<Path>,
-    lexicon_path: impl AsRef<Path>,
-) -> Result<()> {
-    let handler = TtsHandler::new(&model_path, &tokens_path, &lexicon_path)?;
-    let player = TtsPlayer::new()?;
-
-    TTS_MANAGER
-        .set((handler, player))
-        .map_err(|_| anyhow!("TTS already initialized"))?;
-
-    log::info!("TTS initialized successfully");
-    Ok(())
-}
-
-/// Speak text using TTS
-///
-/// # Arguments
-/// * `text` - Text to synthesize and play
-/// * `speed` - Speech speed (1.0 = normal)
-#[allow(dead_code)]
-pub fn speak(text: &str, speed: f32) -> Result<()> {
-    let (handler, player) = TTS_MANAGER
-        .get()
-        .ok_or_else(|| anyhow!("TTS not initialized"))?;
-
-    let audio = handler.synthesize(text, speed)?;
-    player.play(&audio)?;
-    Ok(())
-}
-
-/// Check if TTS is available and initialized
-#[allow(dead_code)]
-pub fn is_tts_available() -> bool {
-    TTS_MANAGER.get().is_some()
 }
