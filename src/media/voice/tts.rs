@@ -46,13 +46,13 @@ impl TtsHandler {
         let lexicon_path = lexicon_path.as_ref();
 
         if !model_path.exists() {
-            return Err(anyhow!("TTS model not found: {:?}", model_path));
+            anyhow::bail!("Model path {:?} does not exist", model_path);
         }
         if !tokens_path.exists() {
-            return Err(anyhow!("TTS tokens not found: {:?}", tokens_path));
+            anyhow::bail!("Tokens path {:?} does not exist", tokens_path);
         }
         if !lexicon_path.exists() {
-            return Err(anyhow!("TTS lexicon not found: {:?}", lexicon_path));
+            anyhow::bail!("Lexicon path {:?} does not exist", lexicon_path);
         }
 
         let config = OfflineTtsConfig {
@@ -94,7 +94,10 @@ impl TtsHandler {
             ..Default::default()
         };
 
-        let tts = self.tts.lock().unwrap();
+        let tts = self
+            .tts
+            .lock()
+            .map_err(|_| anyhow!("TTS is not available"))?;
         let callback: TtsCallback = Some(Box::new(|_chunk: &[f32], _progress: f32| true));
         let audio = tts
             .generate_with_config(text, &gen_config, callback)
@@ -150,11 +153,7 @@ impl TtsPlayer {
 
         let stream = self.device.build_output_stream(
             &config,
-            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-                for (i, sample) in data.iter_mut().enumerate() {
-                    *sample = samples.get(i).copied().unwrap_or(0.0);
-                }
-            },
+            crate::media::voice::write_audio_callback(samples),
             |err| log::error!("TTS stream error: {}", err),
             None,
         )?;
@@ -178,7 +177,8 @@ impl TtsPlayer {
 
 impl Default for TtsPlayer {
     fn default() -> Self {
-        Self::new().expect("Failed to create default TtsPlayer")
+        // unwrap is safe here as it only fails if no audio device exists
+        Self::new().unwrap()
     }
 }
 

@@ -169,6 +169,7 @@ impl OnlineLlm {
     /// 添加消息到历史记录
     fn add_message_to_history(&mut self, msg: ChatCompletionRequestMessage) {
         self.ensure_session();
+        // Safety: session is guaranteed to exist after ensure_session()
         let history = self.histories.get_mut(&self.current_session).unwrap();
         history.push_back(msg);
         // 超过容量时移除最旧的消息

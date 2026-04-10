@@ -186,11 +186,7 @@ fn play_output_samples(
 ) -> Result<(), anyhow::Error> {
     let stream = device.build_output_stream(
         config,
-        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
-            for (i, sample) in data.iter_mut().enumerate() {
-                *sample = samples.get(i).copied().unwrap_or(0.0);
-            }
-        },
+        write_audio_callback(samples),
         |err| log::error!("Beep stream error: {}", err),
         None,
     )?;
@@ -199,6 +195,17 @@ fn play_output_samples(
     thread::sleep(std::time::Duration::from_millis(duration_ms as u64 + 50));
 
     Ok(())
+}
+
+/// Creates a callback closure for writing audio samples to an output stream
+pub fn write_audio_callback(
+    samples: Vec<f32>,
+) -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo) + Send + 'static {
+    move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+        for (i, sample) in data.iter_mut().enumerate() {
+            *sample = samples.get(i).copied().unwrap_or(0.0);
+        }
+    }
 }
 
 /// Initialize TTS with the given model paths

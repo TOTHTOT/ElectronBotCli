@@ -224,12 +224,19 @@ mod tests {
         let samples = load_wav_samples(Path::new("assets/audio/asr_example_zh.wav"))
             .expect("failed to load wav");
 
-        let model_path = ModelManager::global().get("sense_voice").unwrap();
-        let vad_path = ModelManager::global().get("silero_vad").unwrap();
-        let tokens_path = ModelManager::global().get("sense_voice_tokens").unwrap();
+        let model_path = ModelManager::global()
+            .get("sense_voice")
+            .expect("sense_voice model not found");
+        let vad_path = ModelManager::global()
+            .get("silero_vad")
+            .expect("silero_vad model not found");
+        let tokens_path = ModelManager::global()
+            .get("sense_voice_tokens")
+            .expect("sense_voice_tokens not found");
 
-        let mut recognizer = init_sense_voice(&model_path, &tokens_path).unwrap();
-        let mut vad = init_silero_vad(&vad_path).unwrap();
+        let mut recognizer =
+            init_sense_voice(&model_path, &tokens_path).expect("Failed to create recognizer");
+        let mut vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
 
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
         let (result_tx, result_rx) = mpsc::channel::<String>();
