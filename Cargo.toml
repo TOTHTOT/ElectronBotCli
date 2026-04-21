@@ -22,7 +22,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
 # ASR+TTS 推理
-sherpa-onnx = "1.12.36"
+sherpa-onnx = "1.12.39"
 
 # 音频管理, 获取系统音频输入输出
 cpal = "0.17.1"

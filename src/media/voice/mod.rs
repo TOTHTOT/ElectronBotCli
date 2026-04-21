@@ -105,10 +105,28 @@ impl VoiceManager {
     }
 
     /// 使用 TTS 播放文本
-    pub fn speak(&self, text: &str, speed: f32) -> Result<()> {
+    ///
+    /// # Arguments
+    ///
+    /// * `text`:
+    /// * `speed`:
+    /// * `on_complete`: 播放完成时的回调 (播放结果, 是否出错)
+    ///
+    /// returns: Result<(), Error>
+    pub fn speak(
+        &self,
+        text: &str,
+        speed: f32,
+        on_complete: Option<Box<dyn FnOnce(Result<()>) + Send>>,
+    ) -> Result<()> {
+        let start = std::time::Instant::now();
         let audio = self.tts_handler.synthesize(text, speed)?;
+        log::info!("synthesized audio took: {:?}", start.elapsed());
         if let Some(player) = &self.tts_player {
             player.play(&audio)?;
+            if let Some(callback) = on_complete {
+                callback(Ok(()));
+            }
         }
         Ok(())
     }
@@ -118,7 +136,13 @@ impl VoiceManager {
     /// # Arguments
     /// * `text` - 要播放的文本
     /// * `speed` - 播放速度
-    pub fn speak_streaming(&self, text: &str, speed: f32) -> Result<()> {
+    /// * `on_complete` - 播放完成时的回调 (播放结果, 是否出错)
+    pub fn speak_streaming(
+        &self,
+        text: &str,
+        speed: f32,
+        on_complete: Option<Box<dyn FnOnce(Result<()>) + Send>>,
+    ) -> Result<()> {
         let player = self
             .tts_player
             .as_ref()
@@ -128,16 +152,35 @@ impl VoiceManager {
 
         let handle = Arc::new(stream_handle);
 
-        self.tts_handler.synthesize_streaming(text, speed, {
-            let handle = handle.clone();
-            move |chunk| {
-                handle.write_chunk(chunk);
+        // Spawn a new thread for synthesis to run in parallel with playback
+        let handle_clone = handle.clone();
+        let text = text.to_string();
+        let tts_handler = self.tts_handler.clone();
+        let on_complete = std::sync::Mutex::new(on_complete);
+
+        thread::spawn(move || {
+            if let Err(e) = tts_handler.synthesize_streaming(&text, speed, {
+                let handle = handle_clone.clone();
+                move |chunk, progress| {
+                    handle.write_chunk(chunk, progress);
+                }
+            }) {
+                log::error!("TTS synthesis error: {e:?}");
             }
-        })?;
+            handle_clone.mark_synthesis_done();
+            log::info!("TTS synthesis done");
+        });
 
         // Wait for playback to finish
         while !handle.is_done() {
             thread::sleep(std::time::Duration::from_millis(50));
+        }
+
+        log::info!("TTS streaming playback done");
+
+        // 调用完成回调
+        if let Some(callback) = on_complete.into_inner().unwrap_or(None) {
+            callback(Ok(()));
         }
 
         Ok(())
