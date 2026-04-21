@@ -5,6 +5,7 @@ mod viewmodel;
 use crate::app::{App, MenuItem};
 use crate::ui::viewmodel::{
     DeviceControlViewModel, DeviceStatusViewModel, LlmTestViewModel, SettingsViewModel,
+    TtsTestViewModel,
 };
 use crate::ui_components::PopupWidget;
 use ratatui::prelude::*;
@@ -37,6 +38,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let control_vm = DeviceControlViewModel::from_app(app);
     let llm_vm = LlmTestViewModel::from_app(app);
     let settings_vm = SettingsViewModel::from_app(app);
+    let tts_vm = TtsTestViewModel::from_app(app);
 
     match app.ui.selected_menu {
         MenuItem::DeviceStatus => {
@@ -56,6 +58,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
         ),
         MenuItem::About => pages::about::render(frame, chunks[1], right_border_color),
         MenuItem::LlmTest => pages::llm_test::render(frame, chunks[1], &llm_vm, right_border_color),
+        MenuItem::TtsTest => pages::tts_test::render(frame, chunks[1], &tts_vm, right_border_color),
     }
 
     // 渲染弹窗

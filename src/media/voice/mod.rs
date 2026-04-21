@@ -19,12 +19,20 @@ pub const CHUNK_SIZE: usize = 1600; // 100ms at 16kHz
 pub const SAMPLE_RATE: u32 = 16000;
 #[allow(dead_code)]
 pub struct VoiceManager {
-    _stream: Stream,
+    _stream: Option<Stream>,
+    _rx: mpsc::Receiver<String>,
     volume: Arc<AtomicI32>,
-    pub rx: mpsc::Receiver<String>,
     tts_handler: TtsHandler,
     tts_player: Option<TtsPlayer>,
 }
+
+// Safety: VoiceManager is only accessed from the main thread and the ASR thread.
+// The Receiver is only used in the ASR thread, and the TTS methods are called
+// from the main thread, so it's safe to implement Send + Sync.
+#[allow(dead_code)]
+unsafe impl Send for VoiceManager {}
+#[allow(dead_code)]
+unsafe impl Sync for VoiceManager {}
 
 #[allow(dead_code)]
 impl VoiceManager {
@@ -43,11 +51,22 @@ impl VoiceManager {
         let tts_handler = TtsHandler::new(&tts_model_path, &tts_tokens_path, &tts_lexicon_path)?;
         let tts_player = Some(TtsPlayer::new()?);
 
-        let device = find_input_device(speech_name)?; // 查找输入麦克风
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
-        let stream = build_asr_stream(&device, volume.clone(), audio_tx)?;
-        stream.play()?;
+
+        // 查找输入麦克风, 当设备不存在时也会继续执行, 只是不会运行到 asr 相关功能
+        let stream = match find_input_device(speech_name) {
+            Ok(device) => {
+                let stream = build_asr_stream(&device, volume.clone(), audio_tx)?;
+                stream.play()?;
+                Some(stream)
+            }
+            Err(e) => {
+                log::warn!("Cannot find input device: {}", e);
+                None
+            }
+        };
+
         let sense_voice_model_path = sense_voice_model_path.as_ref().into();
         let silero_vad_model_path = silero_vad_model_path.as_ref().into();
         let tokens_path = tokens_path.as_ref().into();
@@ -68,8 +87,8 @@ impl VoiceManager {
 
         Ok(Self {
             _stream: stream,
+            _rx: text_rx,
             volume,
-            rx: text_rx,
             tts_handler,
             tts_player,
         })
@@ -80,12 +99,47 @@ impl VoiceManager {
         self.volume.load(Ordering::Relaxed)
     }
 
+    /// 获取 TTS handler
+    pub fn tts_handler(&self) -> &TtsHandler {
+        &self.tts_handler
+    }
+
     /// 使用 TTS 播放文本
     pub fn speak(&self, text: &str, speed: f32) -> Result<()> {
         let audio = self.tts_handler.synthesize(text, speed)?;
         if let Some(player) = &self.tts_player {
             player.play(&audio)?;
         }
+        Ok(())
+    }
+
+    /// 流式播放 TTS - 每个音频片段生成后立即播放
+    ///
+    /// # Arguments
+    /// * `text` - 要播放的文本
+    /// * `speed` - 播放速度
+    pub fn speak_streaming(&self, text: &str, speed: f32) -> Result<()> {
+        let player = self
+            .tts_player
+            .as_ref()
+            .ok_or_else(|| anyhow!("TTS player not available"))?;
+        let sample_rate = self.tts_handler.sample_rate();
+        let stream_handle = player.start_streaming(sample_rate)?;
+
+        let handle = Arc::new(stream_handle);
+
+        self.tts_handler.synthesize_streaming(text, speed, {
+            let handle = handle.clone();
+            move |chunk| {
+                handle.write_chunk(chunk);
+            }
+        })?;
+
+        // Wait for playback to finish
+        while !handle.is_done() {
+            thread::sleep(std::time::Duration::from_millis(50));
+        }
+
         Ok(())
     }
 

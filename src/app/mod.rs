@@ -12,6 +12,7 @@ use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
+use crate::ui::pages::tts_test::TtsTestState;
 use crate::vision::face::create_face_detector;
 use crate::web::WebPreview;
 use boteyes::Mood;
@@ -42,15 +43,17 @@ pub(crate) struct UiState {
     pub in_edit_settings_mode: bool,
     pub edit_buffer: String,
     pub in_llm_test_mode: bool,
+    pub in_tts_test_mode: bool,
 }
 
 /// AI 状态 - LLM、语音、情感识别
 pub(crate) struct AiState {
-    pub voice_manager: Option<VoiceManager>, // 允许音频设备不存在, 不放到里面不能延长生命周期, None时程序不崩溃
+    pub voice_manager: Option<Arc<VoiceManager>>, // 允许音频设备不存在, 不放到里面不能延长生命周期, None时程序不崩溃
     voice_result_rx: Option<mpsc::Receiver<LlmResponse>>,
     pub is_processing: Arc<AtomicBool>,
     pub text_tx: Sender<String>,
     pub llm_test_state: LlmTestState,
+    pub tts_test_state: TtsTestState,
 }
 
 /// 通信状态
@@ -119,7 +122,7 @@ impl App {
 
         // 初始化语音管理器
         let voice_manager = match Self::init_voice_manager(&config) {
-            Ok(m) => Some(m),
+            Ok(m) => Some(Arc::new(m)),
             Err(e) => {
                 log::warn!("initial voice manager initialization failed: {e}");
                 None
@@ -141,6 +144,7 @@ impl App {
                 settings_selected: 0,
                 in_edit_settings_mode: false,
                 in_llm_test_mode: false,
+                in_tts_test_mode: false,
                 edit_buffer: String::new(),
             },
             joint: Arc::new(Joint::new()),
@@ -154,6 +158,7 @@ impl App {
                 is_processing: Arc::new(AtomicBool::new(false)),
                 text_tx,
                 llm_test_state: LlmTestState::default(),
+                tts_test_state: TtsTestState::default(),
             },
             comm: Comm {
                 state: None,

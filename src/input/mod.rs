@@ -4,14 +4,17 @@ mod device;
 mod llm_test;
 mod menu;
 mod settings;
+mod tts_test;
 
 pub use device::DeviceEvent;
 pub use llm_test::LlmTestEvent;
 pub use menu::MenuEvent;
 pub use settings::SettingsEvent;
+pub use tts_test::TtsTestEvent;
 
 use crate::app::{App, MenuItem};
-use crate::input::llm_test::handle;
+use crate::input::llm_test::handle as handle_llm_test;
+use crate::input::tts_test::handle as handle_tts_test;
 use crossterm::event::{KeyCode, KeyModifiers};
 
 /// 通用事件
@@ -29,6 +32,7 @@ pub enum AppEvent {
     Device(DeviceEvent),
     Settings(SettingsEvent),
     LlmTest(LlmTestEvent),
+    TtsTest(TtsTestEvent),
 }
 
 impl From<CommonEvent> for AppEvent {
@@ -61,6 +65,12 @@ impl From<LlmTestEvent> for AppEvent {
     }
 }
 
+impl From<TtsTestEvent> for AppEvent {
+    fn from(e: TtsTestEvent) -> Self {
+        AppEvent::TtsTest(e)
+    }
+}
+
 /// 处理应用事件
 pub fn handle_event(app: &mut App, event: AppEvent) {
     match event {
@@ -72,6 +82,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
         AppEvent::Device(e) => device::handle(app, e),
         AppEvent::Settings(e) => settings::handle(app, e),
         AppEvent::LlmTest(_) => {} // Handled in handle_by_mode
+        AppEvent::TtsTest(_) => {} // Handled in handle_by_mode
     }
 }
 
@@ -98,15 +109,18 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         app.in_servo_mode,
         app.ui.in_settings,
         app.ui.in_llm_test_mode,
+        app.ui.in_tts_test_mode,
     ) {
         // 编辑模式：处理设置项内容编辑
-        (true, _, _, _) => handle_edit_settings_mode(app, code),
+        (true, _, _, _, _) => handle_edit_settings_mode(app, code),
         // 设备控制模式：处理舵机角度调整
-        (_, true, _, _) => handle_servo_mode(app, code),
+        (_, true, _, _, _) => handle_servo_mode(app, code),
         // 设置模式：处理配置项选择
-        (_, _, true, _) => handle_settings_mode(app, code),
+        (_, _, true, _, _) => handle_settings_mode(app, code),
         // LLM 测试模式：处理文本输入
-        (_, _, _, true) => handle_llm_test_mode(app, code),
+        (_, _, _, true, _) => handle_llm_test_mode(app, code),
+        // TTS 测试模式：处理文本输入
+        (_, _, _, _, true) => handle_tts_test_mode(app, code),
         // 菜单模式：处理侧边栏导航
         _ => handle_menu_mode(app, code, modifiers),
     }
@@ -163,6 +177,11 @@ fn handle_menu_enter(app: &mut App) -> AppEvent {
             app.ui.in_llm_test_mode = true;
             app.ui.left_focused = false;
             AppEvent::LlmTest(LlmTestEvent::None)
+        }
+        MenuItem::TtsTest => {
+            app.ui.in_tts_test_mode = true;
+            app.ui.left_focused = false;
+            AppEvent::TtsTest(TtsTestEvent::None)
         }
         _ => MenuEvent::ConnectDevice.into(),
     }
@@ -295,6 +314,27 @@ fn handle_llm_test_mode(app: &mut App, code: KeyCode) {
         app.ai.llm_test_state.current_mood = None;
         app.toggle_focus();
     } else {
-        handle(app, code);
+        handle_llm_test(app, code);
+    }
+}
+
+fn handle_tts_test_mode(app: &mut App, code: KeyCode) {
+    if app.ui.left_focused {
+        if code == KeyCode::Tab
+            || !matches!(
+                code,
+                KeyCode::Esc | KeyCode::Enter | KeyCode::Up | KeyCode::Down
+            )
+        {
+            app.toggle_focus();
+        }
+    } else if code == KeyCode::Esc || code == KeyCode::Tab {
+        app.ui.in_tts_test_mode = false;
+        app.ai.tts_test_state.input_text.clear();
+        app.ai.tts_test_state.output_text.clear();
+        app.ai.tts_test_state.is_playing = false;
+        app.toggle_focus();
+    } else {
+        handle_tts_test(app, code);
     }
 }

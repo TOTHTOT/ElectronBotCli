@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use sherpa_onnx::{GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsVitsModelConfig};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Callback type for TTS progress reporting
@@ -110,6 +110,38 @@ impl TtsHandler {
         })
     }
 
+    /// Synthesize text to audio with streaming callback
+    ///
+    /// # Arguments
+    /// * `text` - Text to synthesize
+    /// * `speed` - Speech speed (1.0 = normal, 0.5 = half speed, 2.0 = double speed)
+    /// * `callback` - Called for each audio chunk generated, parameter is audio data
+    pub fn synthesize_streaming<F>(&self, text: &str, speed: f32, mut callback: F) -> Result<()>
+    where
+        F: FnMut(&[f32]) + Send + 'static,
+    {
+        let gen_config = GenerationConfig {
+            sid: 0,
+            speed,
+            ..Default::default()
+        };
+
+        let tts = self
+            .tts
+            .lock()
+            .map_err(|_| anyhow!("TTS is not available"))?;
+
+        let stream_callback: TtsCallback = Some(Box::new(move |chunk: &[f32], _progress: f32| {
+            callback(chunk);
+            true // continue generation
+        }));
+
+        tts.generate_with_config(text, &gen_config, stream_callback)
+            .ok_or_else(|| anyhow!("TTS generation failed"))?;
+
+        Ok(())
+    }
+
     /// Get the TTS sample rate
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate as u32
@@ -120,6 +152,33 @@ impl TtsHandler {
 pub struct TtsPlayer {
     device: Device,
     is_playing: Arc<AtomicBool>,
+}
+
+/// Handle for streaming audio playback
+pub struct StreamPlayerHandle {
+    pub sample_rate: u32,
+    buffer: Arc<Mutex<Vec<f32>>>,
+    total_written: Arc<AtomicUsize>,
+    consumed: Arc<AtomicUsize>,
+}
+
+impl StreamPlayerHandle {
+    /// Add a chunk of audio samples to the buffer
+    pub fn write_chunk(&self, chunk: &[f32]) {
+        let Some(mut buffer) = self.buffer.lock().ok() else {
+            log::warn!("lock StreamPlayerHandle.buffer failed");
+            return;
+        };
+        buffer.extend_from_slice(chunk);
+        self.total_written.fetch_add(chunk.len(), Ordering::SeqCst);
+    }
+
+    /// Check if all samples have been consumed
+    pub fn is_done(&self) -> bool {
+        let total = self.total_written.load(Ordering::SeqCst);
+        let consumed = self.consumed.load(Ordering::SeqCst);
+        consumed >= total && total > 0
+    }
 }
 
 impl TtsPlayer {
@@ -172,6 +231,60 @@ impl TtsPlayer {
     /// Check if currently playing
     pub fn is_playing(&self) -> bool {
         self.is_playing.load(Ordering::SeqCst)
+    }
+
+    /// Start streaming audio playback
+    ///
+    /// Returns a `StreamPlayerHandle` that can be used to write audio chunks.
+    /// The handle's `write_chunk` method is thread-safe and can be called from any thread.
+    pub fn start_streaming(&self, sample_rate: u32) -> Result<StreamPlayerHandle> {
+        let buffer = Arc::new(Mutex::new(Vec::new()));
+        let consumed = Arc::new(AtomicUsize::new(0));
+        let total_written = Arc::new(AtomicUsize::new(0));
+
+        let buffer_clone = buffer.clone();
+        let consumed_clone = consumed.clone();
+
+        let config = cpal::StreamConfig {
+            channels: 1,
+            sample_rate,
+            buffer_size: cpal::BufferSize::Default,
+        };
+
+        let stream = self.device.build_output_stream(
+            &config,
+            move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                let mut buffer = buffer_clone.lock().unwrap();
+                let consumed_idx = consumed_clone.load(Ordering::SeqCst);
+
+                for (i, sample) in data.iter_mut().enumerate() {
+                    if consumed_idx + i < buffer.len() {
+                        *sample = buffer[consumed_idx + i];
+                    } else {
+                        *sample = 0.0;
+                    }
+                }
+
+                consumed_clone.fetch_add(data.len(), Ordering::SeqCst);
+
+                // Trim buffer to prevent memory growth
+                if consumed_idx > 44100 {
+                    buffer.drain(0..consumed_idx);
+                    consumed_clone.store(0, Ordering::SeqCst);
+                }
+            },
+            |err| log::error!("TTS streaming error: {}", err),
+            None,
+        )?;
+
+        stream.play()?;
+
+        Ok(StreamPlayerHandle {
+            sample_rate,
+            buffer,
+            total_written,
+            consumed,
+        })
     }
 }
 

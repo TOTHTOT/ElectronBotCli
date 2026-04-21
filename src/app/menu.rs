@@ -4,6 +4,7 @@ pub enum MenuItem {
     DeviceStatus,
     DeviceControl,
     LlmTest,
+    TtsTest,
     Settings,
     About,
 }
@@ -14,16 +15,18 @@ impl MenuItem {
             MenuItem::DeviceStatus => "设备状态",
             MenuItem::DeviceControl => "设备控制",
             MenuItem::LlmTest => "LLM测试",
+            MenuItem::TtsTest => "TTS测试",
             MenuItem::Settings => "设置",
             MenuItem::About => "关于",
         }
     }
 
-    pub fn all() -> [Self; 5] {
+    pub fn all() -> [Self; 6] {
         [
             MenuItem::DeviceStatus,
             MenuItem::DeviceControl,
             MenuItem::LlmTest,
+            MenuItem::TtsTest,
             MenuItem::Settings,
             MenuItem::About,
         ]
