@@ -332,7 +332,10 @@ fn handle_tts_test_mode(app: &mut App, code: KeyCode) {
         app.ui.in_tts_test_mode = false;
         app.ai.tts_test_state.input_text.clear();
         app.ai.tts_test_state.output_text.clear();
-        app.ai.tts_test_state.is_playing = false;
+        app.ai
+            .tts_test_state
+            .is_playing
+            .store(false, std::sync::atomic::Ordering::SeqCst);
         app.toggle_focus();
     } else {
         handle_tts_test(app, code);

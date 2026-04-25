@@ -12,14 +12,16 @@ use ratatui::{
     style::Style,
     Frame,
 };
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
 #[derive(Default)]
 pub struct TtsTestState {
     pub input_text: String,
     pub output_text: String,
-    pub speed: f32,         // 0.5 ~ 2.0, 默认 1.0
-    pub is_streaming: bool, // true=流式, false=阻塞
-    pub is_playing: bool,
+    pub speed: f32,                  // 0.5 ~ 2.0, 默认 1.0
+    pub is_streaming: bool,          // true=流式, false=阻塞
+    pub is_playing: Arc<AtomicBool>, // 使用 AtomicBool 以便线程间共享
 }
 
 /// TTS 测试页面

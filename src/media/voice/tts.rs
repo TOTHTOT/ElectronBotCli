@@ -5,7 +5,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::Device;
 use sherpa_onnx::{GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsVitsModelConfig};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Callback type for TTS progress reporting
@@ -21,6 +21,7 @@ pub struct TtsAudio {
 
 /// TTS handler for synthesizing speech using sherpa-onnx VITS
 /// Wrapped in Arc<Mutex<>> to ensure thread safety since OfflineTts is not Sync
+#[derive(Clone)]
 pub struct TtsHandler {
     tts: Arc<Mutex<OfflineTts>>,
     sample_rate: i32,
@@ -110,15 +111,15 @@ impl TtsHandler {
         })
     }
 
-    /// Synthesize text to audio with streaming callback
+    /// 使用流式回调合成文本到音频
     ///
-    /// # Arguments
-    /// * `text` - Text to synthesize
-    /// * `speed` - Speech speed (1.0 = normal, 0.5 = half speed, 2.0 = double speed)
-    /// * `callback` - Called for each audio chunk generated, parameter is audio data
+    /// # 参数
+    /// * `text` - 要合成的文本
+    /// * `speed` - 语速 (1.0 = 正常, 0.5 = 半速, 2.0 = 倍速)
+    /// * `callback` - 每个音频块生成时调用，参数为音频数据
     pub fn synthesize_streaming<F>(&self, text: &str, speed: f32, mut callback: F) -> Result<()>
     where
-        F: FnMut(&[f32]) + Send + 'static,
+        F: FnMut(&[f32], f32) + Send + 'static,
     {
         let gen_config = GenerationConfig {
             sid: 0,
@@ -131,8 +132,8 @@ impl TtsHandler {
             .lock()
             .map_err(|_| anyhow!("TTS is not available"))?;
 
-        let stream_callback: TtsCallback = Some(Box::new(move |chunk: &[f32], _progress: f32| {
-            callback(chunk);
+        let stream_callback: TtsCallback = Some(Box::new(move |chunk: &[f32], progress: f32| {
+            callback(chunk, progress);
             true // continue generation
         }));
 
@@ -156,28 +157,31 @@ pub struct TtsPlayer {
 
 /// Handle for streaming audio playback
 pub struct StreamPlayerHandle {
-    pub sample_rate: u32,
+    /// Audio buffer shared between synthesis and playback threads
     buffer: Arc<Mutex<Vec<f32>>>,
-    total_written: Arc<AtomicUsize>,
-    consumed: Arc<AtomicUsize>,
+    /// Set to true when synthesis is complete
+    synthesis_done: Arc<AtomicBool>,
+    /// Set to true when playback is complete
+    playback_done: Arc<AtomicBool>,
 }
 
 impl StreamPlayerHandle {
     /// Add a chunk of audio samples to the buffer
-    pub fn write_chunk(&self, chunk: &[f32]) {
-        let Some(mut buffer) = self.buffer.lock().ok() else {
-            log::warn!("lock StreamPlayerHandle.buffer failed");
-            return;
-        };
-        buffer.extend_from_slice(chunk);
-        self.total_written.fetch_add(chunk.len(), Ordering::SeqCst);
+    pub fn write_chunk(&self, chunk: &[f32], progress: f32) {
+        if let Ok(mut buffer) = self.buffer.lock() {
+            buffer.extend_from_slice(chunk);
+            log::info!("deal progress: {}", progress);
+        }
     }
 
-    /// Check if all samples have been consumed
+    /// Mark synthesis as complete
+    pub fn mark_synthesis_done(&self) {
+        self.synthesis_done.store(true, Ordering::SeqCst);
+    }
+
+    /// Check if playback is complete
     pub fn is_done(&self) -> bool {
-        let total = self.total_written.load(Ordering::SeqCst);
-        let consumed = self.consumed.load(Ordering::SeqCst);
-        consumed >= total && total > 0
+        self.playback_done.load(Ordering::SeqCst)
     }
 }
 
@@ -196,6 +200,26 @@ impl TtsPlayer {
         })
     }
 
+    pub fn write_audio_callback(
+        samples: Vec<f32>,
+    ) -> impl FnMut(&mut [f32], &cpal::OutputCallbackInfo) + Send + 'static {
+        let current_pos = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let current_pos_clone = current_pos.clone();
+        let total_samples = samples.len();
+
+        move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
+            let pos = current_pos_clone.load(std::sync::atomic::Ordering::Relaxed);
+            for (i, sample) in data.iter_mut().enumerate() {
+                if pos + i < total_samples {
+                    *sample = samples[pos + i];
+                } else {
+                    *sample = 0.0;
+                }
+            }
+            current_pos_clone.fetch_add(data.len(), std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
     /// Play TTS audio
     pub fn play(&self, audio: &TtsAudio) -> Result<()> {
         let config = cpal::StreamConfig {
@@ -212,7 +236,7 @@ impl TtsPlayer {
 
         let stream = self.device.build_output_stream(
             &config,
-            crate::media::voice::write_audio_callback(samples),
+            Self::write_audio_callback(samples),
             |err| log::error!("TTS stream error: {}", err),
             None,
         )?;
@@ -239,11 +263,12 @@ impl TtsPlayer {
     /// The handle's `write_chunk` method is thread-safe and can be called from any thread.
     pub fn start_streaming(&self, sample_rate: u32) -> Result<StreamPlayerHandle> {
         let buffer = Arc::new(Mutex::new(Vec::new()));
-        let consumed = Arc::new(AtomicUsize::new(0));
-        let total_written = Arc::new(AtomicUsize::new(0));
+        let synthesis_done = Arc::new(AtomicBool::new(false));
+        let playback_done = Arc::new(AtomicBool::new(false));
 
         let buffer_clone = buffer.clone();
-        let consumed_clone = consumed.clone();
+        let synthesis_done_clone = synthesis_done.clone();
+        let playback_done_clone = playback_done.clone();
 
         let config = cpal::StreamConfig {
             channels: 1,
@@ -251,26 +276,33 @@ impl TtsPlayer {
             buffer_size: cpal::BufferSize::Default,
         };
 
+        // Build the output stream
         let stream = self.device.build_output_stream(
             &config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut buffer = buffer_clone.lock().unwrap();
-                let consumed_idx = consumed_clone.load(Ordering::SeqCst);
 
+                // Drain audio data from buffer head
+                let to_read = std::cmp::min(data.len(), buffer.len());
                 for (i, sample) in data.iter_mut().enumerate() {
-                    if consumed_idx + i < buffer.len() {
-                        *sample = buffer[consumed_idx + i];
+                    if i < to_read {
+                        *sample = buffer[i];
                     } else {
                         *sample = 0.0;
                     }
                 }
 
-                consumed_clone.fetch_add(data.len(), Ordering::SeqCst);
+                // Remove consumed samples from buffer
+                if to_read > 0 {
+                    buffer.drain(0..to_read);
+                }
 
-                // Trim buffer to prevent memory growth
-                if consumed_idx > 44100 {
-                    buffer.drain(0..consumed_idx);
-                    consumed_clone.store(0, Ordering::SeqCst);
+                // Check if we should signal playback done
+                // (synthesis done AND buffer is empty - all data has been consumed)
+                let synthesis_done = synthesis_done_clone.load(Ordering::SeqCst);
+                let buffer_empty = buffer.is_empty();
+                if synthesis_done && buffer_empty {
+                    playback_done_clone.store(true, Ordering::SeqCst);
                 }
             },
             |err| log::error!("TTS streaming error: {}", err),
@@ -279,11 +311,13 @@ impl TtsPlayer {
 
         stream.play()?;
 
+        // Keep stream alive by leaking it
+        std::mem::forget(stream);
+
         Ok(StreamPlayerHandle {
-            sample_rate,
             buffer,
-            total_written,
-            consumed,
+            synthesis_done,
+            playback_done,
         })
     }
 }
