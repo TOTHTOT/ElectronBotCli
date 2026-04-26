@@ -94,14 +94,14 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
         })
         .collect();
     log::info!(
-        "input audio device: {:?}",
+        "input audio device: {:#?}",
         devices.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
     let device = devices
         .iter()
-        .find(|(name, _)| name == speech_name)
+        .find(|(name, _)| name.contains(speech_name))
         .map(|(_, d)| d.clone())
-        .ok_or_else(|| anyhow!("No audio input device found: {}", speech_name))?;
+        .ok_or_else(|| anyhow!("No audio input device found containing: {}", speech_name))?;
 
     // 打印设备配置信息
     if let Ok(config) = device.default_input_config() {
