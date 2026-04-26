@@ -7,7 +7,7 @@
 #   ./deploy_rk3566.sh deploy   - 只传输
 
 TARGET="aarch64-unknown-linux-gnu"
-DEVICE="radxa@192.168.2.202"
+DEVICE="radxa@192.168.2.159"
 REMOTE_DIR="~/ElectronBotCli"
 
 # 解析参数
