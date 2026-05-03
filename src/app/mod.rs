@@ -7,7 +7,7 @@ use crate::llm::response::Action;
 use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::FrameInfo;
 use crate::media::video::VideoCapture;
-use crate::media::voice::play_beep;
+use crate::media::voice::play_bd1_sound;
 use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
@@ -522,13 +522,9 @@ impl App {
         Ok(())
     }
 
-    /// 根据 Mood 播放对应的 bibi 声
+    /// 根据 Mood 播放对应的 BD1 电子音
     fn play_beep_for_mood(mood: Mood) {
-        match mood {
-            Mood::Happy | Mood::Surprise => play_beep(2, 800.0, 100, 150),
-            Mood::Angry | Mood::Sad | Mood::Confuse => play_beep(3, 500.0, 80, 100),
-            Mood::Default | Mood::Loading => play_beep(1, 440.0, 150, 0),
-        }
+        play_bd1_sound(mood);
     }
 
     pub fn poll_voice_input(&mut self) {
