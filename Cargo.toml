@@ -27,6 +27,12 @@ sherpa-rs = { version = "0.6", features = ["tts", "download-binaries"] }
 # 音频管理, 获取系统音频输入输出
 cpal = "0.17.1"
 
+# BD1 机器人声音合成
+droid-chatter = { git = "https://github.com/TOTHTOT/droid-chatter", version = "0.1.1"}
+
+# WAV 文件读写
+hound = "3.5"
+
 # 离线llm推理, 跑 gguf 模型
 candle-core = "0.9"
 candle-transformers = "0.9"
