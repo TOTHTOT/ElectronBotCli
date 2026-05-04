@@ -27,7 +27,7 @@ impl SettingsViewModel {
             },
             SettingItem {
                 label: "麦克风名称",
-                value: app.config.speech_name.clone(),
+                value: app.config.speaker_name.clone(),
             },
         ];
 

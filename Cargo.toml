@@ -20,26 +20,26 @@ BotEyes = { git = "https://github.com/TOTHTOT/BotEyes" , version = "0.1.2"}
 toml = "1.0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+cfg-if = "1.0.4"
 
 # asr+tts 推理
 sherpa-rs = { version = "0.6", features = ["tts", "download-binaries"] }
 
 # 音频管理, 获取系统音频输入输出
 cpal = "0.17.1"
+hound = "3.5"
+rodio = "0.22.2"
 
 # BD1 机器人声音合成
-droid-chatter = { git = "https://github.com/TOTHTOT/droid-chatter", version = "0.1.1"}
-
-# WAV 文件读写
-hound = "3.5"
+droid-chatter = { git = "https://github.com/TOTHTOT/droid-chatter", version = "0.1.2"}
 
 # 离线llm推理, 跑 gguf 模型
-candle-core = "0.9"
-candle-transformers = "0.9"
-tokenizers = "0.22.2"
+candle-core = "0.10.2"
+candle-transformers = "0.10.2"
+tokenizers = "0.23.1"
 
 # Online LLM (使用 async-openai 调用)
-async-openai = { version = "0.34.0", features = ["_api", "chat-completion", "chat-completion-types"] }
+async-openai = { version = "0.36.1", features = ["_api", "chat-completion", "chat-completion-types"] }
 
 # Web server for preview
 axum = "0.8"
@@ -50,7 +50,6 @@ bytes = "1"
 
 # 模型管理, 自动下载需要的模型
 hf-hub = "0.5.0"
-rodio = "0.22.2"
 
 # Camera capture
 [target.'cfg(windows)'.dependencies]

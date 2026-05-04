@@ -101,6 +101,7 @@ impl LlmTrait for QwenLlm {
         let mood = QwenLlm::analyze_mood(self, user_input)?;
         Ok(LlmResponse {
             mood,
+            ack: "hello bd1".to_string(),
             actions: Vec::new(),
         })
     }

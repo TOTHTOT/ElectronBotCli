@@ -9,6 +9,8 @@ use boteyes::Mood;
 pub struct LlmResponse {
     /// 情感状态
     pub mood: Mood,
+    /// 回复的话
+    pub ack: String,
     /// 舵机动作列表
     pub actions: Vec<Action>,
 }

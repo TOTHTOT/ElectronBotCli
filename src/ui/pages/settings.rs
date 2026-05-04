@@ -70,7 +70,7 @@ fn render_settings_list(
     let items = [
         ("Wifi名称", config.wifi_ssid.as_str()),
         ("Wifi密码", config.wifi_password.as_str()),
-        ("麦克风名称", config.speech_name.as_str()),
+        ("麦克风名称", config.speaker_name.as_str()),
     ];
 
     // 渲染每个设置项

@@ -243,7 +243,11 @@ impl OnlineLlm {
         // 保存 assistant message 到历史
         self.add_message_to_history(Self::create_assistant_message(&content));
 
-        Ok(LlmResponse { mood, actions })
+        Ok(LlmResponse {
+            mood,
+            ack: "hello bd1".to_string(),
+            actions,
+        })
     }
 
     /// 分离 LLM 输出中的情感标签和动作 JSON

@@ -1,4 +1,5 @@
 use crate::media::video::process::RotateAngle;
+use cfg_if::cfg_if;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -6,7 +7,8 @@ use std::path::Path;
 /// 应用配置
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AppConfig {
-    pub speech_name: String,
+    pub speaker_name: String,
+    pub microphone_name: String,
     pub camera_index: String,
     pub rotation: RotateAngle,
     pub wifi_ssid: String,
@@ -22,13 +24,22 @@ pub struct AppConfig {
 impl Default for AppConfig {
     fn default() -> Self {
         Self {
-            speech_name: "麦克风阵列".to_string(),
+            speaker_name: {
+                cfg_if! {
+                    if #[cfg(target_os = "linux")] {
+                        "sysdefault:CARD=CODEC".to_string()
+                    } else if #[cfg(target_os = "macos")] {
+                        "BuiltInSpeakerDevice".to_string()
+                    }
+                }
+            },
+            microphone_name: "麦克风阵列".to_string(),
             rotation: RotateAngle::Rotate270,
             camera_index: "0".to_string(),
             wifi_ssid: "".to_string(),
             wifi_password: "".to_string(),
-            llm_api_base: "".to_string(),
-            llm_api_key: "".to_string(),
+            llm_api_base: "https://ark.cn-beijing.volces.com/api/v3".to_string(),
+            llm_api_key: "6804a808-871b-4d70-8d21-51fdfb49cd4b".to_string(),
             llm_model: "doubao-seed-1-6-251015".to_string(),
         }
     }
@@ -66,7 +77,7 @@ impl AppConfig {
     }
 
     pub fn set_speech_name(&mut self, name: String) {
-        self.speech_name = name;
+        self.speaker_name = name;
         let _ = self.save();
     }
 

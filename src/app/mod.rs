@@ -5,10 +5,10 @@ pub mod menu;
 use crate::app::face_tracker::{calculate_body_adjustment, smooth_adjustment};
 use crate::llm::response::Action;
 use crate::llm::{LlmManager, LlmResponse};
+use crate::media::audio::play_bd1_sound;
+use crate::media::audio::VoiceManager;
 use crate::media::video::types::FrameInfo;
 use crate::media::video::VideoCapture;
-use crate::media::voice::play_bd1_sound;
-use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
 use crate::ui::pages::llm_test::LlmTestState;
@@ -121,7 +121,7 @@ impl App {
         let voice_manager = match Self::init_voice_manager(&config) {
             Ok(m) => Some(m),
             Err(e) => {
-                log::warn!("initial voice manager initialization failed: {e}");
+                log::warn!("initial audio manager initialization failed: {e}");
                 None
             }
         };
@@ -207,7 +207,7 @@ impl App {
 
     /// 初始化语音管理器
     fn init_voice_manager(config: &config::AppConfig) -> anyhow::Result<VoiceManager> {
-        log::info!("start load voice manager");
+        log::info!("start load audio manager");
         let mm = ModelManager::global();
         if let (Some(sense_voice_path), Some(silero_vad_path), Some(tokens_path)) = (
             mm.get("sense_voice"),
@@ -218,7 +218,8 @@ impl App {
                 sense_voice_path,
                 silero_vad_path,
                 tokens_path,
-                &config.speech_name,
+                &config.speaker_name,
+                "",
             )
         } else {
             anyhow::bail!("Voice model not available");
@@ -496,7 +497,7 @@ impl App {
         match self.ui.settings_selected {
             0 => self.config.wifi_ssid = self.ui.edit_buffer.clone(),
             1 => self.config.wifi_password = self.ui.edit_buffer.clone(),
-            2 => self.config.speech_name = self.ui.edit_buffer.clone(),
+            2 => self.config.speaker_name = self.ui.edit_buffer.clone(),
             _ => {}
         }
         if let Err(e) = self.config.save() {
@@ -520,11 +521,6 @@ impl App {
         self.lcd.load_image(path)?;
         self.lcd.set_mode(DisplayMode::Static);
         Ok(())
-    }
-
-    /// 根据 Mood 播放对应的 BD1 电子音
-    fn play_beep_for_mood(mood: Mood) {
-        play_bd1_sound(mood);
     }
 
     pub fn poll_voice_input(&mut self) {
@@ -552,7 +548,9 @@ impl App {
                 .is_processing
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             self.lcd.set_eyes_mood(mood);
-            Self::play_beep_for_mood(mood);
+            if let Err(e) = play_bd1_sound(mood, &response.ack) {
+                log::error!("Failed to play sound: {e}");
+            }
 
             // 处理动作
             if !response.actions.is_empty() {
