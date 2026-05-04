@@ -20,8 +20,9 @@ pub const CHUNK_SIZE: usize = 1600; // 100ms at 16kHz
 pub const SAMPLE_RATE: u32 = 16000;
 #[allow(dead_code)]
 pub struct VoiceManager {
-    volume: Arc<AtomicI32>,
     pub rx: mpsc::Receiver<String>,
+    _recognition: Recognition,
+    volume: Arc<AtomicI32>,
     speaker_name: String,
     microphone_name: String,
 }
@@ -57,6 +58,7 @@ impl VoiceManager {
         }
 
         Ok(Self {
+            _recognition: recognition,
             speaker_name: speaker_name.to_string(),
             microphone_name: microphone_name.to_string(),
             volume,

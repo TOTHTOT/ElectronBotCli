@@ -33,13 +33,13 @@ impl Recognition {
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
         let input_stream = self.config.build_input_stream(audio_tx)?;
 
-        let mut recognizer = Recognition::init_sense_voice(
-            &self.config.sense_voice_model_path,
-            &self.config.tokens_path,
-        )?;
+        let sense_path = self.config.sense_voice_model_path.clone();
+        let silero_path = self.config.silero_vad_model_path.clone();
+        let tokens_path = self.config.tokens_path.clone();
         let tx_clone = self.config.result_tx.clone();
-        let mut vad = Recognition::init_silero_vad(&self.config.silero_vad_model_path)?;
         let handle = std::thread::spawn(move || {
+            let mut recognizer = Recognition::init_sense_voice(&sense_path, &tokens_path)?;
+            let mut vad = Recognition::init_silero_vad(&silero_path)?;
             Recognition::recognition_loop(&mut recognizer, &mut vad, audio_rx, tx_clone)
         });
 
