@@ -548,9 +548,11 @@ impl App {
                 .is_processing
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             self.lcd.set_eyes_mood(mood);
-            if let Err(e) = play_bd1_sound(mood, &response.ack) {
-                log::error!("Failed to play sound: {e}");
-            }
+            std::thread::spawn(move || {
+                if let Err(e) = play_bd1_sound(mood, &response.ack) {
+                    log::error!("Failed to play sound: {e}");
+                }
+            });
 
             // 处理动作
             if !response.actions.is_empty() {
