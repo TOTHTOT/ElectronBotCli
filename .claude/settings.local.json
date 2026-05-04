@@ -125,11 +125,12 @@
       "Bash(mkdir -p /Users/yangyihui/WorkSpace/ElectronBotCli/assets/lib)",
       "Bash(cp /tmp/sherpa-onnx-v1.12.9-linux-aarch64-shared-cpu/lib/*.so /Users/yangyihui/WorkSpace/ElectronBotCli/assets/lib/)",
       "Bash(http_proxy=http://192.168.2.147:7890 https_proxy=http://192.168.2.147:7890 all_proxy=http://192.168.2.147:7890 cross build --release --target aarch64-unknown-linux-gnu)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(pkill -f \"sshpass.*ele_bot\")"
     ]
   },
+  "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "lanhu"
-  ],
-  "enableAllProjectMcpServers": true
+  ]
 }

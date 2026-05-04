@@ -1421,6 +1421,7 @@ dependencies = [
  "ort",
  "ratatui",
  "rknn-rs",
+ "rodio",
  "serde",
  "serde_json",
  "sherpa-rs",

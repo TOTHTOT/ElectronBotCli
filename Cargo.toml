@@ -50,6 +50,7 @@ bytes = "1"
 
 # 模型管理, 自动下载需要的模型
 hf-hub = "0.5.0"
+rodio = "0.22.2"
 
 # Camera capture
 [target.'cfg(windows)'.dependencies]
