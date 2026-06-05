@@ -33,7 +33,7 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
             app.ui.edit_buffer = match app.ui.settings_selected {
                 0 => app.config.wifi_ssid.clone(),
                 1 => app.config.wifi_password.clone(),
-                2 => app.config.speaker_name.clone(),
+                2 => app.config.microphone_name.clone(),
                 _ => String::new(),
             };
         }

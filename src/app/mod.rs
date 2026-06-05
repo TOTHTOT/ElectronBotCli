@@ -219,7 +219,7 @@ impl App {
                 silero_vad_path,
                 tokens_path,
                 &config.speaker_name,
-                "",
+                &config.microphone_name,
             )
         } else {
             anyhow::bail!("Voice model not available");
@@ -497,7 +497,7 @@ impl App {
         match self.ui.settings_selected {
             0 => self.config.wifi_ssid = self.ui.edit_buffer.clone(),
             1 => self.config.wifi_password = self.ui.edit_buffer.clone(),
-            2 => self.config.speaker_name = self.ui.edit_buffer.clone(),
+            2 => self.config.microphone_name = self.ui.edit_buffer.clone(),
             _ => {}
         }
         if let Err(e) = self.config.save() {

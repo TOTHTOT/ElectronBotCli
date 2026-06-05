@@ -196,7 +196,7 @@ impl RecognitionConfig {
                     self.microphone_name
                 )
             })?;
-
+        log::info!("use microphone: {}", device.id()?.1);
         if let Ok(config) = device.default_input_config() {
             log::info!("Selected audio device config: {config:?} ");
         }
