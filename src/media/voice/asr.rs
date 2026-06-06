@@ -153,9 +153,22 @@ pub fn build_asr_stream(
     Ok(device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            let sum: f32 = data.iter().map(|&s| s * s).sum();
-            let rms = (sum / data.len() as f32).sqrt();
-            volume_clone.store((rms * 100.0).min(100.0) as i32, Ordering::Relaxed);
+            // 峰值检测 + 慢速衰减, 类似 VU 表的响应特性, 视觉上更容易看出音量变化
+            let peak = data
+                .iter()
+                .fold(0.0f32, |acc, &s| acc.max(s.abs()));
+            let peak_value = (peak * 100.0).min(100.0) as i32;
+            let current = volume_clone.load(Ordering::Relaxed);
+            let new_value = if peak_value > current {
+                // 新峰值: 立即提升
+                peak_value
+            } else if current > 0 {
+                // 慢速指数衰减 (约 0.95 / 32ms, 半衰期约 0.4s)
+                ((current as f32) * 0.95) as i32
+            } else {
+                0
+            };
+            volume_clone.store(new_value, Ordering::Relaxed);
 
             let mono: Vec<f32> = if channels == 2 {
                 data.chunks(2).map(|c| (c[0] + c[1]) / 2.0).collect()

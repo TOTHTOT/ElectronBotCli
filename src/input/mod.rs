@@ -105,22 +105,25 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // 使用模式元组进行模式匹配
     match (
+        app.ui.in_device_selection_mode,
         app.ui.in_edit_settings_mode,
         app.in_servo_mode,
         app.ui.in_settings,
         app.ui.in_llm_test_mode,
         app.ui.in_tts_test_mode,
     ) {
+        // 设备选择模式：处理输入/输出设备选择 (最高优先级)
+        (true, _, _, _, _, _) => handle_device_selection_mode(app, code),
         // 编辑模式：处理设置项内容编辑
-        (true, _, _, _, _) => handle_edit_settings_mode(app, code),
+        (_, true, _, _, _, _) => handle_edit_settings_mode(app, code),
         // 设备控制模式：处理舵机角度调整
-        (_, true, _, _, _) => handle_servo_mode(app, code),
+        (_, _, true, _, _, _) => handle_servo_mode(app, code),
         // 设置模式：处理配置项选择
-        (_, _, true, _, _) => handle_settings_mode(app, code),
+        (_, _, _, true, _, _) => handle_settings_mode(app, code),
         // LLM 测试模式：处理文本输入
-        (_, _, _, true, _) => handle_llm_test_mode(app, code),
+        (_, _, _, _, true, _) => handle_llm_test_mode(app, code),
         // TTS 测试模式：处理文本输入
-        (_, _, _, _, true) => handle_tts_test_mode(app, code),
+        (_, _, _, _, _, true) => handle_tts_test_mode(app, code),
         // 菜单模式：处理侧边栏导航
         _ => handle_menu_mode(app, code, modifiers),
     }
@@ -279,6 +282,43 @@ fn handle_edit_settings_mode(app: &mut App, code: KeyCode) {
         KeyCode::Char(c) => {
             app.ui.edit_buffer.push(c);
         }
+        _ => {}
+    }
+}
+
+/// 设备选择模式输入处理
+///
+/// 处理输入/输出设备选择的按键输入：
+/// - ↑/↓：在设备列表中移动
+/// - Enter：保存当前选中的设备
+/// - Esc：取消选择
+/// - 设备列表为空时仅 Esc 有效
+///
+/// # Arguments
+///
+/// * `app` - 应用状态
+/// * `code` - 按键代码
+fn handle_device_selection_mode(app: &mut App, code: KeyCode) {
+    let devices = app.current_device_list();
+    if devices.is_empty() {
+        if code == KeyCode::Esc {
+            app.cancel_device_selection();
+        }
+        return;
+    }
+    match code {
+        KeyCode::Up => {
+            if app.ui.device_selection_index > 0 {
+                app.ui.device_selection_index -= 1;
+            }
+        }
+        KeyCode::Down => {
+            if app.ui.device_selection_index + 1 < devices.len() {
+                app.ui.device_selection_index += 1;
+            }
+        }
+        KeyCode::Enter => app.save_device_selection(),
+        KeyCode::Esc => app.cancel_device_selection(),
         _ => {}
     }
 }

@@ -46,10 +46,11 @@ impl VoiceManager {
         tts_model_path: impl AsRef<Path>,
         tts_tokens_path: impl AsRef<Path>,
         tts_lexicon_path: impl AsRef<Path>,
+        output_device_name: &str,
     ) -> Result<Self> {
         // 初始化 TTS
         let tts_handler = TtsHandler::new(&tts_model_path, &tts_tokens_path, &tts_lexicon_path)?;
-        let tts_player = Some(TtsPlayer::new()?);
+        let tts_player = Some(TtsPlayer::new(output_device_name)?);
 
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
@@ -206,6 +207,12 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
         "input audio device: {:?}",
         devices.iter().map(|(name, _)| name).collect::<Vec<_>>()
     );
+    // 名称为空时回退到默认输入设备
+    if speech_name.is_empty() {
+        return host
+            .default_input_device()
+            .ok_or_else(|| anyhow!("No default audio input device found"));
+    }
     let device = devices
         .iter()
         .find(|(name, _)| name == speech_name)
@@ -220,9 +227,53 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
     Ok(device)
 }
 
+/// 枚举系统所有输入设备的名称
+pub fn list_input_devices() -> Vec<String> {
+    let host = match cpal::default_host() {
+        h => h,
+    };
+    host.input_devices()
+        .map(|it| {
+            it.filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 枚举系统所有输出设备的名称
+pub fn list_output_devices() -> Vec<String> {
+    let host = match cpal::default_host() {
+        h => h,
+    };
+    host.output_devices()
+        .map(|it| {
+            it.filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// 按名称查找输出设备，名称为空或找不到时回退到默认输出设备
+pub fn find_output_device(name: &str) -> Option<Device> {
+    let host = cpal::default_host();
+    if !name.is_empty() {
+        if let Ok(devices) = host.output_devices() {
+            for d in devices {
+                if let Ok(desc) = d.description() {
+                    if desc.name() == name {
+                        return Some(d);
+                    }
+                }
+            }
+        }
+        log::warn!("Output device '{}' not found, falling back to default", name);
+    }
+    host.default_output_device()
+}
+
 /// Play a simple beep sound (for notifications)
-pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32) {
-    let device = match cpal::default_host().default_output_device() {
+pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32, output_device_name: &str) {
+    let device = match find_output_device(output_device_name) {
         Some(d) => d,
         None => return,
     };

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::{anyhow, Result};
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use cpal::traits::{DeviceTrait, StreamTrait};
 use cpal::Device;
 use sherpa_onnx::{GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsVitsModelConfig};
 use std::path::Path;
@@ -186,11 +186,10 @@ impl StreamPlayerHandle {
 }
 
 impl TtsPlayer {
-    /// Create a new TtsPlayer using the default output device
-    pub fn new() -> Result<Self> {
-        let device = cpal::default_host()
-            .default_output_device()
-            .ok_or_else(|| anyhow!("No default audio output device found"))?;
+    /// Create a new TtsPlayer using the specified output device (空字符串 = 系统默认设备)
+    pub fn new(output_device_name: &str) -> Result<Self> {
+        let device = crate::media::voice::find_output_device(output_device_name)
+            .ok_or_else(|| anyhow!("No audio output device found"))?;
 
         log::info!("TTS output device: {:?}", device.description());
 
@@ -325,7 +324,7 @@ impl TtsPlayer {
 impl Default for TtsPlayer {
     fn default() -> Self {
         // unwrap is safe here as it only fails if no audio device exists
-        Self::new().unwrap()
+        Self::new("").unwrap()
     }
 }
 

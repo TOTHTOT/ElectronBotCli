@@ -44,6 +44,8 @@ pub(crate) struct UiState {
     pub edit_buffer: String,
     pub in_llm_test_mode: bool,
     pub in_tts_test_mode: bool,
+    pub in_device_selection_mode: bool,
+    pub device_selection_index: usize,
 }
 
 /// AI 状态 - LLM、语音、情感识别
@@ -90,6 +92,10 @@ pub struct App {
     // 配置
     pub config: config::AppConfig,
 
+    // 缓存的可用设备列表
+    pub input_devices: Vec<String>,
+    pub output_devices: Vec<String>,
+
     // AI 状态
     pub ai: AiState,
 
@@ -129,6 +135,15 @@ impl App {
             }
         };
 
+        // 枚举系统可用输入/输出设备
+        let input_devices = crate::media::voice::list_input_devices();
+        let output_devices = crate::media::voice::list_output_devices();
+        log::info!(
+            "Available input devices: {:?}, output devices: {:?}",
+            input_devices,
+            output_devices
+        );
+
         log::info!("init app successfully");
 
         let mut menu_state = ListState::default();
@@ -145,6 +160,8 @@ impl App {
                 in_edit_settings_mode: false,
                 in_llm_test_mode: false,
                 in_tts_test_mode: false,
+                in_device_selection_mode: false,
+                device_selection_index: 0,
                 edit_buffer: String::new(),
             },
             joint: Arc::new(Joint::new()),
@@ -152,6 +169,8 @@ impl App {
             lcd,
             popup: Popup::new(),
             config,
+            input_devices,
+            output_devices,
             ai: AiState {
                 voice_manager,
                 voice_result_rx: Some(result_rx),
@@ -237,6 +256,7 @@ impl App {
                 tts_model_path,
                 tts_tokens_path,
                 tts_lexicon_path,
+                &config.output_device,
             )
         } else {
             anyhow::bail!("Voice model not available");
@@ -492,7 +512,7 @@ impl App {
 
     /// 设置项数量
     pub fn settings_item_count(&self) -> usize {
-        3 // Wifi名称, Wifi密码, 麦克风名称
+        4 // Wifi名称, Wifi密码, 输入设备, 输出设备
     }
 
     pub fn settings_prev(&mut self) {
@@ -530,6 +550,40 @@ impl App {
         self.ui.edit_buffer.clear();
     }
 
+    /// 获取当前设置项对应的设备列表
+    pub fn current_device_list(&self) -> &[String] {
+        match self.ui.settings_selected {
+            2 => &self.input_devices,
+            3 => &self.output_devices,
+            _ => &[],
+        }
+    }
+
+    /// 保存设备选择到 config
+    pub fn save_device_selection(&mut self) {
+        let name = self
+            .current_device_list()
+            .get(self.ui.device_selection_index)
+            .cloned()
+            .unwrap_or_default();
+        match self.ui.settings_selected {
+            2 => self.config.speech_name = name,
+            3 => self.config.output_device = name,
+            _ => return,
+        }
+        if let Err(e) = self.config.save() {
+            log::error!("Failed to save device selection: {e}");
+        }
+        self.ui.in_device_selection_mode = false;
+        self.ui.device_selection_index = 0;
+    }
+
+    /// 取消设备选择
+    pub fn cancel_device_selection(&mut self) {
+        self.ui.in_device_selection_mode = false;
+        self.ui.device_selection_index = 0;
+    }
+
     pub fn is_connected(&self) -> bool {
         self.comm.state.is_some()
     }
@@ -541,11 +595,12 @@ impl App {
     }
 
     /// 根据 Mood 播放对应的 bibi 声
-    fn play_beep_for_mood(mood: Mood) {
+    fn play_beep_for_mood(&self, mood: Mood) {
+        let device = self.config.output_device.as_str();
         match mood {
-            Mood::Happy | Mood::Surprise => play_beep(2, 800.0, 100, 150),
-            Mood::Angry | Mood::Sad | Mood::Confuse => play_beep(3, 500.0, 80, 100),
-            Mood::Default | Mood::Loading => play_beep(1, 440.0, 150, 0),
+            Mood::Happy | Mood::Surprise => play_beep(2, 800.0, 100, 150, device),
+            Mood::Angry | Mood::Sad | Mood::Confuse => play_beep(3, 500.0, 80, 100, device),
+            Mood::Default | Mood::Loading => play_beep(1, 440.0, 150, 0, device),
         }
     }
 
@@ -574,7 +629,7 @@ impl App {
                 .is_processing
                 .store(false, std::sync::atomic::Ordering::Relaxed);
             self.lcd.set_eyes_mood(mood);
-            Self::play_beep_for_mood(mood);
+            self.play_beep_for_mood(mood);
 
             // 处理动作
             if !response.actions.is_empty() {

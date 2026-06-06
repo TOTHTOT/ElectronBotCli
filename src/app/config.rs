@@ -11,6 +11,8 @@ pub struct AppConfig {
     pub rotation: RotateAngle,
     pub wifi_ssid: String,
     pub wifi_password: String,
+    /// 输出设备名称（空字符串表示使用系统默认设备）
+    pub output_device: String,
     /// 在线 LLM API 地址
     pub llm_api_base: String,
     /// 在线 LLM API Key
@@ -33,6 +35,7 @@ impl Default for AppConfig {
             camera_index: "0".to_string(),
             wifi_ssid: "".to_string(),
             wifi_password: "".to_string(),
+            output_device: "".to_string(),
             llm_api_base: "".to_string(),
             llm_api_key: "".to_string(),
             llm_model: "doubao-seed-1-6-251015".to_string(),
@@ -76,6 +79,11 @@ impl AppConfig {
 
     pub fn set_speech_name(&mut self, name: String) {
         self.speech_name = name;
+        let _ = self.save();
+    }
+
+    pub fn set_output_device(&mut self, name: String) {
+        self.output_device = name;
         let _ = self.save();
     }
 

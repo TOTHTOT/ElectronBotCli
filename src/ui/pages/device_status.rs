@@ -43,7 +43,10 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &DeviceStatusViewModel, border_
                 Cell::from(Span::styled("输入音量", Style::new().fg(Color::Yellow))),
                 // 音量条
                 Cell::from(Span::styled(
-                    format!("{:-<20}", "│".repeat((vm.volume / 5) as usize)),
+                    format!(
+                        "{: <20}",
+                        "█".repeat((vm.volume / 5).min(20) as usize)
+                    ),
                     Style::new().fg(Color::Cyan),
                 )),
             ]),

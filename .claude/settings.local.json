@@ -114,7 +114,15 @@
       "Bash(cat:*)",
       "WebFetch(domain:*)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:k2-fsa.github.io)"
+      "WebFetch(domain:k2-fsa.github.io)",
+      "mcp__filesystem__read_text_file",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:docs.rs)"
     ]
+  },
+  "statusLine": {
+    "type": "command",
+    "command": "powershell -NoProfile -Command \"$j=[Console]::In.ReadToEnd()|ConvertFrom-Json;$u=$j.context_window.used_percentage;$r=$j.context_window.remaining_percentage;$m=$j.model.display_name;$d=Split-Path $j.workspace.current_dir -Leaf;$ctx=if($u -ne $null){'ctx: '+$u+'% used / '+$r+'% left'}else{'ctx: --'};Write-Output($m+' | '+$d+' | '+$ctx)\""
   }
 }
