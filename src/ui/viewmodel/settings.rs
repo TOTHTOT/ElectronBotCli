@@ -1,4 +1,5 @@
 use crate::app::App;
+use crate::media::voice::DeviceInfo;
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,8 +24,8 @@ pub struct SettingsViewModel {
     pub edit_buffer: String,
     pub in_device_selection_mode: bool,
     pub device_selection_index: usize,
-    pub input_devices: Vec<String>,
-    pub output_devices: Vec<String>,
+    pub input_devices: Vec<DeviceInfo>,
+    pub output_devices: Vec<DeviceInfo>,
 }
 
 #[allow(dead_code)]

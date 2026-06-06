@@ -45,10 +45,10 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
             }
             // 设备选择项：进入设备选择模式
             2 | 3 => {
-                let devices: &[String] = match app.ui.settings_selected {
-                    2 => &app.input_devices,
-                    3 => &app.output_devices,
-                    _ => &[],
+                let devices: Vec<String> = match app.ui.settings_selected {
+                    2 => app.input_devices.iter().map(|d| d.name.clone()).collect(),
+                    3 => app.output_devices.iter().map(|d| d.name.clone()).collect(),
+                    _ => Vec::new(),
                 };
                 app.ui.in_device_selection_mode = true;
                 // 初始化为当前 config 设备名在列表中的位置, 找不到则 0

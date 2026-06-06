@@ -8,6 +8,7 @@ use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::FrameInfo;
 use crate::media::video::VideoCapture;
 use crate::media::voice::play_beep;
+use crate::media::voice::DeviceInfo;
 use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{self, CommState, DisplayMode, Joint, JointConfig, Lcd};
@@ -93,8 +94,8 @@ pub struct App {
     pub config: config::AppConfig,
 
     // 缓存的可用设备列表
-    pub input_devices: Vec<String>,
-    pub output_devices: Vec<String>,
+    pub input_devices: Vec<DeviceInfo>,
+    pub output_devices: Vec<DeviceInfo>,
 
     // AI 状态
     pub ai: AiState,
@@ -551,7 +552,7 @@ impl App {
     }
 
     /// 获取当前设置项对应的设备列表
-    pub fn current_device_list(&self) -> &[String] {
+    pub fn current_device_list(&self) -> &[DeviceInfo] {
         match self.ui.settings_selected {
             2 => &self.input_devices,
             3 => &self.output_devices,
@@ -559,12 +560,12 @@ impl App {
         }
     }
 
-    /// 保存设备选择到 config
+    /// 保存设备选择到 config (使用设备真实名称, 不含显示后缀)
     pub fn save_device_selection(&mut self) {
         let name = self
             .current_device_list()
             .get(self.ui.device_selection_index)
-            .cloned()
+            .map(|d| d.name.clone())
             .unwrap_or_default();
         match self.ui.settings_selected {
             2 => self.config.speech_name = name,

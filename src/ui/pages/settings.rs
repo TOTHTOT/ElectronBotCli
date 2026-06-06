@@ -1,4 +1,5 @@
 use crate::app::config::AppConfig;
+use crate::media::voice::DeviceInfo;
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Paragraph};
 
@@ -12,8 +13,8 @@ pub fn render(
     border_color: Color,
     in_device_selection: bool,
     device_selection_index: usize,
-    input_devices: &[String],
-    output_devices: &[String],
+    input_devices: &[DeviceInfo],
+    output_devices: &[DeviceInfo],
 ) {
     let outer_block = create_block("设置".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
@@ -85,8 +86,8 @@ fn render_settings_list(
     border_color: Color,
     in_device_selection: bool,
     device_selection_index: usize,
-    input_devices: &[String],
-    output_devices: &[String],
+    input_devices: &[DeviceInfo],
+    output_devices: &[DeviceInfo],
 ) {
     let outer_block = create_block("配置项".to_string(), border_color, Color::Cyan);
 
@@ -202,7 +203,7 @@ fn render_setting_item(
 fn render_device_list(
     frame: &mut Frame,
     area: Rect,
-    devices: &[String],
+    devices: &[DeviceInfo],
     selected_index: usize,
     border_color: Color,
 ) {
@@ -219,7 +220,7 @@ fn render_device_list(
         return;
     }
 
-    for (i, name) in devices.iter().enumerate() {
+    for (i, info) in devices.iter().enumerate() {
         if i as u16 >= inner.height {
             break;
         }
@@ -232,7 +233,7 @@ fn render_device_list(
             Style::new().fg(Color::White)
         };
         let line = vec![Line::from_iter([Span::styled(
-            format!("{prefix}{name}"),
+            format!("{prefix}{}", info.display),
             style,
         )])];
         frame.render_widget(Paragraph::new(line), item_area);

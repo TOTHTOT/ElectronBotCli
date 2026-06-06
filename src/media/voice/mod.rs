@@ -227,27 +227,73 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
     Ok(device)
 }
 
-/// 枚举系统所有输入设备的名称
-pub fn list_input_devices() -> Vec<String> {
-    let host = match cpal::default_host() {
-        h => h,
-    };
+/// 设备信息 - 用于在设置页面中显示并区分同名设备
+#[derive(Debug, Clone)]
+pub struct DeviceInfo {
+    /// 实际设备名称
+    pub name: String,
+    /// 列表中显示的字符串, 包含通道数 / 采样率等额外信息
+    pub display: String,
+}
+
+impl DeviceInfo {
+    fn new(name: String, channels: Option<u16>, sample_rate: Option<u32>, _index: usize, driver: Option<String>) -> Self {
+        let mut parts: Vec<String> = Vec::new();
+        if let Some(driver) = driver {
+            parts.push(format!("{} ",driver));
+        }
+        if let Some(ch) = channels {
+            parts.push(format!("{}ch", ch));
+        }
+        if let Some(sr) = sample_rate {
+            parts.push(format!("{}Hz", sr));
+        }
+        let display = if parts.is_empty() {
+            name.clone()
+        } else {
+            format!("{} ({})", name, parts.join(", "))
+        };
+        Self { name, display }
+    }
+}
+
+/// 枚举系统所有输入设备, 包含通道数和采样率等额外信息
+pub fn list_input_devices() -> Vec<DeviceInfo> {
+    let host = cpal::default_host();
     host.input_devices()
         .map(|it| {
-            it.filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+            it.enumerate()
+                .filter_map(|(i, d)| {
+                    let desc = d.description().ok()?;
+                    let name = desc.name().to_string();
+                    let driver = desc.driver().map(|s| s.to_string());
+                    let (channels, sample_rate) = d
+                        .default_input_config()
+                        .map(|c| (Some(c.channels()), Some(c.sample_rate())))
+                        .unwrap_or((None, None));
+                    Some(DeviceInfo::new(name, channels, sample_rate, i, driver))
+                })
                 .collect()
         })
         .unwrap_or_default()
 }
 
-/// 枚举系统所有输出设备的名称
-pub fn list_output_devices() -> Vec<String> {
-    let host = match cpal::default_host() {
-        h => h,
-    };
+/// 枚举系统所有输出设备, 包含通道数和采样率等额外信息
+pub fn list_output_devices() -> Vec<DeviceInfo> {
+    let host = cpal::default_host();
     host.output_devices()
         .map(|it| {
-            it.filter_map(|d| d.description().ok().map(|desc| desc.name().to_string()))
+            it.enumerate()
+                .filter_map(|(i, d)| {
+                    let desc = d.description().ok()?;
+                    let name = desc.name().to_string();
+                    let driver = desc.driver().map(|s| s.to_string());
+                    let (channels, sample_rate) = d
+                        .default_output_config()
+                        .map(|c| (Some(c.channels()), Some(c.sample_rate())))
+                        .unwrap_or((None, None));
+                    Some(DeviceInfo::new(name, channels, sample_rate, i, driver))
+                })
                 .collect()
         })
         .unwrap_or_default()
@@ -266,13 +312,22 @@ pub fn find_output_device(name: &str) -> Option<Device> {
                 }
             }
         }
-        log::warn!("Output device '{}' not found, falling back to default", name);
+        log::warn!(
+            "Output device '{}' not found, falling back to default",
+            name
+        );
     }
     host.default_output_device()
 }
 
 /// Play a simple beep sound (for notifications)
-pub fn play_beep(count: u32, frequency: f32, duration_ms: u32, interval_ms: u32, output_device_name: &str) {
+pub fn play_beep(
+    count: u32,
+    frequency: f32,
+    duration_ms: u32,
+    interval_ms: u32,
+    output_device_name: &str,
+) {
     let device = match find_output_device(output_device_name) {
         Some(d) => d,
         None => return,
@@ -358,5 +413,16 @@ pub fn write_audio_callback(
         for (i, sample) in data.iter_mut().enumerate() {
             *sample = samples.get(i).copied().unwrap_or(0.0);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::media::voice::list_output_devices;
+
+    #[test]
+    fn show_all_output_devices() {
+        let devices= list_output_devices();
+        println!("{:?}", devices);
     }
 }
