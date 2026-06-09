@@ -38,42 +38,27 @@ pub fn handle(app: &mut App, code: KeyCode) {
         KeyCode::Enter => {
             let input = app.ai.tts_test_state.input_text.clone();
             if !input.is_empty() && !app.ai.tts_test_state.is_playing.load(Ordering::SeqCst) {
-                // 设置正在播放
+                // 设置正在播放(本地标记)
                 app.ai
                     .tts_test_state
                     .is_playing
                     .store(true, Ordering::SeqCst);
-                app.ai.tts_test_state.output_text = "正在播放...".to_string();
+                app.ai.tts_test_state.output_text = "已发送到服务端...".to_string();
 
-                // 在新线程中执行 TTS 播放
                 let is_streaming = app.ai.tts_test_state.is_streaming;
                 let speed = app.ai.tts_test_state.speed;
-                let voice_manager = app.ai.voice_manager.clone();
-                let is_playing_flag = app.ai.tts_test_state.is_playing.clone();
 
-                std::thread::spawn(move || {
-                    let result = if is_streaming {
-                        voice_manager.as_ref().map_or_else(
-                            || Err(anyhow::anyhow!("Voice manager not available")),
-                            |vm| vm.speak_streaming(&input, speed, None),
-                        )
-                    } else {
-                        voice_manager.as_ref().map_or_else(
-                            || Err(anyhow::anyhow!("Voice manager not available")),
-                            |vm| vm.speak(&input, speed, None),
-                        )
-                    };
+                // 发送到服务端执行 TTS
+                app.speak_tts(input, speed, is_streaming);
 
-                    if let Err(e) = result {
-                        log::warn!("TTS playback failed: {e:?}");
-                    }
-
-                    is_playing_flag.store(false, Ordering::SeqCst);
-                });
+                // 简化: 立即清除播放标志
+                app.ai
+                    .tts_test_state
+                    .is_playing
+                    .store(false, Ordering::SeqCst);
             }
         }
         KeyCode::Esc => {
-            // 清除输入
             app.ai.tts_test_state.input_text.clear();
             app.ai.tts_test_state.output_text.clear();
             app.ai

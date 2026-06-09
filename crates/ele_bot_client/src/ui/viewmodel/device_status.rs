@@ -9,16 +9,16 @@ pub struct DeviceStatusViewModel {
 
 impl DeviceStatusViewModel {
     pub fn from_app(app: &App) -> Self {
+        let server = app.server.lock().unwrap();
         Self {
-            is_connected: app.is_connected(),
+            is_connected: server.robot_connected,
             battery: 85, // TODO: 后续获取真实电量
-            network: "已连接",
-            volume: app
-                .ai
-                .voice_manager
-                .as_ref()
-                .map(|vm| vm.volume())
-                .unwrap_or(0),
+            network: if server.net_connected {
+                "已连接"
+            } else {
+                "未连接"
+            },
+            volume: server.volume,
         }
     }
 }

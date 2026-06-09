@@ -114,7 +114,25 @@
       "Bash(cat:*)",
       "WebFetch(domain:*)",
       "WebFetch(domain:github.com)",
-      "WebFetch(domain:k2-fsa.github.io)"
+      "WebFetch(domain:k2-fsa.github.io)",
+      "Bash(mkdir -p crates/ele_bot_server/src/robot crates/ele_bot_server/src/media crates/ele_bot_server/src/llm crates/ele_bot_server/src/vision/face crates/ele_bot_server/src/emotion)",
+      "Bash(mv src/robot/* crates/ele_bot_server/src/robot/)",
+      "Bash(mv src/media/* crates/ele_bot_server/src/media/)",
+      "Bash(mv src/llm/* crates/ele_bot_server/src/llm/)",
+      "Bash(mv src/vision/face/* crates/ele_bot_server/src/vision/face/)",
+      "Bash(mv preview.rs web/preview.rs)",
+      "Bash(mv mod.rs web/mod.rs)",
+      "Bash(mkdir -p crates/ele_bot_client/src/app crates/ele_bot_client/src/input crates/ele_bot_client/src/ui/pages crates/ele_bot_client/src/ui/viewmodel crates/ele_bot_client/src/ui_components)",
+      "Bash(mv src/app/* crates/ele_bot_client/src/app/)",
+      "Bash(mv src/input/* crates/ele_bot_client/src/input/)",
+      "Bash(mv src/ui/pages/* crates/ele_bot_client/src/ui/pages/)",
+      "Bash(mv src/ui/viewmodel/* crates/ele_bot_client/src/ui/viewmodel/)",
+      "Bash(./target/debug/ele_bot_server.exe --bind 127.0.0.1:7879)",
+      "Read(//tmp/**)",
+      "Bash(ps -W)",
+      "Bash(ls src/)",
+      "Bash(rm -rf src/)",
+      "Bash(ls -d src/)"
     ]
   }
 }

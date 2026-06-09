@@ -106,7 +106,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // 使用模式元组进行模式匹配
     match (
         app.ui.in_edit_settings_mode,
-        app.in_servo_mode,
+        app.ui.in_servo_mode,
         app.ui.in_settings,
         app.ui.in_llm_test_mode,
         app.ui.in_tts_test_mode,
@@ -202,18 +202,18 @@ fn handle_menu_enter(app: &mut App) -> AppEvent {
 /// * `code` - 按键代码
 fn handle_servo_mode(app: &mut App, code: KeyCode) {
     if app.ui.left_focused {
-        app.in_servo_mode = false;
+        app.ui.in_servo_mode = false;
         return;
     }
 
     match code {
         KeyCode::Esc => {
             app.toggle_focus();
-            app.in_servo_mode = false;
+            app.ui.in_servo_mode = false;
         }
         KeyCode::Enter => {
             app.toggle_focus();
-            app.in_servo_mode = false;
+            app.ui.in_servo_mode = false;
         }
         KeyCode::Up => handle_event(app, DeviceEvent::Prev.into()),
         KeyCode::Down => handle_event(app, DeviceEvent::Next.into()),

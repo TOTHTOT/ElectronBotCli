@@ -1,7 +1,27 @@
-use crate::robot::SERVO_COUNT;
 use crate::ui::viewmodel::DeviceControlViewModel;
 use crate::ui_components::{create_block, get_indicator};
+use ele_bot_proto::SERVO_COUNT;
 use ratatui::{prelude::*, widgets::Paragraph};
+
+/// 解析 "min° ~ max°" 格式
+fn parse_range(s: &str) -> (i16, i16) {
+    let parts: Vec<&str> = s.split("~").collect();
+    if parts.len() == 2 {
+        let min = parts[0]
+            .trim()
+            .trim_end_matches('°')
+            .parse::<i16>()
+            .unwrap_or(0);
+        let max = parts[1]
+            .trim()
+            .trim_end_matches('°')
+            .parse::<i16>()
+            .unwrap_or(0);
+        (min, max)
+    } else {
+        (0, 0)
+    }
+}
 
 pub fn render(frame: &mut Frame, area: Rect, vm: &DeviceControlViewModel, border_color: Color) {
     let outer_block = create_block("设备控制".to_string(), border_color, border_color);
@@ -78,9 +98,8 @@ fn render_single_joint(frame: &mut Frame, area: Rect, vm: &DeviceControlViewMode
         Color::White
     };
 
-    // 计算进度条
-    let min = crate::robot::ServoState::min_angle(index);
-    let max = crate::robot::ServoState::max_angle(index);
+    // 计算进度条 - 从 range_str 解析 min/max
+    let (min, max) = parse_range(&range_str);
     let total_range = (max - min) as f32;
     let value_offset = (value - min) as f32;
     let percent = if total_range > 0.0 {

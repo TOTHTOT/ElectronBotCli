@@ -25,8 +25,8 @@ pub fn handle(app: &mut App, code: KeyCode) {
                     .is_processing
                     .store(true, std::sync::atomic::Ordering::Relaxed);
                 app.ai.llm_test_state.output_text = "正在分析...".to_string();
-                // 发送到 LLM 处理通道
-                let _ = app.ai.text_tx.send(input);
+                // 发送到服务端
+                app.send_llm_text(input);
             }
         }
         KeyCode::Esc => {

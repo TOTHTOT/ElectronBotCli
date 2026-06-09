@@ -1,5 +1,5 @@
 use crate::app::App;
-use boteyes::Mood;
+use ele_bot_proto::Mood;
 
 pub struct LlmTestViewModel {
     pub input_text: String,
@@ -14,10 +14,7 @@ impl LlmTestViewModel {
             input_text: app.ai.llm_test_state.input_text.clone(),
             output_text: app.ai.llm_test_state.output_text.clone(),
             current_mood: app.ai.llm_test_state.current_mood,
-            is_processing: app
-                .ai
-                .is_processing
-                .load(std::sync::atomic::Ordering::Relaxed),
+            is_processing: app.ai.is_processing.load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 }

@@ -16,22 +16,20 @@ pub enum DeviceEvent {
 
 /// 处理设备控制事件
 pub fn handle(app: &mut App, event: DeviceEvent) {
-    if !app.in_servo_mode {
+    if !app.ui.in_servo_mode {
         return;
     }
 
     match event {
         DeviceEvent::Exit => {
-            app.in_servo_mode = false;
+            app.ui.in_servo_mode = false;
         }
-        DeviceEvent::Next => app.joint.next_servo(),
-        DeviceEvent::Prev => app.joint.prev_servo(),
-        DeviceEvent::Increase => app.joint.increase(),
-        DeviceEvent::Decrease => app.joint.decrease(),
+        DeviceEvent::Next => app.next_servo(),
+        DeviceEvent::Prev => app.prev_servo(),
+        DeviceEvent::Increase => app.increase_selected(),
+        DeviceEvent::Decrease => app.decrease_selected(),
         DeviceEvent::Screenshot => {
-            if let Err(e) = app.take_screenshot() {
-                log::error!("Screenshot failed: {}", e);
-            }
+            app.take_screenshot();
         }
     }
 }

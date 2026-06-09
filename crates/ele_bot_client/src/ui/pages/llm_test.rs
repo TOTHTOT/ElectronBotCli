@@ -4,7 +4,7 @@
 
 use crate::ui::viewmodel::LlmTestViewModel;
 use crate::ui_components::create_block;
-use boteyes::Mood;
+use ele_bot_proto::Mood;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
