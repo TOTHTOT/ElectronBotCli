@@ -5,6 +5,9 @@
 
 pub mod config;
 pub mod menu;
+pub mod mode;
+pub mod overlay;
+pub mod route;
 
 use crate::net::Client;
 use crate::ui::pages::llm_test::LlmTestState;
@@ -13,6 +16,9 @@ use ele_bot_proto::{
     Action, AppConfig, ClientMessage, DisplayMode, LlmResponse, Mood, ServerEvent, SERVO_COUNT,
 };
 pub use menu::*;
+use mode::AppMode;
+pub use overlay::{Overlay, PopupConfig, PopupDismiss};
+pub use route::{DeviceControlMode, EditField, Route};
 use ratatui::widgets::ListState;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -20,19 +26,17 @@ use std::sync::{Arc, Mutex};
 /// tokio runtime, 用于在主循环中调用 .await
 pub type Runtime = tokio::runtime::Runtime;
 
+/// 设置项标签(供 EditField::label 使用)
+pub const SETTINGS_LABELS: [&str; 3] = ["Wifi名称", "Wifi密码", "麦克风名称"];
+
 /// UI 状态
 pub struct UiState {
+    /// 侧边栏 ListState, 高亮当前选中项
     pub menu_state: ListState,
-    pub selected_menu: MenuItem,
+    /// 主循环是否继续
     pub running: bool,
-    pub left_focused: bool,
-    pub in_servo_mode: bool,
-    pub in_settings: bool,
-    pub settings_selected: usize,
-    pub in_edit_settings_mode: bool,
-    pub edit_buffer: String,
-    pub in_llm_test_mode: bool,
-    pub in_tts_test_mode: bool,
+    /// 路由 + 模态组合(取代旧的 5 个 mode bool + left_focused + popup)
+    pub mode: AppMode,
 }
 
 /// AI 测试页状态(本地 UI 状态)
@@ -63,7 +67,6 @@ pub struct App {
     pub ai: AiState,
     pub server: Mutex<ServerStateMirror>,
     pub config: AppConfig,
-    pub popup: Popup,
     pub face_tracking_enabled: bool,
     /// tokio runtime
     rt: Runtime,
@@ -90,16 +93,8 @@ impl App {
         let app = Self {
             ui: UiState {
                 menu_state,
-                selected_menu: MenuItem::DeviceStatus,
                 running: true,
-                left_focused: true,
-                in_servo_mode: false,
-                in_settings: false,
-                settings_selected: 0,
-                in_edit_settings_mode: false,
-                in_llm_test_mode: false,
-                in_tts_test_mode: false,
-                edit_buffer: String::new(),
+                mode: AppMode::new(),
             },
             ai: AiState {
                 llm_test_state: LlmTestState::default(),
@@ -119,7 +114,6 @@ impl App {
                 last_face: None,
             }),
             config: AppConfig::default(),
-            popup: Popup::new(),
             face_tracking_enabled: false,
             rt,
             client: Some(client),
@@ -153,6 +147,12 @@ impl App {
             }
             ServerEvent::Connection { is_connected } => {
                 server.robot_connected = is_connected;
+                // 连接建立后, 自动 dismiss "正在连接设备..." 弹窗
+                if is_connected {
+                    if let Some(Overlay::Popup { .. }) = &self.ui.mode.overlay {
+                        self.ui.mode.overlay = None;
+                    }
+                }
             }
             ServerEvent::JointState { state } => {
                 server.joint_values = state.values;
@@ -167,7 +167,7 @@ impl App {
                 server.last_llm_response = Some(response.clone());
                 server.mood = mood;
                 self.ai.is_processing.store(false, Ordering::Relaxed);
-                if self.ui.in_llm_test_mode {
+                if matches!(self.ui.mode.route, Route::LlmTest) {
                     self.ai.llm_test_state.current_mood = Some(mood);
                     self.ai.llm_test_state.output_text = format!("情感: {:?}", mood);
                 }
@@ -202,14 +202,24 @@ impl App {
     }
 
     pub fn connect_robot(&mut self) {
-        self.popup.show_connecting();
+        // 弹窗常驻, 等 ServerEvent::Connection 回来再 dismiss (apply_event 处理)
+        // Esc 可中断, 由 on_dismiss 决定行为
+        self.ui.mode.overlay = Some(Overlay::Popup {
+            config: PopupConfig::connecting(),
+            on_dismiss: PopupDismiss::CancelConnect,
+        });
         self.send_cmd(ClientMessage::ConnectRobot);
-        self.popup.hide();
     }
 
     pub fn stop_comm_thread(&mut self) {
         self.send_cmd(ClientMessage::DisconnectRobot);
-        self.popup.hide();
+        // 清掉弹窗(包括 Popup::CancelConnect 的"连接中"弹窗)
+        if matches!(
+            self.ui.mode.overlay,
+            Some(Overlay::Popup { .. })
+        ) {
+            self.ui.mode.overlay = None;
+        }
     }
 
     pub fn set_angle(&self, index: usize, angle: f32) {
@@ -302,52 +312,104 @@ impl App {
         self.select_menu(-1);
     }
 
+    /// 侧边栏上下选择。
+    /// - 若当前在 Nav: 直接更新 last_entered, 路由不变(已在 Nav)
+    /// - 若在某个页面: 切到 Nav 并把 last_entered 设为新选项
     fn select_menu(&mut self, delta: isize) {
         let items = MenuItem::all();
         let len = items.len();
         let current = self.ui.menu_state.selected().unwrap_or(0);
         let new_i = (current as isize + delta).rem_euclid(len as isize) as usize;
         self.ui.menu_state.select(Some(new_i));
-        self.ui.selected_menu = items[new_i];
+        let new_item = items[new_i];
+        // 把路由切到 Nav 并记下 last_entered
+        self.ui.mode.route = Route::Nav {
+            last_entered: new_item,
+        };
     }
 
-    pub fn toggle_focus(&mut self) {
-        self.ui.left_focused = !self.ui.left_focused;
+    /// 进入某个菜单项对应的页面
+    pub fn enter_menu(&mut self) {
+        let item = self.ui.menu_state.selected().map_or(MenuItem::DeviceStatus, |i| {
+            MenuItem::all()[i.min(MenuItem::all().len() - 1)]
+        });
+        self.ui.mode.route = Route::from(item);
+    }
+
+    /// 退到 Nav(从某页面按下 Esc 时)
+    pub fn back_to_nav(&mut self) {
+        let last = self.ui.mode.route.menu_item();
+        self.ui.mode.route = Route::Nav {
+            last_entered: last,
+        };
+    }
+
+    /// 把当前 DeviceControl 切到 Active(进入子模式)
+    pub fn enter_device_control_active(&mut self) {
+        if let Route::DeviceControl { mode } = &mut self.ui.mode.route {
+            *mode = DeviceControlMode::Active;
+        }
+    }
+
+    /// 把当前 DeviceControl 切到 Idle
+    pub fn enter_device_control_idle(&mut self) {
+        if let Route::DeviceControl { mode } = &mut self.ui.mode.route {
+            *mode = DeviceControlMode::Idle;
+        }
     }
 
     pub fn settings_item_count(&self) -> usize {
-        3
+        SETTINGS_LABELS.len()
     }
 
     pub fn settings_prev(&mut self) {
-        self.move_settings(-1);
+        if let Route::Settings { selected, .. } = &mut self.ui.mode.route {
+            let count = SETTINGS_LABELS.len() as isize;
+            *selected = (*selected as isize - 1).rem_euclid(count) as usize;
+        }
     }
 
     pub fn settings_next(&mut self) {
-        self.move_settings(1);
+        if let Route::Settings { selected, .. } = &mut self.ui.mode.route {
+            let count = SETTINGS_LABELS.len() as isize;
+            *selected = (*selected as isize + 1).rem_euclid(count) as usize;
+        }
     }
 
-    fn move_settings(&mut self, delta: isize) {
-        let count = self.settings_item_count();
-        self.ui.settings_selected =
-            (self.ui.settings_selected as isize + delta).rem_euclid(count as isize) as usize;
+    /// 进入设置项编辑(从 Settings 页面 Enter 时调用)
+    pub fn begin_settings_edit(&mut self) {
+        if let Route::Settings { selected, editing } = &mut self.ui.mode.route {
+            let initial = match *selected {
+                0 => self.config.wifi_ssid.clone(),
+                1 => self.config.wifi_password.clone(),
+                2 => self.config.speech_name.clone(),
+                _ => String::new(),
+            };
+            *editing = Some(EditField::new(*selected, SETTINGS_LABELS[*selected], initial));
+        }
     }
 
-    pub fn save_settings_edit(&mut self) {
-        match self.ui.settings_selected {
-            0 => self.config.wifi_ssid = self.ui.edit_buffer.clone(),
-            1 => self.config.wifi_password = self.ui.edit_buffer.clone(),
-            2 => self.config.speech_name = self.ui.edit_buffer.clone(),
-            _ => {}
+    /// 提交编辑(Enter on EditField overlay)
+    pub fn commit_settings_edit(&mut self) {
+        if let Route::Settings { selected, editing } = &mut self.ui.mode.route {
+            if let Some(field) = editing.take() {
+                match field.index {
+                    0 => self.config.wifi_ssid = field.buffer,
+                    1 => self.config.wifi_password = field.buffer,
+                    2 => self.config.speech_name = field.buffer,
+                    _ => {}
+                }
+                *selected = field.index;
+            }
         }
         self.set_config(self.config.clone());
-        self.ui.in_edit_settings_mode = false;
-        self.ui.edit_buffer.clear();
     }
 
+    /// 取消编辑(Esc on EditField overlay)
     pub fn cancel_settings_edit(&mut self) {
-        self.ui.in_edit_settings_mode = false;
-        self.ui.edit_buffer.clear();
+        if let Route::Settings { editing, .. } = &mut self.ui.mode.route {
+            *editing = None;
+        }
     }
 
     #[allow(dead_code)]
@@ -364,64 +426,5 @@ impl App {
             let mut server = self.server.lock().unwrap();
             server.mood = Mood::Loading;
         }
-    }
-}
-
-/// 通用弹窗配置
-#[derive(Debug, Clone)]
-pub struct PopupConfig {
-    pub title: String,
-    pub content: String,
-    pub width: u16,
-    pub height: u16,
-    pub border_color: ratatui::style::Color,
-    pub bg_color: ratatui::style::Color,
-    pub title_color: ratatui::style::Color,
-}
-
-impl Default for PopupConfig {
-    fn default() -> Self {
-        Self {
-            title: "弹窗".to_string(),
-            content: "".to_string(),
-            width: 40,
-            height: 5,
-            border_color: ratatui::style::Color::Green,
-            bg_color: ratatui::style::Color::DarkGray,
-            title_color: ratatui::style::Color::Cyan,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct Popup {
-    pub visible: bool,
-    pub config: PopupConfig,
-}
-
-impl Popup {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    pub fn show(&mut self) {
-        self.visible = true;
-    }
-
-    pub fn hide(&mut self) {
-        self.visible = false;
-    }
-
-    pub fn is_visible(&self) -> bool {
-        self.visible
-    }
-
-    pub fn show_connecting(&mut self) {
-        self.config = PopupConfig {
-            title: " 连接设备 ".to_string(),
-            content: "正在连接设备...".to_string(),
-            ..PopupConfig::default()
-        };
-        self.show();
     }
 }

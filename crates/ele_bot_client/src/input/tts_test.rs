@@ -4,12 +4,6 @@ use crate::app::App;
 use crossterm::event::KeyCode;
 use std::sync::atomic::Ordering;
 
-/// TTS 测试事件
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum TtsTestEvent {
-    None,
-}
-
 /// 处理 TTS 测试模式的输入
 pub fn handle(app: &mut App, code: KeyCode) {
     match code {
@@ -59,12 +53,7 @@ pub fn handle(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Esc => {
-            app.ai.tts_test_state.input_text.clear();
-            app.ai.tts_test_state.output_text.clear();
-            app.ai
-                .tts_test_state
-                .is_playing
-                .store(false, Ordering::SeqCst);
+            // Esc 由 Route 层处理退到 Nav, 此处不再清空缓冲
         }
         KeyCode::Char(c) => {
             app.ai.tts_test_state.input_text.push(c);

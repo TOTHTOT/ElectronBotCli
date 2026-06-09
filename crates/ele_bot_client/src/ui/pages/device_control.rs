@@ -99,7 +99,7 @@ fn render_single_joint(frame: &mut Frame, area: Rect, vm: &DeviceControlViewMode
     };
 
     // 计算进度条 - 从 range_str 解析 min/max
-    let (min, max) = parse_range(&range_str);
+    let (min, max) = parse_range(range_str);
     let total_range = (max - min) as f32;
     let value_offset = (value - min) as f32;
     let percent = if total_range > 0.0 {

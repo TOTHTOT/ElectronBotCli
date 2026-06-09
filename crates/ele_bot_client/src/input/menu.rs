@@ -12,13 +12,8 @@ pub enum MenuEvent {
     EnterSettingMode,
 }
 
-/// 处理菜单事件
+/// 处理菜单事件(由 input::handle_by_mode 路由, 已是 Nav 模式)
 pub fn handle(app: &mut App, event: MenuEvent) {
-    // 如果在舵机模式或设置模式中，不处理菜单事件
-    if app.ui.in_servo_mode || app.ui.in_settings {
-        return;
-    }
-
     match event {
         MenuEvent::Up => app.prev_menu(),
         MenuEvent::Down => app.next_menu(),
@@ -30,18 +25,11 @@ pub fn handle(app: &mut App, event: MenuEvent) {
             }
         }
         MenuEvent::EnterServoMode => {
-            if matches!(app.ui.selected_menu, crate::app::MenuItem::DeviceControl) {
-                app.ui.in_servo_mode = true;
-                // 进入设备控制页面时，焦点切换到右侧
-                app.ui.left_focused = false;
-            }
+            // 兼容性入口, 实际由 handle_nav Enter 直接 Route::from 触发
+            app.enter_device_control_active();
         }
         MenuEvent::EnterSettingMode => {
-            if app.ui.selected_menu == crate::app::MenuItem::Settings {
-                app.ui.in_settings = true;
-                // 进入设置页面时，焦点切换到右侧
-                app.ui.left_focused = false;
-            }
+            // 同上
         }
     }
 }

@@ -1,3 +1,4 @@
+use crate::app::route::Route;
 use crate::app::App;
 
 #[allow(dead_code)]
@@ -31,11 +32,21 @@ impl SettingsViewModel {
             },
         ];
 
+        // 从 Route::Settings 取 selected + editing
+        let (selected_index, in_edit_mode, edit_buffer) = match &app.ui.mode.route {
+            Route::Settings {
+                selected: _,
+                editing: Some(f),
+            } => (f.index, true, f.buffer.clone()),
+            Route::Settings { selected, .. } => (*selected, false, String::new()),
+            _ => (0, false, String::new()),
+        };
+
         Self {
             settings_items,
-            selected_index: app.ui.settings_selected,
-            in_edit_mode: app.ui.in_edit_settings_mode,
-            edit_buffer: app.ui.edit_buffer.clone(),
+            selected_index,
+            in_edit_mode,
+            edit_buffer,
         }
     }
 }

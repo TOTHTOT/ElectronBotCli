@@ -1,16 +1,10 @@
-use crate::app::Popup;
+use crate::app::PopupConfig;
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, Paragraph},
 };
 
 /// 创建带标题的 Block
-///
-/// # Arguments
-///
-/// * `title` - 标题
-/// * `border_color` - 边框颜色
-/// * `title_color` - 标题颜色
 pub fn create_block(title: String, border_color: Color, title_color: Color) -> Block<'static> {
     Block::new()
         .title(title)
@@ -20,9 +14,6 @@ pub fn create_block(title: String, border_color: Color, title_color: Color) -> B
 }
 
 /// 获取选中指示器
-/// - 未选中: " "
-/// - 选中: "○"
-/// - 选中并编辑: "▶"
 pub fn get_indicator(is_selected: bool, is_editing: bool) -> &'static str {
     if is_selected {
         if is_editing {
@@ -43,12 +34,7 @@ impl PopupWidget {
         Self
     }
 
-    pub fn render(&mut self, frame: &mut Frame, area: Rect, popup: &mut Popup) {
-        if !popup.is_visible() {
-            return;
-        }
-
-        let config = &popup.config;
+    pub fn render(&mut self, frame: &mut Frame, area: Rect, config: &PopupConfig) {
         let width = std::cmp::min(config.width, area.width.saturating_sub(4));
         let height = config.height;
         let x = area.x + (area.width.saturating_sub(width)) / 2;

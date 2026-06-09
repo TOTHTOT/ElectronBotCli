@@ -3,12 +3,6 @@
 use crate::app::App;
 use crossterm::event::KeyCode;
 
-/// LLM 测试事件
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LlmTestEvent {
-    None,
-}
-
 /// 处理 LLM 测试模式的输入
 pub fn handle(app: &mut App, code: KeyCode) {
     match code {
@@ -30,10 +24,8 @@ pub fn handle(app: &mut App, code: KeyCode) {
             }
         }
         KeyCode::Esc => {
-            // 清除输入
-            app.ai.llm_test_state.input_text.clear();
-            app.ai.llm_test_state.output_text.clear();
-            app.ai.llm_test_state.current_mood = None;
+            // Esc 由 Route 层处理退到 Nav, 此处不再清空缓冲
+            // (AiState 保持 long-lived, 重新进入可看到上次输入)
         }
         _ => {}
     }

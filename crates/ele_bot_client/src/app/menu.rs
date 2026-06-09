@@ -1,5 +1,5 @@
 /// 菜单项
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MenuItem {
     DeviceStatus,
     DeviceControl,
