@@ -38,6 +38,7 @@ pub enum AppEvent {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CommonEvent {
     Quit,
+    ConfirmQuit,
     None,
 }
 
@@ -65,6 +66,7 @@ impl From<SettingsEvent> for AppEvent {
 pub fn handle_event(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Common(CommonEvent::Quit) => app.quit(),
+        AppEvent::Common(CommonEvent::ConfirmQuit) => app.confirm_quit(),
         AppEvent::Common(CommonEvent::None) => {}
         AppEvent::Menu(e) => menu::handle(app, e),
         AppEvent::Device(e) => device::handle(app, e),
@@ -82,7 +84,8 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
         match &app.ui.mode.route {
             Route::Nav { .. } | Route::About => {
-                app.quit();
+                // 弹"确认退出", 等用户 Enter 确认 / Esc 取消
+                app.confirm_quit();
                 return;
             }
             _ => {
@@ -92,6 +95,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
         }
     }
     if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('c') {
+        // Ctrl+C 是"硬退出"逃生口, 不弹确认
         app.quit();
         return;
     }
@@ -243,18 +247,29 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
             };
             app.ui.mode.overlay = new_overlay;
         }
-        Some(Overlay::Popup { on_dismiss, config }) => {
-            if code == KeyCode::Esc {
+        Some(Overlay::Popup { on_dismiss, config }) => match (code, on_dismiss) {
+            (KeyCode::Esc, _) => {
                 match on_dismiss {
                     PopupDismiss::Cancel => {}
                     PopupDismiss::CancelConnect => {
                         app.stop_comm_thread();
                     }
+                    PopupDismiss::ConfirmQuit => {}
                 }
-            } else {
+                // 弹窗关闭 (take 已把 overlay 置为 None)
+            }
+            (KeyCode::Enter, PopupDismiss::ConfirmQuit) => {
+                // 确认退出
+                app.quit();
+            }
+            (KeyCode::Enter, _) => {
+                // 其它变体不支持 Enter 确认, 弹窗保持
                 app.ui.mode.overlay = Some(Overlay::Popup { config, on_dismiss });
             }
-        }
+            _ => {
+                app.ui.mode.overlay = Some(Overlay::Popup { config, on_dismiss });
+            }
+        },
         None => unreachable!("guarded by caller"),
     }
 }

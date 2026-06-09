@@ -40,6 +40,17 @@ impl PopupConfig {
             ..Self::default()
         }
     }
+
+    /// "确认退出" 默认配置
+    pub fn confirm_quit() -> Self {
+        Self {
+            title: " 确认退出 ".to_string(),
+            content: "确定要退出程序吗?\n[Enter] 确认   [Esc] 取消".to_string(),
+            border_color: Color::Yellow,
+            title_color: Color::Yellow,
+            ..Self::default()
+        }
+    }
 }
 
 /// 弹窗 Esc 键的行为
@@ -49,6 +60,8 @@ pub enum PopupDismiss {
     Cancel,
     /// 关闭弹窗 + 调用 stop_comm_thread(用于"连接中"可中断)
     CancelConnect,
+    /// Esc 关闭弹窗(取消), Enter 确认退出程序
+    ConfirmQuit,
 }
 
 /// 模态层

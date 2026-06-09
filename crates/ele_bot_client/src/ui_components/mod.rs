@@ -50,11 +50,15 @@ impl PopupWidget {
 
         frame.render_widget(block, popup_area);
 
-        let content = Paragraph::new(config.content.clone()).style(Style::new().fg(Color::White));
-        frame.render_widget(
-            content,
-            Rect::new(popup_area.x + 1, popup_area.y + 2, width - 2, 1),
+        // 内容区域: x+1 / y+1, 高度扣掉上下边框各 1 行
+        let content_area = Rect::new(
+            popup_area.x + 1,
+            popup_area.y + 1,
+            width.saturating_sub(2),
+            height.saturating_sub(2),
         );
+        let content = Paragraph::new(config.content.clone()).style(Style::new().fg(Color::White));
+        frame.render_widget(content, content_area);
     }
 }
 

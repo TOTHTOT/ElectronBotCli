@@ -304,6 +304,14 @@ impl App {
         self.ui.running = false;
     }
 
+    /// 弹出"确认退出"对话框(常驻, 等用户按 Enter 确认或 Esc 取消)
+    pub fn confirm_quit(&mut self) {
+        self.ui.mode.overlay = Some(Overlay::Popup {
+            config: PopupConfig::confirm_quit(),
+            on_dismiss: PopupDismiss::ConfirmQuit,
+        });
+    }
+
     pub fn next_menu(&mut self) {
         self.select_menu(1);
     }
