@@ -1,14 +1,11 @@
-use crate::app::config::AppConfig;
+use crate::ui::viewmodel::SettingsViewModel;
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Paragraph};
 
 pub fn render(
     frame: &mut Frame,
     area: Rect,
-    selected: usize,
-    config: &AppConfig,
-    in_edit: bool,
-    edit_buffer: &str,
+    vm: &SettingsViewModel,
     border_color: Color,
 ) {
     let outer_block = create_block("设置".to_string(), border_color, border_color);
@@ -21,16 +18,8 @@ pub fn render(
     )
     .split(inner_area);
 
-    render_info_bar(frame, chunks[0], in_edit, border_color);
-    render_settings_list(
-        frame,
-        chunks[1],
-        selected,
-        config,
-        in_edit,
-        edit_buffer,
-        border_color,
-    );
+    render_info_bar(frame, chunks[0], vm.in_edit_mode, border_color);
+    render_settings_list(frame, chunks[1], vm, border_color);
 }
 
 fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: Color) {
@@ -53,39 +42,27 @@ fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: C
     frame.render_widget(widget, inner_area);
 }
 
-fn render_settings_list(
-    frame: &mut Frame,
-    area: Rect,
-    selected: usize,
-    config: &AppConfig,
-    in_edit: bool,
-    edit_buffer: &str,
-    border_color: Color,
-) {
+fn render_settings_list(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_color: Color) {
     let outer_block = create_block("配置项".to_string(), border_color, Color::Cyan);
-
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    let items = [
-        ("Wifi名称", config.wifi_ssid.as_str()),
-        ("Wifi密码", config.wifi_password.as_str()),
-        ("麦克风名称", config.speech_name.as_str()),
-    ];
-
-    // 渲染每个设置项
-    for (i, (label, value)) in items.iter().enumerate() {
+    for (i, item) in vm.settings_items.iter().enumerate() {
         let y = inner_area.y + i as u16;
         let item_area = Rect::new(inner_area.x, y, inner_area.width, 1);
+
+        let is_selected = i == vm.selected_index;
+        let is_editing = vm.in_edit_mode && is_selected;
+        let display_value = if is_editing { &vm.edit_buffer } else { &item.value };
 
         render_setting_item(
             frame,
             item_area,
-            label,
-            value,
-            i == selected,
-            in_edit && i == selected,
-            edit_buffer,
+            item.label,
+            display_value,
+            is_selected,
+            is_editing,
+            &item.value,
         );
     }
 }
@@ -98,7 +75,7 @@ fn render_setting_item(
     value: &str,
     is_selected: bool,
     is_editing: bool,
-    edit_buffer: &str,
+    raw_value: &str,
 ) {
     let indicator = get_indicator(is_selected, is_editing);
 
@@ -108,8 +85,6 @@ fn render_setting_item(
         Color::White
     };
 
-    let display_value = if is_editing { edit_buffer } else { value };
-
     let text = vec![Line::from_iter([
         Span::styled(
             indicator.to_string(),
@@ -117,10 +92,10 @@ fn render_setting_item(
         ),
         Span::styled(format!(" {label}: "), Style::new().fg(color)),
         Span::styled(
-            display_value,
+            value,
             if is_editing {
                 Style::new().fg(Color::Black).bg(Color::White)
-            } else if value.is_empty() {
+            } else if raw_value.is_empty() {
                 Style::new().fg(Color::DarkGray)
             } else {
                 Style::new().fg(Color::Yellow)

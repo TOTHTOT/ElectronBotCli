@@ -2,7 +2,6 @@
 //!
 //! 用于手动发送文本并调用 LLM 模型生成回复
 
-use crate::ui::viewmodel::LlmTestViewModel;
 use crate::ui_components::create_block;
 use ele_bot_proto::Mood;
 use ratatui::widgets::{Block, Paragraph, Wrap};
@@ -22,16 +21,13 @@ pub struct LlmTestState {
 }
 
 /// LLM 测试页面
-///
-/// # Arguments
-///
-/// * `frame`:
-/// * `area`: 显示区域
-/// * `vm`: ViewModel
-/// * `border_color`: 边框颜色, 切换焦点
-///
-/// returns: ()
-pub fn render(frame: &mut Frame, area: Rect, vm: &LlmTestViewModel, border_color: Color) {
+pub fn render(
+    frame: &mut Frame,
+    area: Rect,
+    state: &LlmTestState,
+    is_processing: bool,
+    border_color: Color,
+) {
     let outer_block = create_block("LLM 情感测试".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
@@ -46,7 +42,7 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &LlmTestViewModel, border_color
         .split(inner_area);
     // 输入框
     let input_style = Style::default().fg(Color::Yellow);
-    let input_box = Paragraph::new(vm.input_text.as_str()).block(
+    let input_box = Paragraph::new(state.input_text.as_str()).block(
         Block::bordered()
             .title("输入 (按回车发送)")
             .style(input_style),
@@ -54,10 +50,10 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &LlmTestViewModel, border_color
     frame.render_widget(input_box, chunks[0]);
 
     // 输出区域
-    let output_text = if vm.output_text.is_empty() {
+    let output_text = if state.output_text.is_empty() {
         "等待输入...".to_string()
     } else {
-        vm.output_text.clone()
+        state.output_text.clone()
     };
     let output_box = Paragraph::new(output_text)
         .block(Block::bordered().title("输出"))
@@ -65,9 +61,9 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &LlmTestViewModel, border_color
     frame.render_widget(output_box, chunks[1]);
 
     // 状态/情感显示
-    let status_text = if vm.is_processing {
+    let status_text = if is_processing {
         "状态: 处理中..."
-    } else if let Some(mood) = vm.current_mood {
+    } else if let Some(mood) = state.current_mood {
         match mood {
             Mood::Happy => "情感: 开心 😊",
             Mood::Sad => "情感: 难过 😢",

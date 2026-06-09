@@ -3,7 +3,6 @@
 //! 持有 UI 状态 + 网络客户端, 通过 WS 与服务端通信。
 //! 不再直接持有任何硬件资源。
 
-pub mod config;
 pub mod menu;
 pub mod mode;
 pub mod overlay;
