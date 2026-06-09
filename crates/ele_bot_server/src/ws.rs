@@ -220,7 +220,7 @@ async fn handle_command(
             }
         }
         ClientMessage::SetFaceTracking { enabled } => {
-            state.face_tracking_enabled.store(enabled, Ordering::Relaxed);
+            state.set_face_tracking(enabled);
         }
         ClientMessage::SendLlmText { text } => {
             if let Some(tx) = state.llm_text_tx.lock().unwrap().as_ref() {

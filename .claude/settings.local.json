@@ -132,7 +132,9 @@
       "Bash(ps -W)",
       "Bash(ls src/)",
       "Bash(rm -rf src/)",
-      "Bash(ls -d src/)"
+      "Bash(ls -d src/)",
+      "Bash(rm -f server.log)",
+      "Bash(./target/debug/ele_bot_server.exe --bind 127.0.0.1:7880)"
     ]
   }
 }

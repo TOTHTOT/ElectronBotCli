@@ -3,18 +3,19 @@
 //! 集中持有所有硬件资源句柄, 以及向所有客户端广播事件的通道。
 //! ws.rs 中的 WebSocket 处理器从此处读取/写入。
 
+use crate::face_tracker::{calculate_body_adjustment, smooth_adjustment, BODY_SERVO_INDEX};
 use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::{FrameCache, FrameInfo};
 use crate::media::video::VideoCapture;
 use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{CommState, Joint, JointConfig, Lcd};
-use crate::vision::face::detector::FaceDetectionResult;
 use boteyes::Mood;
 use ele_bot_proto::{
-    AppConfig, JointState, LlmResponse as ProtoLlmResponse, Mood as ProtoMood, ServerEvent,
+    AppConfig, FacePosition, JointState, LlmResponse as ProtoLlmResponse, Mood as ProtoMood,
+    ServerEvent,
 };
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::{broadcast, mpsc};
 
@@ -45,8 +46,6 @@ pub struct SharedState {
     pub comm_state: Mutex<Option<CommState>>,
     /// 机器人连接状态
     pub robot_connected: AtomicBool,
-    /// 当前面部检测结果(供 face tracking 使用)
-    pub last_face: Mutex<Option<FaceDetectionResult>>,
     /// LLM 处理中标志
     pub llm_processing: AtomicBool,
     /// LCD 帧缓存(Web 预览用)
@@ -57,6 +56,8 @@ pub struct SharedState {
     pub llm_text_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
     /// 人脸追踪是否启用
     pub face_tracking_enabled: AtomicBool,
+    /// 人脸追踪平滑状态(累计调整值, 度)
+    face_tracking_adjustment: AtomicI32,
 }
 
 impl SharedState {
@@ -114,21 +115,23 @@ impl SharedState {
             video: Mutex::new(video_capture),
             voice: Mutex::new(voice),
             llm: Mutex::new(llm),
-            frame_tx,
+            frame_tx: frame_tx.clone(),
             event_tx,
             bot_tx: Mutex::new(None),
             comm_state: Mutex::new(None),
             robot_connected: AtomicBool::new(false),
-            last_face: Mutex::new(None),
             llm_processing: AtomicBool::new(false),
             lcd_frame_cache,
             camera_resolution,
             llm_text_tx: Mutex::new(None),
             face_tracking_enabled: AtomicBool::new(false),
+            face_tracking_adjustment: AtomicI32::new(0),
         });
 
         // 启动 LLM 处理线程
         state.spawn_llm_thread();
+        // 启动人脸追踪后台任务
+        state.spawn_face_tracking_task(frame_tx);
 
         Ok(state)
     }
@@ -223,6 +226,75 @@ impl SharedState {
                 }
             }
         });
+    }
+
+    /// 启动人脸追踪后台任务
+    ///
+    /// 订阅 `frame_tx` 广播, 收到带人脸检测结果的帧时:
+    /// - 若 `face_tracking_enabled`, 计算身体舵机调整量并直接 set_angle
+    /// - 始终广播 `ServerEvent::Face` 给所有 WS 客户端(用于 UI 显示)
+    fn spawn_face_tracking_task(self: &Arc<Self>, frame_tx: FrameCache) {
+        let mut frame_rx = frame_tx.subscribe();
+        let state = self.clone();
+        std::thread::spawn(move || {
+            loop {
+                match frame_rx.blocking_recv() {
+                    Ok(frame_info) => {
+                        let position = FacePosition {
+                            x: frame_info.face_info.x,
+                            has_face: frame_info.face_info.has_face,
+                        };
+
+                        // 始终广播给客户端(可选 UI 显示)
+                        let _ = state.event_tx.send(ServerEvent::Face { position });
+
+                        // 仅在追踪开启时调整舵机
+                        if state
+                            .face_tracking_enabled
+                            .load(Ordering::Relaxed)
+                            && position.has_face
+                        {
+                            let target = calculate_body_adjustment(position.x);
+                            let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
+                            let smoothed = smooth_adjustment(prev, target, 0.3);
+                            state
+                                .face_tracking_adjustment
+                                .store(smoothed, Ordering::Relaxed);
+
+                            let current_angle = state.joint.values()[BODY_SERVO_INDEX];
+                            let new_angle =
+                                (current_angle as f32 + smoothed as f32).clamp(-90.0, 90.0);
+                            state.joint.set_angle(BODY_SERVO_INDEX, new_angle);
+                        } else if !position.has_face
+                            && state.face_tracking_enabled.load(Ordering::Relaxed)
+                        {
+                            // 无人脸时, 平滑回 0
+                            let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
+                            let smoothed = smooth_adjustment(prev, 0, 0.1);
+                            state
+                                .face_tracking_adjustment
+                                .store(smoothed, Ordering::Relaxed);
+                            if smoothed == 0 && prev != 0 {
+                                // 已归零, 复位身体舵机
+                                state.joint.set_angle(BODY_SERVO_INDEX, 0.0);
+                            }
+                        }
+                    }
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
+                        log::debug!("face tracking lagged, dropped {n} frames");
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+    }
+
+    /// 启用/禁用人脸追踪; 禁用时复位累计调整值
+    pub fn set_face_tracking(&self, enabled: bool) {
+        self.face_tracking_enabled.store(enabled, Ordering::Relaxed);
+        if !enabled {
+            self.face_tracking_adjustment.store(0, Ordering::Relaxed);
+        }
     }
 
     /// 生成当前 LCD 帧数据

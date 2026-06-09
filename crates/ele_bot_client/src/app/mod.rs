@@ -4,10 +4,8 @@
 //! 不再直接持有任何硬件资源。
 
 pub mod config;
-pub mod face_tracker;
 pub mod menu;
 
-use crate::app::face_tracker::{calculate_body_adjustment, smooth_adjustment};
 use crate::net::Client;
 use crate::ui::pages::llm_test::LlmTestState;
 use crate::ui::pages::tts_test::TtsTestState;
@@ -55,6 +53,8 @@ pub struct ServerStateMirror {
     pub volume: i32,
     pub last_error: Option<String>,
     pub net_connected: bool,
+    /// 最近一次服务端检测到的人脸位置(用于 UI 可选显示)
+    pub last_face: Option<ele_bot_proto::FacePosition>,
 }
 
 /// 主应用
@@ -65,7 +65,6 @@ pub struct App {
     pub config: AppConfig,
     pub popup: Popup,
     pub face_tracking_enabled: bool,
-    last_face_adjustment: i32,
     /// tokio runtime
     rt: Runtime,
     /// WebSocket 客户端
@@ -117,11 +116,11 @@ impl App {
                 volume: 0,
                 last_error: None,
                 net_connected: true,
+                last_face: None,
             }),
             config: AppConfig::default(),
             popup: Popup::new(),
             face_tracking_enabled: false,
-            last_face_adjustment: 0,
             rt,
             client: Some(client),
             server_url: server_url.to_string(),
@@ -187,11 +186,8 @@ impl App {
                 server.last_error = Some(message);
             }
             ServerEvent::Face { position } => {
-                if self.face_tracking_enabled && position.has_face {
-                    let target = calculate_body_adjustment(position.x);
-                    let smoothed = smooth_adjustment(self.last_face_adjustment, target, 0.3);
-                    self.last_face_adjustment = smoothed;
-                }
+                // 人脸追踪实际由服务端执行, 这里仅做可选的 UI 展示
+                server.last_face = Some(position);
             }
             ServerEvent::CameraResolution { width, height } => {
                 log::debug!("camera resolution: {width}x{height}");
@@ -255,9 +251,7 @@ impl App {
 
     pub fn toggle_face_tracking(&mut self) {
         self.face_tracking_enabled = !self.face_tracking_enabled;
-        if !self.face_tracking_enabled {
-            self.last_face_adjustment = 0;
-        }
+        // 实际的人脸追踪计算在服务端执行
         self.send_cmd(ClientMessage::SetFaceTracking {
             enabled: self.face_tracking_enabled,
         });
