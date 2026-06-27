@@ -178,6 +178,7 @@ impl SharedState {
                 tts_model_path,
                 tts_tokens_path,
                 tts_lexicon_path,
+                &config.output_device,
             )
         } else {
             anyhow::bail!("voice model not available");

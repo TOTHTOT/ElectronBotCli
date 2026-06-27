@@ -135,7 +135,8 @@
       "Bash(ls -d src/)",
       "Bash(rm -f server.log)",
       "Bash(./target/debug/ele_bot_server.exe --bind 127.0.0.1:7880)",
-      "WebFetch(domain:docs.rs)"
+      "WebFetch(domain:docs.rs)",
+      "Bash(git commit:*)"
     ]
   }
 }
