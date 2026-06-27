@@ -17,8 +17,8 @@ use ele_bot_proto::{
 pub use menu::*;
 use mode::AppMode;
 pub use overlay::{Overlay, PopupConfig, PopupDismiss};
-pub use route::{DeviceControlMode, EditField, Route};
 use ratatui::widgets::ListState;
+pub use route::{DeviceControlMode, EditField, Route};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -173,7 +173,9 @@ impl App {
                 }
             }
             ServerEvent::LlmProcessing { is_processing } => {
-                self.ai.is_processing.store(is_processing, Ordering::Relaxed);
+                self.ai
+                    .is_processing
+                    .store(is_processing, Ordering::Relaxed);
                 if is_processing {
                     server.mood = Mood::Loading;
                 }
@@ -214,10 +216,7 @@ impl App {
     pub fn stop_comm_thread(&mut self) {
         self.send_cmd(ClientMessage::DisconnectRobot);
         // 清掉弹窗(包括 Popup::CancelConnect 的"连接中"弹窗)
-        if matches!(
-            self.ui.mode.overlay,
-            Some(Overlay::Popup { .. })
-        ) {
+        if matches!(self.ui.mode.overlay, Some(Overlay::Popup { .. })) {
             self.ui.mode.overlay = None;
         }
     }
@@ -338,18 +337,20 @@ impl App {
 
     /// 进入某个菜单项对应的页面
     pub fn enter_menu(&mut self) {
-        let item = self.ui.menu_state.selected().map_or(MenuItem::DeviceStatus, |i| {
-            MenuItem::all()[i.min(MenuItem::all().len() - 1)]
-        });
+        let item = self
+            .ui
+            .menu_state
+            .selected()
+            .map_or(MenuItem::DeviceStatus, |i| {
+                MenuItem::all()[i.min(MenuItem::all().len() - 1)]
+            });
         self.ui.mode.route = Route::from(item);
     }
 
     /// 退到 Nav(从某页面按下 Esc 时)
     pub fn back_to_nav(&mut self) {
         let last = self.ui.mode.route.menu_item();
-        self.ui.mode.route = Route::Nav {
-            last_entered: last,
-        };
+        self.ui.mode.route = Route::Nav { last_entered: last };
     }
 
     /// 把当前 DeviceControl 切到 Active(进入子模式)
@@ -393,7 +394,11 @@ impl App {
                 2 => self.config.speech_name.clone(),
                 _ => String::new(),
             };
-            *editing = Some(EditField::new(*selected, SETTINGS_LABELS[*selected], initial));
+            *editing = Some(EditField::new(
+                *selected,
+                SETTINGS_LABELS[*selected],
+                initial,
+            ));
         }
     }
 

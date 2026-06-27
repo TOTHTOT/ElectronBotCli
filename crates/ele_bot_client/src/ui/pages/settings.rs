@@ -2,12 +2,7 @@ use crate::ui::viewmodel::SettingsViewModel;
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Paragraph};
 
-pub fn render(
-    frame: &mut Frame,
-    area: Rect,
-    vm: &SettingsViewModel,
-    border_color: Color,
-) {
+pub fn render(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_color: Color) {
     let outer_block = create_block("设置".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
@@ -42,7 +37,12 @@ fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: C
     frame.render_widget(widget, inner_area);
 }
 
-fn render_settings_list(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_color: Color) {
+fn render_settings_list(
+    frame: &mut Frame,
+    area: Rect,
+    vm: &SettingsViewModel,
+    border_color: Color,
+) {
     let outer_block = create_block("配置项".to_string(), border_color, Color::Cyan);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
@@ -53,7 +53,11 @@ fn render_settings_list(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, b
 
         let is_selected = i == vm.selected_index;
         let is_editing = vm.in_edit_mode && is_selected;
-        let display_value = if is_editing { &vm.edit_buffer } else { &item.value };
+        let display_value = if is_editing {
+            &vm.edit_buffer
+        } else {
+            &item.value
+        };
 
         render_setting_item(
             frame,

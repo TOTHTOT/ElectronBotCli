@@ -23,7 +23,11 @@ pub struct EditField {
 
 impl EditField {
     pub fn new(index: usize, label: &'static str, buffer: String) -> Self {
-        Self { index, label, buffer }
+        Self {
+            index,
+            label,
+            buffer,
+        }
     }
 }
 
@@ -32,9 +36,13 @@ impl EditField {
 pub enum Route {
     /// 侧边栏获得焦点。`last_entered` 记录上一次"进入"的页面,
     /// 退出子页时画面保留, 重新进入同页可恢复。
-    Nav { last_entered: MenuItem },
+    Nav {
+        last_entered: MenuItem,
+    },
 
-    DeviceControl { mode: DeviceControlMode },
+    DeviceControl {
+        mode: DeviceControlMode,
+    },
 
     Settings {
         selected: usize,
@@ -67,9 +75,7 @@ impl From<MenuItem> for Route {
     /// 再按一次 Enter 切到 Idle (侧边栏可重新选菜单项)。
     fn from(item: MenuItem) -> Self {
         match item {
-            MenuItem::DeviceStatus => Route::Nav {
-                last_entered: item,
-            },
+            MenuItem::DeviceStatus => Route::Nav { last_entered: item },
             MenuItem::DeviceControl => Route::DeviceControl {
                 mode: DeviceControlMode::Active,
             },

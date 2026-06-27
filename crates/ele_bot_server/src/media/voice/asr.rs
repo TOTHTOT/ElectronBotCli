@@ -154,9 +154,7 @@ pub fn build_asr_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
             // 峰值检测 + 慢速衰减, 类似 VU 表的响应特性, 视觉上更容易看出音量变化
-            let peak = data
-                .iter()
-                .fold(0.0f32, |acc, &s| acc.max(s.abs()));
+            let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
             let peak_value = (peak * 100.0).min(100.0) as i32;
             let current = volume_clone.load(Ordering::Relaxed);
             let new_value = if peak_value > current {

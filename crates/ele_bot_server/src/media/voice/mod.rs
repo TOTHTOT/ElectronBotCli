@@ -237,10 +237,16 @@ pub struct DeviceInfo {
 }
 
 impl DeviceInfo {
-    fn new(name: String, channels: Option<u16>, sample_rate: Option<u32>, _index: usize, driver: Option<String>) -> Self {
+    fn new(
+        name: String,
+        channels: Option<u16>,
+        sample_rate: Option<u32>,
+        _index: usize,
+        driver: Option<String>,
+    ) -> Self {
         let mut parts: Vec<String> = Vec::new();
         if let Some(driver) = driver {
-            parts.push(format!("{} ",driver));
+            parts.push(format!("{} ", driver));
         }
         if let Some(ch) = channels {
             parts.push(format!("{}ch", ch));
@@ -422,7 +428,7 @@ mod tests {
 
     #[test]
     fn show_all_output_devices() {
-        let devices= list_output_devices();
+        let devices = list_output_devices();
         println!("{:?}", devices);
     }
 }

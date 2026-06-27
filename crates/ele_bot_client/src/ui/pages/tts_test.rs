@@ -50,7 +50,11 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TtsTestState, border_color:
 
     // 控制面板：速度 + 模式
     let speed_text = format!("速度: {:.1}", state.speed);
-    let mode_text = if state.is_streaming { "流式" } else { "阻塞" };
+    let mode_text = if state.is_streaming {
+        "流式"
+    } else {
+        "阻塞"
+    };
     let control_text = format!("{}  |  模式: [{}]  (按 M 切换)", speed_text, mode_text);
     let control_box = Paragraph::new(control_text.as_str())
         .block(Block::bordered().title("控制"))

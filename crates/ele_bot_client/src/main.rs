@@ -9,7 +9,9 @@ use std::panic;
 use std::time::Duration;
 
 use crossterm::event::{self, Event, KeyCode, KeyEventKind, KeyModifiers};
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use crossterm::ExecutableCommand;
 use ratatui::prelude::*;
 use simplelog::{CombinedLogger, Config, WriteLogger};
@@ -41,7 +43,8 @@ fn main() -> anyhow::Result<()> {
         )]);
     }
 
-    let server_url = env::var("SERVER_URL").unwrap_or_else(|_| "ws://127.0.0.1:7878/ws".to_string());
+    let server_url =
+        env::var("SERVER_URL").unwrap_or_else(|_| "ws://127.0.0.1:7878/ws".to_string());
     log::info!("connecting to {}", server_url);
 
     let mut app = App::new(&server_url)?;

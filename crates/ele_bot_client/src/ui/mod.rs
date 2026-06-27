@@ -29,7 +29,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
     let mut control_vm = DeviceControlViewModel::from_app(app);
     control_vm.is_servo_mode = matches!(
         app.ui.mode.route,
-        Route::DeviceControl { mode: DeviceControlMode::Active }
+        Route::DeviceControl {
+            mode: DeviceControlMode::Active
+        }
     );
     let settings_vm = SettingsViewModel::from_app(app);
 
@@ -63,7 +65,9 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             frame,
             chunks[1],
             &app.ai.llm_test_state,
-            app.ai.is_processing.load(std::sync::atomic::Ordering::Relaxed),
+            app.ai
+                .is_processing
+                .load(std::sync::atomic::Ordering::Relaxed),
             right_border_color,
         ),
         Route::TtsTest => {
@@ -95,9 +99,7 @@ fn render_menu_item_page(
     border_color: Color,
 ) {
     match item {
-        MenuItem::DeviceStatus => {
-            pages::device_status::render(frame, area, app, border_color)
-        }
+        MenuItem::DeviceStatus => pages::device_status::render(frame, area, app, border_color),
         MenuItem::DeviceControl => {
             pages::device_control::render(frame, area, control_vm, border_color)
         }
@@ -105,15 +107,15 @@ fn render_menu_item_page(
             frame,
             area,
             &app.ai.llm_test_state,
-            app.ai.is_processing.load(std::sync::atomic::Ordering::Relaxed),
+            app.ai
+                .is_processing
+                .load(std::sync::atomic::Ordering::Relaxed),
             border_color,
         ),
         MenuItem::TtsTest => {
             pages::tts_test::render(frame, area, &app.ai.tts_test_state, border_color)
         }
-        MenuItem::Settings => {
-            pages::settings::render(frame, area, settings_vm, border_color)
-        }
+        MenuItem::Settings => pages::settings::render(frame, area, settings_vm, border_color),
         MenuItem::About => pages::about::render(frame, area, border_color),
     }
 }

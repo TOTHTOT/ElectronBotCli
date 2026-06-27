@@ -250,10 +250,7 @@ impl SharedState {
                         let _ = state.event_tx.send(ServerEvent::Face { position });
 
                         // 仅在追踪开启时调整舵机
-                        if state
-                            .face_tracking_enabled
-                            .load(Ordering::Relaxed)
-                            && position.has_face
+                        if state.face_tracking_enabled.load(Ordering::Relaxed) && position.has_face
                         {
                             let target = calculate_body_adjustment(position.x);
                             let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
@@ -408,7 +405,9 @@ pub fn mood_to_proto(m: Mood) -> ProtoMood {
 }
 
 /// proto::RotateAngle -> 内部 video::process::RotateAngle
-pub fn rotate_proto_to_local(r: ele_bot_proto::RotateAngle) -> crate::media::video::process::RotateAngle {
+pub fn rotate_proto_to_local(
+    r: ele_bot_proto::RotateAngle,
+) -> crate::media::video::process::RotateAngle {
     use crate::media::video::process::RotateAngle as Local;
     match r {
         ele_bot_proto::RotateAngle::Rotate0 => Local::None,
