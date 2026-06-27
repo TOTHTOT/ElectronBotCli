@@ -29,6 +29,7 @@ pub type Runtime = tokio::runtime::Runtime;
 pub const SETTINGS_LABELS: [&str; 3] = ["Wifi名称", "Wifi密码", "麦克风名称"];
 
 /// UI 状态
+#[derive(Debug)]
 pub struct UiState {
     /// 侧边栏 ListState, 高亮当前选中项
     pub menu_state: ListState,

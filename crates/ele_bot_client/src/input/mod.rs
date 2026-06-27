@@ -63,6 +63,36 @@ impl From<SettingsEvent> for AppEvent {
     }
 }
 
+/// 应用事件入口 — 把语义化 [`AppEvent`] 分发给对应的子系统 handler.
+///
+/// 这是输入层 (`handle_nav` / `handle_device_control` / `handle_settings`)
+/// 唯一允许触达子系统实现的途径。所有"按键 → 动作"的翻译都在 route
+/// handler 里完成, 这里只做 dispatch —— 不读 route, 不读 overlay.
+///
+/// 子系统 handler:
+/// - [`CommonEvent`] → 直接调 `App` 方法 (Quit / ConfirmQuit)
+/// - [`MenuEvent`]   → [`menu::handle`]   (Nav 列表导航 + 设备连接)
+/// - [`DeviceEvent`] → [`device::handle`] (DeviceControl::Active 舵机控制)
+/// - [`SettingsEvent`] → [`settings::handle`] (Settings 列表导航 + 进入编辑)
+///
+/// # 何时调用
+///
+/// 1. **路由层** (`handle_nav` 等): 按键翻译成事件后调用本函数.
+/// 2. **未来扩展**: 其它入口 (网络回调、定时器、热键重映射) 也应构造
+///    `AppEvent` 并走这里, 而不是直接调 `App` 方法.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// // DeviceStatus 菜单项按 Enter 时:
+/// handle_event(app, AppEvent::Menu(MenuEvent::ConnectDevice));
+///
+/// // DeviceControl::Active 按方向键调舵机:
+/// handle_event(app, AppEvent::Device(DeviceEvent::Increase));
+///
+/// // Settings 列表按 Enter 进入编辑:
+/// handle_event(app, AppEvent::Settings(SettingsEvent::Enter));
+/// ```
 pub fn handle_event(app: &mut App, event: AppEvent) {
     match event {
         AppEvent::Common(CommonEvent::Quit) => app.quit(),
@@ -76,6 +106,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
 
 /// 按 AppMode 分发按键输入
 pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    log::info!("ui state: {:?}handling event: {:?}", app.ui, code);
     // (0) 全局热键 (Esc / Ctrl+C 跨所有 mode)
     if code == KeyCode::Esc {
         if app.ui.mode.overlay.is_some() {
@@ -128,9 +159,9 @@ fn handle_nav(app: &mut App, code: KeyCode) {
         Route::Nav { last_entered } => *last_entered,
         _ => return,
     };
-    match code {
-        KeyCode::Up => app.prev_menu(),
-        KeyCode::Down => app.next_menu(),
+    let event = match code {
+        KeyCode::Up => Some(AppEvent::Menu(MenuEvent::Up)),
+        KeyCode::Down => Some(AppEvent::Menu(MenuEvent::Down)),
         KeyCode::Enter => {
             let last = app
                 .ui
@@ -138,9 +169,18 @@ fn handle_nav(app: &mut App, code: KeyCode) {
                 .selected()
                 .and_then(|i| MenuItem::all().get(i).copied())
                 .unwrap_or(last_entered);
+            log::info!("nav selected: {:?}", last);
             app.ui.mode.route = Route::from(last);
+            if last == MenuItem::DeviceStatus {
+                Some(AppEvent::Menu(MenuEvent::ConnectDevice))
+            } else {
+                None
+            }
         }
-        _ => {}
+        _ => None,
+    };
+    if let Some(e) = event {
+        handle_event(app, e);
     }
 }
 
@@ -154,49 +194,47 @@ fn handle_device_control(app: &mut App, code: KeyCode) {
         _ => return,
     };
     if mode == DeviceControlMode::Idle {
-        match code {
-            KeyCode::Up => app.prev_menu(),
-            KeyCode::Down => app.next_menu(),
-            KeyCode::Enter => {
-                if let Route::DeviceControl { mode } = &mut app.ui.mode.route {
-                    *mode = DeviceControlMode::Active;
-                }
-            }
-            _ => {}
+        let event = match code {
+            KeyCode::Up => Some(AppEvent::Menu(MenuEvent::Up)),
+            KeyCode::Down => Some(AppEvent::Menu(MenuEvent::Down)),
+            KeyCode::Enter => Some(AppEvent::Menu(MenuEvent::EnterServoMode)),
+            _ => None,
+        };
+        if let Some(e) = event {
+            handle_event(app, e);
         }
         return;
     }
     // Active
-    match code {
-        KeyCode::Enter => {
-            if let Route::DeviceControl { mode } = &mut app.ui.mode.route {
-                *mode = DeviceControlMode::Idle;
-            }
+    let event = match code {
+        KeyCode::Enter => Some(AppEvent::Device(DeviceEvent::Exit)),
+        KeyCode::Up => Some(AppEvent::Device(DeviceEvent::Prev)),
+        KeyCode::Down => Some(AppEvent::Device(DeviceEvent::Next)),
+        KeyCode::Left => Some(AppEvent::Device(DeviceEvent::Decrease)),
+        KeyCode::Right => Some(AppEvent::Device(DeviceEvent::Increase)),
+        KeyCode::Char('s') | KeyCode::Char('S') => Some(AppEvent::Device(DeviceEvent::Screenshot)),
+        // F/f = 人脸追踪开关, 暂无对应 DeviceEvent, 直接调用 app 方法
+        KeyCode::Char('f') | KeyCode::Char('F') => {
+            app.toggle_face_tracking();
+            None
         }
-        KeyCode::Up => app.prev_servo(),
-        KeyCode::Down => app.next_servo(),
-        KeyCode::Left => app.decrease_selected(),
-        KeyCode::Right => app.increase_selected(),
-        KeyCode::Char('s') | KeyCode::Char('S') => app.take_screenshot(),
-        KeyCode::Char('f') | KeyCode::Char('F') => app.toggle_face_tracking(),
-        _ => {}
+        _ => None,
+    };
+    if let Some(e) = event {
+        handle_event(app, e);
     }
 }
 
 /// Settings 页面
 fn handle_settings(app: &mut App, code: KeyCode) {
-    match code {
-        KeyCode::Enter => {
-            app.begin_settings_edit();
-            if let Route::Settings { editing, .. } = &app.ui.mode.route {
-                if let Some(field) = editing.clone() {
-                    app.ui.mode.overlay = Some(Overlay::EditField(field));
-                }
-            }
-        }
-        KeyCode::Up => app.settings_prev(),
-        KeyCode::Down => app.settings_next(),
-        _ => {}
+    let event = match code {
+        KeyCode::Up => Some(AppEvent::Settings(SettingsEvent::Up)),
+        KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::Down)),
+        KeyCode::Enter => Some(AppEvent::Settings(SettingsEvent::Enter)),
+        _ => None,
+    };
+    if let Some(e) = event {
+        handle_event(app, e);
     }
 }
 
@@ -216,15 +254,16 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
     match overlay {
         Some(Overlay::EditField(field)) => {
             let new_overlay = match code {
-                KeyCode::Esc => None,
+                KeyCode::Esc => {
+                    app.cancel_settings_edit();
+                    None
+                }
                 KeyCode::Enter => {
+                    // 把当前 overlay 字段同步回 Route.editing, 再让 commit 取走
                     if let Route::Settings { editing, .. } = &mut app.ui.mode.route {
                         *editing = Some(field);
                     }
                     app.commit_settings_edit();
-                    if let Route::Settings { editing, .. } = &mut app.ui.mode.route {
-                        *editing = None;
-                    }
                     None
                 }
                 KeyCode::Backspace => {
