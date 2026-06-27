@@ -5,7 +5,7 @@ use crate::media::voice::asr::{build_asr_stream, recognition_thread};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -17,6 +17,55 @@ pub const VAD_WINDOW_SIZE: i32 = 512;
 pub const CHUNK_SIZE: usize = 1600; // 100ms at 16kHz
 #[allow(dead_code)]
 pub const SAMPLE_RATE: u32 = 16000;
+
+/// ASR 模型路径集合 (sense_voice + silero_vad + tokens)
+///
+/// 三者必须同时存在才能跑识别, 打包在一起避免漏传.
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct AsrModelPaths {
+    pub sense_voice: PathBuf,
+    pub silero_vad: PathBuf,
+    pub tokens: PathBuf,
+}
+
+impl AsrModelPaths {
+    pub fn new(
+        sense_voice: impl AsRef<Path>,
+        silero_vad: impl AsRef<Path>,
+        tokens: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            sense_voice: sense_voice.as_ref().into(),
+            silero_vad: silero_vad.as_ref().into(),
+            tokens: tokens.as_ref().into(),
+        }
+    }
+}
+
+/// TTS 模型路径集合 (vits 模型 + tokens + lexicon)
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct TtsModelPaths {
+    pub model: PathBuf,
+    pub tokens: PathBuf,
+    pub lexicon: PathBuf,
+}
+
+impl TtsModelPaths {
+    pub fn new(
+        model: impl AsRef<Path>,
+        tokens: impl AsRef<Path>,
+        lexicon: impl AsRef<Path>,
+    ) -> Self {
+        Self {
+            model: model.as_ref().into(),
+            tokens: tokens.as_ref().into(),
+            lexicon: lexicon.as_ref().into(),
+        }
+    }
+}
+
 #[allow(dead_code)]
 pub struct VoiceManager {
     _stream: Option<Stream>,
@@ -39,17 +88,13 @@ impl VoiceManager {
     /// 创建voice模块, 通过静音检测截取有效实时音频数据,
     /// 完成后发送到解析线程
     pub fn new(
-        sense_voice_model_path: impl AsRef<Path>,
-        silero_vad_model_path: impl AsRef<Path>,
-        tokens_path: impl AsRef<Path>,
+        asr_paths: AsrModelPaths,
+        tts_paths: TtsModelPaths,
         speech_name: &str,
-        tts_model_path: impl AsRef<Path>,
-        tts_tokens_path: impl AsRef<Path>,
-        tts_lexicon_path: impl AsRef<Path>,
         output_device_name: &str,
     ) -> Result<Self> {
         // 初始化 TTS
-        let tts_handler = TtsHandler::new(&tts_model_path, &tts_tokens_path, &tts_lexicon_path)?;
+        let tts_handler = TtsHandler::new(&tts_paths.model, &tts_paths.tokens, &tts_paths.lexicon)?;
         let tts_player = Some(TtsPlayer::new(output_device_name)?);
 
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
@@ -68,17 +113,13 @@ impl VoiceManager {
             }
         };
 
-        let sense_voice_model_path = sense_voice_model_path.as_ref().into();
-        let silero_vad_model_path = silero_vad_model_path.as_ref().into();
-        let tokens_path = tokens_path.as_ref().into();
-
         // 创建解析音频线程, 结果提供 text_rx 传递
         let (text_tx, text_rx) = mpsc::channel::<String>();
         thread::spawn(move || {
             if let Err(e) = recognition_thread(
-                sense_voice_model_path,
-                silero_vad_model_path,
-                tokens_path,
+                asr_paths.sense_voice,
+                asr_paths.silero_vad,
+                asr_paths.tokens,
                 audio_rx,
                 text_tx,
             ) {

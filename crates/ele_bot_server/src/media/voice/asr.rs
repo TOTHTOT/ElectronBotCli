@@ -224,7 +224,7 @@ mod tests {
         assert!(!samples.is_empty());
         assert!(samples.len() >= 16000);
         assert!(
-            samples.iter().all(|&s| s >= -1.0 && s <= 1.0),
+            samples.iter().all(|&s| (-1.0..=1.0).contains(&s)),
             "sample out of range"
         );
     }

@@ -139,7 +139,9 @@
       "Bash(git commit:*)",
       "Bash(git -C E:/Project/GitHub/ElectronBotCli add CLAUDE.md crates/ele_bot_client/src/input/mod.rs crates/ele_bot_client/src/input/device.rs crates/ele_bot_client/src/input/settings.rs crates/ele_bot_client/src/app/mod.rs)",
       "Bash(git -C E:/Project/GitHub/ElectronBotCli commit -m \"$\\(cat <<''EOF''\n让 route handler 走 AppEvent dispatch, 补全 SettingsEvent/DeviceEvent\n\n原来 handle_nav / handle_device_control / handle_settings 直接调 App 方法,\n绕过 handle_event 的派发契约. 现在 route handler 只做按键到语义的翻译,\n具体动作由 AppEvent 派发到 menu::handle / device::handle / settings::handle.\n\nSettingsEvent 精简成 Up/Down/Enter 三变体, EditField overlay 的字符流\n明确划归 handle_overlay 单独处理. DeviceEvent::Exit 接入 enter_device_control_idle\n\\(之前是空实现\\).\n\n附: 添加项目级 CLAUDE.md, 锁定 rustdoc + 中文行内注释规范, 以及\nfmt/clippy/check 三步提交流程. UiState 加 Debug derive 以满足\nhandle_by_mode 日志的 -D warnings 要求.\nEOF\n\\)\")",
-      "Bash(git -C E:/Project/GitHub/ElectronBotCli log --oneline -3)"
+      "Bash(git -C E:/Project/GitHub/ElectronBotCli log --oneline -3)",
+      "Bash(git -C E:/Project/GitHub/ElectronBotCli status:*)",
+      "Bash(git -C E:/Project/GitHub/ElectronBotCli diff crates/ele_bot_server/src/media/voice/asr.rs)"
     ]
   }
 }
