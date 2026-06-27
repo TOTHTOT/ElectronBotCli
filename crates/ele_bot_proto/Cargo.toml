@@ -1,0 +1,15 @@
+[package]
+name = "ele_bot_proto"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+bytes = { workspace = true }
+thiserror = { workspace = true }
+log = { workspace = true }
+toml = { workspace = true }
+anyhow = { workspace = true }
