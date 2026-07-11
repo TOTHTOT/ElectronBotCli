@@ -1,0 +1,59 @@
+schema: spec-driven
+
+# 项目上下文 (注入到所有 artifact 生成的 AI prompt)
+# 作用: 让 AI 在写 proposal / design / tasks / specs 时,
+#       默认采用中文输出 + 本项目技术栈 + CLAUDE.md 的代码规范.
+# 注意: context 是给 AI 看的约束, 不会出现在产物文件里.
+context: |
+  # 项目简介
+  ElectronBotCli 是 Rust 命令行上位机, 三个 crate 的 workspace:
+  - crates/ele_bot_proto: 客户端/服务端共享协议类型 (ClientMessage / ServerEvent)
+  - crates/ele_bot_server: 服务端, 持有硬件资源 (串口舵机, 摄像头, 麦克风/扬声器, ASR/TTS, LLM), 通过 WebSocket 与客户端通信
+  - crates/ele_bot_client: 客户端, ratatui TUI, 通过 WebSocket 连接服务端
+
+  # 回答与文档语言
+  - 所有 OpenSpec 产物 (proposal / design / tasks / spec 文档) 一律中文输出
+  - 回答用户的对话也用中文
+  - 技术术语保留英文, 不强行翻译: AppEvent / Route / dispatch / VAD / ASR / TTS / LLM / WebSocket / ratatui 等
+  - 文件路径、crate 名、函数名、字段名必须保持原样 (英文/英文), 不要翻译
+  - 文档中嵌入的代码块用 `rust` 标注, 命令用 `bash`, toml 用 `toml`
+
+  # 代码规范 (来自仓库根目录的 CLAUDE.md)
+  - 公共 API (pub 函数/结构体/枚举/trait) 必须有 `///` rustdoc, 含一句话职责 + 边界/不变量 + 推荐 `# Examples` 样例
+  - 每个 .rs 文件顶部用 `//!` 写 2-4 行模块头注释, 说明职责与关联模块
+  - 代码内 `//` 行内注释用中文, 解释"为什么"而不是"做什么"
+  - 不写显而易见的注释 (例如 `// i += 1`)
+  - log 宏用中文短句, UI 字符串以中文为主
+
+  # 提交流程 (与代码相关的 task 必须遵守)
+  - 改完代码后必须依次通过:
+      1. cargo fmt --all
+      2. cargo clippy --all-features --all-targets -- -D warnings
+      3. cargo check --all-features --all-targets
+  - 涉及超过 3 步的改动, 在 tasks.md 里也要列清楚步骤
+  - commit 信息: 中文短句, 首行格式 `[<类别>/] <中文短句>`, 类别用 `新增` / `修复` / `发布` / `优化` 等中文关键词, 不加 emoji 不加 feat:/fix: 前缀, 首行 ≤ 50 字
+  - 若本次提交涉及修复报错或回归, 主信息后**空一行**追加原始报错日志 (堆栈/调用栈片段), 不截断不二次转述
+
+  # TUI 输入相关修改 (本项目特殊约束)
+  涉及 crates/ele_bot_client/src/input 的修改, 必须先读:
+  - crates/ele_bot_client/src/input/mod.rs 的 handle_event / handle_by_mode
+  - 派发契约写在 handle_event 的 rustdoc 里, 不允许绕过它直接调 App 方法
+
+# 每类 artifact 的规则
+rules:
+  proposal:
+    - proposal.md 用中文书写, 描述"为什么"和"做什么", 不超过 500 字
+    - 必须包含 "目标" / "非目标 (Non-goals)" / "影响范围" 三个小节
+    - 影响范围列出受影响的 crate 与文件路径
+  design:
+    - design.md 用中文书写, 描述"如何做"
+    - 涉及 Rust 代码示例时, 公共 API 必须带 `///` rustdoc 片段; 行内注释用中文
+    - 示例代码块标注 `rust,ignore` (避免 doctest 拉起整个运行时)
+  tasks:
+    - tasks.md 用中文, 任务颗粒度 ≤ 2 小时, 超过就拆
+    - 涉及改 Rust 代码的任务, 在描述里显式标注"完成后跑三件套"
+    - 涉及公共 API 的任务, 标注"补 rustdoc 注释"
+    - 不要在 tasks 里包含 commit 信息, 由实施者自己写
+  specs:
+    - specs 文档用中文, 描述行为/接口契约
+    - 涉及 Rust 代码示例时遵守与 design 相同的注释规范
