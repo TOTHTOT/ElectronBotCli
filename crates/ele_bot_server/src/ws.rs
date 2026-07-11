@@ -41,7 +41,7 @@ async fn ws_handler(
 async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
     let (mut ws_tx, mut ws_rx) = socket.split();
     let (out_tx, mut out_rx) = mpsc::unbounded_channel::<ServerEvent>();
-
+    log::info!("WebSocket connection established");
     // 发送任务: 把 out_rx 事件序列化为 WS 文本帧
     let send_task = tokio::spawn(async move {
         while let Some(evt) = out_rx.recv().await {
@@ -106,9 +106,11 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
                             }
                             Err(e) => {
                                 log::warn!("invalid client message: {e}");
-                                let _ = out_tx.send(ServerEvent::Error {
+                                if let Err(e) = out_tx.send(ServerEvent::Error {
                                     message: e.to_string(),
-                                });
+                                }){
+                                    log::warn!("error sending error: {e}");
+                                };
                             }
                         }
                     }
@@ -146,14 +148,15 @@ async fn handle_command(
     cmd: ClientMessage,
     out_tx: &mpsc::UnboundedSender<ServerEvent>,
 ) -> anyhow::Result<()> {
+    log::info!("received command: {cmd:?}");
     match cmd {
         ClientMessage::Ping => {
-            let _ = out_tx.send(ServerEvent::Pong);
+            out_tx.send(ServerEvent::Pong)?;
         }
         ClientMessage::GetConfig => {
-            let _ = out_tx.send(ServerEvent::Config {
+            out_tx.send(ServerEvent::Config {
                 config: state.config(),
-            });
+            })?;
         }
         ClientMessage::SetConfig { config } => {
             state.set_config(config)?;
@@ -166,7 +169,6 @@ async fn handle_command(
                 Ok((comm_state, _handle)) => {
                     *state.comm_state.lock().unwrap() = Some(comm_state);
                     state.notify_connection(true);
-                    log::info!("robot connected");
                 }
                 Err(e) => {
                     log::warn!("failed to connect: {e}");
