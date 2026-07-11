@@ -10,7 +10,7 @@
 use std::fs::File;
 use std::io;
 
-use simplelog::{CombinedLogger, Config, WriteLogger};
+use simplelog::{ColorChoice, CombinedLogger, Config, TermLogger, TerminalMode, WriteLogger};
 
 use ele_bot_server::state::SharedState;
 use ele_bot_server::test_mode;
@@ -22,12 +22,25 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("panic: {info}");
     }));
 
-    // 日志
+    // 日志: 同时写入 server.log 和 stderr, 方便直接 cargo run 时也能看到
+    // (Tauri 后端拉起时 stderr 可能没终端, 此时 TermLogger 静默失败, 文件日志兜底)
     if let Ok(f) = File::create("server.log") {
-        let _ = CombinedLogger::init(vec![WriteLogger::new(
+        let _ = CombinedLogger::init(vec![
+            TermLogger::new(
+                simplelog::LevelFilter::Info,
+                Config::default(),
+                TerminalMode::Stderr,
+                ColorChoice::Auto,
+            ),
+            WriteLogger::new(simplelog::LevelFilter::Info, Config::default(), f),
+        ]);
+    } else {
+        // 文件创建失败时退回到只输出到终端, 保证至少有日志
+        let _ = CombinedLogger::init(vec![TermLogger::new(
             simplelog::LevelFilter::Info,
             Config::default(),
-            f,
+            TerminalMode::Stderr,
+            ColorChoice::Auto,
         )]);
     }
 
