@@ -86,6 +86,8 @@ pub enum ServerEvent {
     Face { position: FacePosition },
     /// 摄像头分辨率(初始化时推送)
     CameraResolution { width: u32, height: u32 },
+    /// 当前麦克风输入音量 (0..=100), 由 dB 对数刻度从 cpal 峰值样本映射得出
+    Volume { value: i32 },
 }
 
 impl ServerEvent {
@@ -130,6 +132,18 @@ mod tests {
         match parsed {
             ServerEvent::Mood { mood } => assert_eq!(mood, Mood::Happy),
             _ => panic!("expected Mood event"),
+        }
+    }
+
+    #[test]
+    fn server_event_volume_roundtrip() {
+        let evt = ServerEvent::Volume { value: 42 };
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"volume\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        match parsed {
+            ServerEvent::Volume { value } => assert_eq!(value, 42),
+            _ => panic!("expected Volume event"),
         }
     }
 }

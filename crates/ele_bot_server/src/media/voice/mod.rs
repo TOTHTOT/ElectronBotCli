@@ -6,7 +6,7 @@ use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
 
@@ -73,6 +73,10 @@ pub struct VoiceManager {
     volume: Arc<AtomicI32>,
     tts_handler: TtsHandler,
     tts_player: Option<TtsPlayer>,
+    /// ASR 线程取消信号. 初始 true; `rebuild_voice` 重建前把旧实例
+    /// 的 `running` 置 false, 旧 ASR 线程在 `audio_rx.recv_timeout`
+    /// 唤醒时检查并主动退出.
+    running: Arc<AtomicBool>,
 }
 
 // Safety: VoiceManager is only accessed from the main thread and the ASR thread.
@@ -98,6 +102,7 @@ impl VoiceManager {
         let tts_player = Some(TtsPlayer::new(output_device_name)?);
 
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
+        let running = Arc::new(AtomicBool::new(true));
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
 
         // 查找输入麦克风, 当设备不存在时也会继续执行, 只是不会运行到 asr 相关功能
@@ -115,6 +120,7 @@ impl VoiceManager {
 
         // 创建解析音频线程, 结果提供 text_rx 传递
         let (text_tx, text_rx) = mpsc::channel::<String>();
+        let running_for_thread = running.clone();
         thread::spawn(move || {
             if let Err(e) = recognition_thread(
                 asr_paths.sense_voice,
@@ -122,6 +128,7 @@ impl VoiceManager {
                 asr_paths.tokens,
                 audio_rx,
                 text_tx,
+                running_for_thread,
             ) {
                 log::error!("recognition_thread failed: {e:?}");
             }
@@ -133,12 +140,37 @@ impl VoiceManager {
             volume,
             tts_handler,
             tts_player,
+            running,
         })
     }
 
     /// 获取实时音量
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
+    }
+
+    /// 返回 ASR 线程的取消信号.
+    ///
+    /// 外部 (如 `SharedState::rebuild_voice`) 调用 `store(false)` 请求
+    /// 当前 ASR 线程主动退出. 线程在 `audio_rx.recv_timeout` 唤醒时
+    /// 检查该标志, 50ms 内返回.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let old = state.voice.lock().unwrap().take();
+    /// if let Some(v) = old {
+    ///     v.running().store(false, Ordering::Relaxed);
+    /// }
+    /// ```
+    pub fn running(&self) -> Arc<AtomicBool> {
+        self.running.clone()
+    }
+
+    /// ASR 线程是否仍在跑 (running 标志当前值).
+    #[allow(dead_code)]
+    pub fn is_running(&self) -> bool {
+        self.running.load(Ordering::Relaxed)
     }
 
     /// 获取 TTS handler

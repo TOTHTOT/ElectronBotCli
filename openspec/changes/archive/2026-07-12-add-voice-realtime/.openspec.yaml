@@ -1,0 +1,3 @@
+schema: spec-driven
+created: 2026-07-11
+goal: 音量条实时刷新 + 切换麦克风立刻生效

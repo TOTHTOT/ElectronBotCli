@@ -9,9 +9,10 @@ use sherpa_onnx::{
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicI32, Ordering};
-use std::sync::mpsc::{Receiver, SyncSender};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{mpsc, Arc};
+use std::time::Duration;
 
 const SAMPLE_RATE: usize = 16000;
 const PRE_ROLL_MS: usize = 500;
@@ -57,18 +58,40 @@ fn init_silero_vad(model_path: &Path) -> anyhow::Result<VoiceActivityDetector> {
 }
 
 /// Speech recognition main loop: VAD detection + SenseVoice recognition
+///
+/// 用 `audio_rx.recv_timeout(50ms)` 替代阻塞 `recv`, 每轮检查
+/// `running` 标志: 一旦为 false, 立即返回. 这是 `rebuild_voice`
+/// 软替换旧实例的退出通道, 不依赖 cpal backend 及时停回调.
 fn recognition_loop(
     recognizer: &mut OfflineRecognizer,
     vad: &mut VoiceActivityDetector,
     audio_rx: Receiver<Vec<f32>>,
     result_tx: mpsc::Sender<String>,
+    running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut buffer: Vec<f32> = Vec::new();
     let mut speaking = false;
     let mut silence_count = 0;
     let mut pre_roll: VecDeque<f32> = VecDeque::with_capacity(PRE_ROLL_SAMPLES);
 
-    for samples in audio_rx {
+    loop {
+        let samples = match audio_rx.recv_timeout(Duration::from_millis(50)) {
+            Ok(s) => s,
+            Err(RecvTimeoutError::Timeout) => {
+                // 50ms 没数据, 检查取消信号. cpal Stream 已经 Drop
+                // 时 audio_rx 也会 Disconnected, 走下面分支.
+                if !running.load(Ordering::Relaxed) {
+                    log::info!("ASR 线程收到取消信号, 退出");
+                    return Ok(());
+                }
+                continue;
+            }
+            Err(RecvTimeoutError::Disconnected) => {
+                // audio_tx 所有克隆都已 drop (旧 cpal Stream 被替换).
+                return Ok(());
+            }
+        };
+
         // Sliding window: keep latest 500ms
         while pre_roll.len() >= PRE_ROLL_SAMPLES {
             pre_roll.pop_front();
@@ -127,8 +150,19 @@ fn recognition_loop(
             }
         }
     }
+}
 
-    Ok(())
+/// 把 cpal f32 峰值样本 (0.0..=1.0) 映射成 0..=100 的归一化音量.
+///
+/// 用 dB 对数刻度: 0 dB (peak=1.0) -> 100, -40 dB (peak=0.01) -> 0.
+/// 这样小声说话 (peak 0.05–0.3) 能稳定显示在 30–70, 不再退化成 1–3 格
+/// 音量条. -40 dB 是常见麦克风本底噪声量级, 低于此值视为静音.
+fn peak_to_volume(peak: f32) -> i32 {
+    if peak <= 0.0 {
+        return 0;
+    }
+    let db = 20.0 * peak.log10();
+    (((db + 40.0) * (100.0 / 40.0)) as i32).clamp(0, 100)
 }
 
 /// Build audio input stream for ASR
@@ -153,9 +187,8 @@ pub fn build_asr_stream(
     Ok(device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            // 峰值检测 + 慢速衰减, 类似 VU 表的响应特性, 视觉上更容易看出音量变化
             let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
-            let peak_value = (peak * 100.0).min(100.0) as i32;
+            let peak_value = peak_to_volume(peak);
             let current = volume_clone.load(Ordering::Relaxed);
             let new_value = if peak_value > current {
                 // 新峰值: 立即提升
@@ -187,10 +220,11 @@ pub fn recognition_thread(
     tokens_path: PathBuf,
     audio_rx: Receiver<Vec<f32>>,
     result_tx: mpsc::Sender<String>,
+    running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut recognizer = init_sense_voice(&sense_voice_model_path, &tokens_path)?;
     let mut vad = init_silero_vad(&silero_vad_model_path)?;
-    recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx)
+    recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running)
 }
 
 /// Use `cargo test test_recognition_with_audio_file -- --ignored --nocapture` to test
@@ -227,6 +261,33 @@ mod tests {
             samples.iter().all(|&s| (-1.0..=1.0).contains(&s)),
             "sample out of range"
         );
+    }
+
+    #[test]
+    fn peak_to_volume_mapping() {
+        // 静音 -> 0
+        assert_eq!(peak_to_volume(0.0), 0);
+        // 麦克风底噪附近 (-46 dB) -> 0
+        assert_eq!(peak_to_volume(0.005), 0);
+        // 小声说话 (peak ~ 0.05, -26 dB) 应该在 30-40 之间
+        let small = peak_to_volume(0.05);
+        assert!(
+            (30..=40).contains(&small),
+            "peak=0.05 expected ~35, got {small}"
+        );
+        // 中等说话 (peak ~ 0.1, -20 dB) 在 50-55
+        let mid = peak_to_volume(0.1);
+        assert!((50..=55).contains(&mid), "peak=0.1 expected ~50, got {mid}");
+        // 大声 (peak ~ 0.5, -6 dB) 在 85 附近
+        let loud = peak_to_volume(0.5);
+        assert!(
+            (80..=90).contains(&loud),
+            "peak=0.5 expected ~85, got {loud}"
+        );
+        // 满刻度 -> 100
+        assert_eq!(peak_to_volume(1.0), 100);
+        // 超过 1.0 (理论上不会, 但保险) -> clamp 到 100
+        assert_eq!(peak_to_volume(2.0), 100);
     }
 
     #[test]
@@ -269,7 +330,8 @@ mod tests {
         });
 
         // Run recognition on main thread since recognizer/vad are not Send
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx);
+        let running = Arc::new(AtomicBool::new(true));
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running);
 
         handle.join().expect("thread panicked");
 

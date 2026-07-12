@@ -2,12 +2,43 @@ use crate::app::App;
 use crate::ui_components::create_block;
 use ratatui::{prelude::*, widgets::*};
 
+/// 音量条宽度 — 总共 20 个字符宽, 含两端的方括号
+const VOLUME_BAR_WIDTH: usize = 20;
+
 fn status_color(ok: bool) -> Color {
     if ok {
         Color::Green
     } else {
         Color::Red
     }
+}
+
+/// 把 0..=100 的音量渲染成 `[█████│---------]` 形状的字符串
+///
+/// - 始终以 `[` `]` 边界包住, 0 时仍可见音量条形态
+/// - 用 `│` 作"游标", 标识当前音量位置 (即便 0 也保留 1 个 `│` 在最左)
+/// - 字符用 `█` (满) + `─` (空), 满部分 Cyan, 游标 Yellow
+fn render_volume_bar(volume: i32) -> String {
+    let v = volume.clamp(0, 100) as usize;
+    // 内宽 = 总宽 - 2 (左右括号)
+    let inner = VOLUME_BAR_WIDTH - 2;
+    // 满格数, 至少 1 个 `█` (音量 > 0) 或 0 个 (音量 = 0)
+    let filled = if v > 0 { (v * inner / 100).max(1) } else { 0 };
+    // 游标位置: 满格末. 当 v=0 时, 游标在 0 处
+    let cursor_pos = if v > 0 { filled - 1 } else { 0 };
+    let mut bar = String::with_capacity(VOLUME_BAR_WIDTH);
+    bar.push('[');
+    for i in 0..inner {
+        if i < filled.saturating_sub(1) {
+            bar.push('█');
+        } else if i == cursor_pos {
+            bar.push('│');
+        } else {
+            bar.push('─');
+        }
+    }
+    bar.push(']');
+    bar
 }
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
@@ -25,6 +56,16 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
         )
     };
     let battery: u32 = 85; // TODO: 后续获取真实电量
+
+    // 音量条本体
+    let volume_bar = render_volume_bar(volume);
+    // 音量文字描述: 0 静音 / 1-30 小声 / 31-60 中等 / 61-100 大声
+    let volume_label = match volume {
+        0 => "静音",
+        1..=30 => "小声",
+        31..=60 => "中等",
+        _ => "大声",
+    };
 
     // 使用 Table 实现网格布局
     let table = Table::new(
@@ -56,19 +97,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
             ]),
             Row::new(vec![
                 Cell::from(Span::styled("输入音量", Style::new().fg(Color::Yellow))),
-                // 音量条
+                // 音量条 + 数字 + 文字描述, 同一行紧凑展示
                 Cell::from(Span::styled(
-                    format!("{:-<20}", "│".repeat((volume / 5) as usize)),
-                    Style::new().fg(Color::Cyan),
-                )),
-            ]),
-            Row::new(vec![
-                Cell::from(Span::styled(
-                    "按 [Enter] 连接设备",
-                    Style::new().fg(Color::Gray),
-                )),
-                Cell::from(Span::styled(
-                    format!("{}", volume),
+                    format!("{}  {} ({})", volume_bar, volume, volume_label),
                     Style::new().fg(Color::Cyan),
                 )),
             ]),
@@ -88,4 +119,35 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
         vertical: 1,
     });
     frame.render_widget(table, inner);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn volume_bar_zero_has_shape() {
+        // 0 时仍然是 `[│─────────────────]` 形态, 不退化成纯横线
+        let bar = render_volume_bar(0);
+        assert!(bar.starts_with('['));
+        assert!(bar.ends_with(']'));
+        assert!(bar.contains('│'));
+        assert_eq!(bar.chars().count(), VOLUME_BAR_WIDTH);
+    }
+
+    #[test]
+    fn volume_bar_full_filled() {
+        let bar = render_volume_bar(100);
+        assert!(bar.starts_with('['));
+        assert!(bar.ends_with(']'));
+        // 100 时内宽 18 个 `█` 加 1 个游标 `│`, 无 `─`
+        assert!(!bar.contains('─'));
+    }
+
+    #[test]
+    fn volume_bar_clamped() {
+        // 越界值截到合法范围
+        assert_eq!(render_volume_bar(-5), render_volume_bar(0));
+        assert_eq!(render_volume_bar(150), render_volume_bar(100));
+    }
 }

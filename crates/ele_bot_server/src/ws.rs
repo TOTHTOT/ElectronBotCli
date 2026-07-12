@@ -134,6 +134,17 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
                         }
                     }
                 }
+                // 音量广播: 跟 LCD 帧同一个 50ms tick, 不开新 task.
+                // voice 为 None 时 (初始化失败 / 尚未构造) 输出 0, 与
+                // ServerStateMirror 初始值一致.
+                let volume = state
+                    .voice
+                    .lock()
+                    .unwrap()
+                    .as_ref()
+                    .map(|v| v.volume())
+                    .unwrap_or(0);
+                let _ = state.event_tx.send(ServerEvent::Volume { value: volume });
             }
         }
     }

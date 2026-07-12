@@ -153,6 +153,78 @@ impl SharedState {
         )
     }
 
+    /// 用当前 `AppConfig` 重新构造 `VoiceManager`, 替换 `self.voice`.
+    ///
+    /// 在用户切换输入/输出设备后立即调用, 不需要重启服务. 旧实例
+    /// 通过 `Arc` 引用计数归零自然 Drop: cpal Stream 停流, ASR 识别
+    /// 线程的 `audio_rx` 收到断开信号后退出, 整个流程无需 join.
+    ///
+    /// # 软替换语义
+    ///
+    /// 旧实例的 `running` 标志先置 false, 给旧 ASR 线程最多 50ms
+    /// 的窗口主动退出 (`asr::recognition_loop` 用 `recv_timeout(50ms)`
+    /// 唤醒检查). 之后 sleep 60ms 确保旧线程已让出 cpal 设备, 再
+    /// 构造新实例替换. 这样保证:
+    ///
+    /// 1. 旧 cpal Stream 不会继续向 mpsc 写音频
+    /// 2. 旧 ASR 线程不会继续占用 sherpa-onnx 解码
+    /// 3. 系统中同时最多只有一个 ASR 实例在跑
+    ///
+    /// # 失败语义
+    ///
+    /// 当 `init_voice` 返回 Err (例如新设备被独占占用) 时, 旧
+    /// `VoiceManager` 已经因 take() 被移出但被外层 Arc 持有, 在函数
+    /// 末尾 Drop — 旧 Stream 自然释放. 错误向上抛, 调用方 (ws.rs)
+    /// 负责把错误通过 `ServerEvent::Error` 广播给客户端.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// if let Err(e) = state.rebuild_voice() {
+    ///     let _ = state.event_tx.send(ServerEvent::Error { message: e.to_string() });
+    /// }
+    /// ```
+    pub fn rebuild_voice(&self) -> anyhow::Result<()> {
+        let config = self.config.read().unwrap().clone();
+
+        // 1. 先把旧实例从 self.voice 移出 (但旧 Arc 还在本函数栈上,
+        //    所以旧 cpal Stream 在这里还活着, 旧 ASR 线程继续跑).
+        let old = {
+            let mut guard = self.voice.lock().unwrap();
+            guard.take()
+        };
+        if let Some(old) = &old {
+            // 2. 通知旧 ASR 线程退出
+            old.running()
+                .store(false, std::sync::atomic::Ordering::Relaxed);
+            // 3. 给退出窗口 (recv_timeout=50ms, 留 10ms 余量)
+            std::thread::sleep(std::time::Duration::from_millis(60));
+        }
+
+        // 4. 构造新实例并替换 (旧 Arc 在本函数末尾 Drop)
+        let new_voice = Self::init_voice(&config)?;
+        *self.voice.lock().unwrap() = Some(Arc::new(new_voice));
+        // 旧 Arc 在这里随 `old` 一起 Drop, 旧 cpal Stream 停流
+        drop(old);
+        Ok(())
+    }
+
+    /// 返回当前生效的 `(speech_name, output_device)`, 给 `set_config`
+    /// 路径做"是否需要重建 VoiceManager"的判断.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let (old_mic, old_spk) = state.current_audio_config();
+    /// if new_cfg.speech_name != old_mic || new_cfg.output_device != old_spk {
+    ///     state.rebuild_voice()?;
+    /// }
+    /// ```
+    pub fn current_audio_config(&self) -> (String, String) {
+        let cfg = self.config.read().unwrap();
+        (cfg.speech_name.clone(), cfg.output_device.clone())
+    }
+
     fn init_voice(config: &AppConfig) -> anyhow::Result<VoiceManager> {
         use crate::media::voice::{AsrModelPaths, TtsModelPaths};
 
@@ -368,10 +440,25 @@ impl SharedState {
     }
 
     /// 更新 config
+    ///
+    /// 若 `speech_name` / `output_device` 与旧值不同, 立即重建
+    /// `VoiceManager` (热生效). 重建失败时 config 仍按本次值持久化
+    /// (用户已经表达过选择意图), 但通过 `ServerEvent::Error` 告知
+    /// 客户端当前 ASR/TTS 仍在用旧设备.
     pub fn set_config(&self, cfg: AppConfig) -> anyhow::Result<()> {
+        let (old_mic, old_spk) = self.current_audio_config();
+        let audio_changed = cfg.speech_name != old_mic || cfg.output_device != old_spk;
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
         let _ = self.event_tx.send(ServerEvent::Config { config: cfg });
+        if audio_changed {
+            if let Err(e) = self.rebuild_voice() {
+                log::warn!("rebuild_voice failed: {e:?}");
+                let _ = self.event_tx.send(ServerEvent::Error {
+                    message: format!("voice rebuild failed: {e}"),
+                });
+            }
+        }
         Ok(())
     }
 }

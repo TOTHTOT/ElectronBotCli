@@ -194,6 +194,9 @@ impl App {
             ServerEvent::CameraResolution { width, height } => {
                 log::debug!("camera resolution: {width}x{height}");
             }
+            ServerEvent::Volume { value } => {
+                server.volume = value;
+            }
         }
     }
 
