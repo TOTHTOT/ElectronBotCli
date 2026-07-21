@@ -14,3 +14,4 @@ nul
 /graphify-out
 *.log
 /.idea/
+/.claude/settings.local.json
