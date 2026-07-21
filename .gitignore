@@ -17,3 +17,5 @@ nul
 /.claude/settings.local.json
 /.claude/CLAUDE.md
 /.repowise/
+/.mcp.json
+/.vscode/
