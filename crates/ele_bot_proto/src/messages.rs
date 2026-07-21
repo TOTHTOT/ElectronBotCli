@@ -44,6 +44,10 @@ pub enum ClientMessage {
     },
     /// 截图
     TakeScreenshot,
+    /// 请求所有音频输入设备 (服务端响应 `ServerEvent::InputDevices`)
+    ListInputDevices,
+    /// 请求所有音频输出设备 (服务端响应 `ServerEvent::OutputDevices`)
+    ListOutputDevices,
 }
 
 impl ClientMessage {
@@ -88,6 +92,10 @@ pub enum ServerEvent {
     CameraResolution { width: u32, height: u32 },
     /// 当前麦克风输入音量 (0..=100), 由 dB 对数刻度从 cpal 峰值样本映射得出
     Volume { value: i32 },
+    /// 服务端枚举到的所有音频输入设备 (响应 `ListInputDevices`)
+    InputDevices { devices: Vec<DeviceInfoDto> },
+    /// 服务端枚举到的所有音频输出设备 (响应 `ListOutputDevices`)
+    OutputDevices { devices: Vec<DeviceInfoDto> },
 }
 
 impl ServerEvent {
@@ -145,5 +153,55 @@ mod tests {
             ServerEvent::Volume { value } => assert_eq!(value, 42),
             _ => panic!("expected Volume event"),
         }
+    }
+
+    #[test]
+    fn list_devices_request_roundtrip() {
+        let msg = ClientMessage::ListInputDevices;
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("\"type\":\"list_input_devices\""));
+        let parsed = ClientMessage::from_json(&json).unwrap();
+        assert!(matches!(parsed, ClientMessage::ListInputDevices));
+
+        let msg = ClientMessage::ListOutputDevices;
+        let json = msg.to_json().unwrap();
+        let parsed = ClientMessage::from_json(&json).unwrap();
+        assert!(matches!(parsed, ClientMessage::ListOutputDevices));
+    }
+
+    #[test]
+    fn input_devices_event_roundtrip() {
+        let evt = ServerEvent::InputDevices {
+            devices: vec![DeviceInfoDto {
+                name: "麦克风阵列".to_string(),
+                display: "WASAPI 麦克风阵列 (2ch, 48000Hz)".to_string(),
+                driver: Some("WASAPI".to_string()),
+                channels: 2,
+                sample_rate: 48000,
+            }],
+        };
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"input_devices\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        match parsed {
+            ServerEvent::InputDevices { devices } => {
+                assert_eq!(devices.len(), 1);
+                assert_eq!(devices[0].name, "麦克风阵列");
+                assert_eq!(devices[0].channels, 2);
+                assert_eq!(devices[0].driver.as_deref(), Some("WASAPI"));
+            }
+            _ => panic!("expected InputDevices event"),
+        }
+    }
+
+    #[test]
+    fn output_devices_event_roundtrip() {
+        let evt = ServerEvent::OutputDevices {
+            devices: vec![DeviceInfoDto::default()],
+        };
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"output_devices\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        assert!(matches!(parsed, ServerEvent::OutputDevices { .. }));
     }
 }

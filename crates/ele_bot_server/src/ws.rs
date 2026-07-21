@@ -268,6 +268,14 @@ async fn handle_command(
             let path = state.take_screenshot()?;
             let _ = out_tx.send(ServerEvent::ScreenshotSaved { path });
         }
+        ClientMessage::ListInputDevices => {
+            let devices = crate::media::voice::list_input_devices_dto();
+            let _ = out_tx.send(ServerEvent::InputDevices { devices });
+        }
+        ClientMessage::ListOutputDevices => {
+            let devices = crate::media::voice::list_output_devices_dto();
+            let _ = out_tx.send(ServerEvent::OutputDevices { devices });
+        }
     }
     Ok(())
 }

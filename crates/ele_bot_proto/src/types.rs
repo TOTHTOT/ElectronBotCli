@@ -156,6 +156,28 @@ pub struct CameraResolution {
     pub height: u32,
 }
 
+/// 音频设备信息(通过 `ListInputDevices` / `ListOutputDevices` 传输)
+///
+/// `name` 是 cpal 的精确设备名, 写入 `AppConfig.speech_name` / `output_device`
+/// 时必须用此字段做 exact match; `display` 是给人类看的拼接字符串, 客户端
+/// MUST NOT 用正则解析它.
+///
+/// `driver` 独立成字段而非藏在 `display` 字符串里, 便于客户端按需布局 /
+/// 着色; 见 `enhance-device-picker` spec 中的 "设备显示须呈现驱动字段" 需求.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceInfoDto {
+    /// 精确设备名 (exact match key)
+    pub name: String,
+    /// 给人类看的拼接串 (e.g. "WASAPI 麦克风阵列 (2ch, 48000Hz)")
+    pub display: String,
+    /// 后端驱动名 (e.g. "WASAPI" / "MME" / "ALSA"), cpal 不可用时为 `None`
+    pub driver: Option<String>,
+    /// 输入/输出通道数, 不可用时为 0
+    pub channels: u16,
+    /// 默认采样率, 不可用时为 0
+    pub sample_rate: u32,
+}
+
 /// 人脸位置(用于追踪)
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct FacePosition {

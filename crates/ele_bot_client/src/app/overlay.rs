@@ -2,8 +2,25 @@
 //!
 //! 当 `AppMode::overlay` 为 `Some` 时, 所有按键优先路由到 overlay。
 
-use super::route::EditField;
+use super::route::{EditField, SelectingKind};
+use ele_bot_proto::DeviceInfoDto;
 use ratatui::style::Color;
+
+/// 设备切换失败时, 服务器/客户端之间保留的旧设备名 + 失败时间
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceKind {
+    Input,
+    Output,
+}
+
+impl From<SelectingKind> for DeviceKind {
+    fn from(k: SelectingKind) -> Self {
+        match k {
+            SelectingKind::Input => DeviceKind::Input,
+            SelectingKind::Output => DeviceKind::Output,
+        }
+    }
+}
 
 /// 弹窗内容配置
 #[derive(Debug, Clone)]
@@ -73,5 +90,20 @@ pub enum Overlay {
     Popup {
         config: PopupConfig,
         on_dismiss: PopupDismiss,
+    },
+    /// 设备选择器 — 与 `EditField` 平行的另一种模态
+    DevicePicker {
+        /// 嵌入式子状态镜像 (与 `Route::Settings::selecting` 同步)
+        selecting: super::route::SelectingField,
+        /// 当前持有的设备列表 (来自最近一次 `*Devices` 事件)
+        devices: Vec<DeviceInfoDto>,
+    },
+    /// 设备切换失败的 transient 提示 — Esc 关, 5 秒后自动关
+    DeviceSwitchFailure {
+        kind: DeviceKind,
+        /// 用户提交切换的目标设备名 (失败时的目标)
+        old_device_name: String,
+        /// 来自服务端 `ServerEvent::Error` 的失败明细
+        detail: String,
     },
 }

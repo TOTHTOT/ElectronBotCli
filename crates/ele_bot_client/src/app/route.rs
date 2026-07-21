@@ -4,6 +4,39 @@
 
 use super::menu::MenuItem;
 
+/// 设备选择器选择的是输入还是输出设备
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectingKind {
+    /// 选择麦克风输入设备
+    Input,
+    /// 选择扬声器输出设备
+    Output,
+}
+
+/// 设备选择器子状态
+///
+/// 嵌入在 `Route::Settings::selecting` 里; overlay
+/// `Overlay::DevicePicker` 持有同一实例, 二者镜像.
+/// `loading` 为 true 时表示列表正在从服务端拉, Enter / ↑↓ 全部屏蔽,
+/// UI 渲染一行 `<加载中...>` 占位.
+#[derive(Debug, Clone)]
+pub struct SelectingField {
+    pub kind: SelectingKind,
+    pub cursor: usize,
+    pub loading: bool,
+}
+
+impl SelectingField {
+    /// 新建: 输入/输出, 起始 cursor=0 (即 `<系统默认>`), 列表非空时立刻就绪.
+    pub fn new(kind: SelectingKind) -> Self {
+        Self {
+            kind,
+            cursor: 0,
+            loading: false,
+        }
+    }
+}
+
 /// 设备控制页面的子模式
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceControlMode {
@@ -47,6 +80,7 @@ pub enum Route {
     Settings {
         selected: usize,
         editing: Option<EditField>,
+        selecting: Option<SelectingField>,
     },
 
     LlmTest,
@@ -84,6 +118,7 @@ impl From<MenuItem> for Route {
             MenuItem::Settings => Route::Settings {
                 selected: 0,
                 editing: None,
+                selecting: None,
             },
             MenuItem::About => Route::About,
         }

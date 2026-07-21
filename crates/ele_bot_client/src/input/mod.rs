@@ -20,8 +20,8 @@ pub use menu::MenuEvent;
 pub use settings::SettingsEvent;
 
 use crate::app::overlay::PopupDismiss;
-use crate::app::route::DeviceControlMode;
-use crate::app::{App, MenuItem, Overlay, Route};
+use crate::app::route::{DeviceControlMode, SelectingKind};
+use crate::app::{App, MenuItem, Overlay, Route, SETTINGS_IDX_OUTPUT, SETTINGS_IDX_SPEECH};
 use crate::input::llm_test::handle as handle_llm_test;
 use crate::input::tts_test::handle as handle_tts_test;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -171,6 +171,10 @@ fn handle_nav(app: &mut App, code: KeyCode) {
                 .unwrap_or(last_entered);
             log::info!("nav selected: {:?}", last);
             app.ui.mode.route = Route::from(last);
+            // 进 Settings 时自动拉设备列表, picker 第一次打开就有数据
+            if last == MenuItem::Settings {
+                app.refresh_device_lists();
+            }
             if last == MenuItem::DeviceStatus {
                 Some(AppEvent::Menu(MenuEvent::ConnectDevice))
             } else {
@@ -226,11 +230,62 @@ fn handle_device_control(app: &mut App, code: KeyCode) {
 }
 
 /// Settings 页面
+///
+/// 列表模式: Up/Down 选, Enter 进入编辑(对 Wifi 两项) 或设备选择器
+/// (对麦克风/扬声器行), 'r' 刷新设备列表.
+/// picker 模式 (selecting.is_some): 把按键翻译为 Picker*, 这里不发,
+/// 由 handle_overlay 接管 DevicePicker 分支 (双路保险, 因为 overlay 已
+/// 优先).
 fn handle_settings(app: &mut App, code: KeyCode) {
+    // picker 中 overlay 已优先处理, 这里理论上不会被命中,
+    // 保留一份 translate 作防御
+    if matches!(
+        &app.ui.mode.route,
+        Route::Settings {
+            selecting: Some(_),
+            ..
+        }
+    ) && app.ui.mode.overlay.is_none()
+    {
+        let event = match code {
+            KeyCode::Up => Some(AppEvent::Settings(SettingsEvent::PickerUp)),
+            KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::PickerDown)),
+            KeyCode::Enter => Some(AppEvent::Settings(SettingsEvent::PickerConfirm)),
+            KeyCode::Esc => Some(AppEvent::Settings(SettingsEvent::PickerCancel)),
+            KeyCode::Char('r') | KeyCode::Char('R') => {
+                Some(AppEvent::Settings(SettingsEvent::PickerRefresh))
+            }
+            _ => None,
+        };
+        if let Some(e) = event {
+            handle_event(app, e);
+        }
+        return;
+    }
     let event = match code {
         KeyCode::Up => Some(AppEvent::Settings(SettingsEvent::Up)),
         KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::Down)),
-        KeyCode::Enter => Some(AppEvent::Settings(SettingsEvent::Enter)),
+        KeyCode::Enter => {
+            // 麦克风 / 扬声器行 (2/3) 走 picker; 其它 (0/1 Wifi) 走文本编辑
+            let selected = if let Route::Settings { selected, .. } = &app.ui.mode.route {
+                *selected
+            } else {
+                0
+            };
+            let kind = match selected {
+                SETTINGS_IDX_SPEECH => Some(SelectingKind::Input),
+                SETTINGS_IDX_OUTPUT => Some(SelectingKind::Output),
+                _ => None,
+            };
+            if let Some(k) = kind {
+                Some(AppEvent::Settings(SettingsEvent::EnterPicker(k)))
+            } else {
+                Some(AppEvent::Settings(SettingsEvent::Enter))
+            }
+        }
+        KeyCode::Char('r') | KeyCode::Char('R') => {
+            Some(AppEvent::Settings(SettingsEvent::RefreshList))
+        }
         _ => None,
     };
     if let Some(e) = event {
@@ -309,6 +364,45 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
                 app.ui.mode.overlay = Some(Overlay::Popup { config, on_dismiss });
             }
         },
+        Some(Overlay::DevicePicker { selecting, devices }) => {
+            // picker 方法内部通过 `&mut self.ui.mode.overlay` 改 cursor / devices,
+            // 所以必须先把 overlay 放回去, 否则取走的瞬间所有方法都看不到它.
+            // (上游 take() 之后, 这里 overlay 字段已被 moved 出来, 用它重建)
+            app.ui.mode.overlay = Some(Overlay::DevicePicker { selecting, devices });
+            match code {
+                KeyCode::Esc => {
+                    app.cancel_device_picker();
+                }
+                KeyCode::Enter => {
+                    app.confirm_device_picker();
+                }
+                KeyCode::Char('r') | KeyCode::Char('R') => {
+                    app.refresh_device_picker();
+                }
+                KeyCode::Up => {
+                    app.picker_up();
+                }
+                KeyCode::Down => {
+                    app.picker_down();
+                }
+                _ => {}
+            }
+        }
+        Some(Overlay::DeviceSwitchFailure {
+            kind,
+            old_device_name,
+            detail,
+        }) => {
+            // 同上, dismiss_device_failure 要看 overlay, 先放回去
+            app.ui.mode.overlay = Some(Overlay::DeviceSwitchFailure {
+                kind,
+                old_device_name,
+                detail,
+            });
+            if code == KeyCode::Esc {
+                app.dismiss_device_failure();
+            }
+        }
         None => unreachable!("guarded by caller"),
     }
 }

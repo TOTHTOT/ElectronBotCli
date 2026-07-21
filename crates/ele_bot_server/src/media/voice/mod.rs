@@ -301,12 +301,21 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
 }
 
 /// 设备信息 - 用于在设置页面中显示并区分同名设备
+///
+/// 内部类型, 不直接序列化. 通过 [`list_input_devices_dto`] /
+/// [`list_output_devices_dto`] 转 [`ele_bot_proto::DeviceInfoDto`] 后走 WS.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    /// 实际设备名称
+    /// 实际设备名称 (cpal exact name)
     pub name: String,
     /// 列表中显示的字符串, 包含通道数 / 采样率等额外信息
     pub display: String,
+    /// 后端驱动名 (cpal Device::description().driver()), 不可用为 None
+    pub driver: Option<String>,
+    /// 输入/输出通道数, default_input_config 失败时为 None
+    pub channels: Option<u16>,
+    /// 默认采样率, default_input_config 失败时为 None
+    pub sample_rate: Option<u32>,
 }
 
 impl DeviceInfo {
@@ -318,7 +327,7 @@ impl DeviceInfo {
         driver: Option<String>,
     ) -> Self {
         let mut parts: Vec<String> = Vec::new();
-        if let Some(driver) = driver {
+        if let Some(driver) = driver.as_ref() {
             parts.push(format!("{} ", driver));
         }
         if let Some(ch) = channels {
@@ -332,7 +341,13 @@ impl DeviceInfo {
         } else {
             format!("{} ({})", name, parts.join(", "))
         };
-        Self { name, display }
+        Self {
+            name,
+            display,
+            driver,
+            channels,
+            sample_rate,
+        }
     }
 }
 
@@ -376,6 +391,40 @@ pub fn list_output_devices() -> Vec<DeviceInfo> {
                 .collect()
         })
         .unwrap_or_default()
+}
+
+/// 把 [`DeviceInfo`] 转成 [`ele_bot_proto::DeviceInfoDto`] 给 ws 走线协议.
+///
+/// `channels` / `sample_rate` 为 None 时填 0, 与 wire 上 "u16/u32 默认值"
+/// 保持一致; 客户端通过 `display` 是否包含这些信息自行判断真实可用性.
+fn to_dto(info: &DeviceInfo) -> ele_bot_proto::DeviceInfoDto {
+    ele_bot_proto::DeviceInfoDto {
+        name: info.name.clone(),
+        display: info.display.clone(),
+        driver: info.driver.clone(),
+        channels: info.channels.unwrap_or(0),
+        sample_rate: info.sample_rate.unwrap_or(0),
+    }
+}
+
+/// 把 [`list_input_devices`] 的结果序列化为 wire DTO, 给
+/// `ServerEvent::InputDevices` 直接消费.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// // 在 ws.rs::handle_command 里:
+/// let devices = voice::list_input_devices_dto();
+/// out_tx.send(ServerEvent::InputDevices { devices })?;
+/// ```
+pub fn list_input_devices_dto() -> Vec<ele_bot_proto::DeviceInfoDto> {
+    list_input_devices().iter().map(to_dto).collect()
+}
+
+/// 把 [`list_output_devices`] 的结果序列化为 wire DTO. 同上, 给
+/// `ServerEvent::OutputDevices` 用.
+pub fn list_output_devices_dto() -> Vec<ele_bot_proto::DeviceInfoDto> {
+    list_output_devices().iter().map(to_dto).collect()
 }
 
 /// 按名称查找输出设备，名称为空或找不到时回退到默认输出设备
