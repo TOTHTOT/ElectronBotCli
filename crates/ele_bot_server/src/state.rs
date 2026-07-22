@@ -170,6 +170,32 @@ impl SharedState {
     /// 2. 旧 ASR 线程不会继续占用 sherpa-onnx 解码
     /// 3. 系统中同时最多只有一个 ASR 实例在跑
     ///
+    /// # 为什么 sleep 60ms
+    ///
+    /// `asr::recognition_thread` 在 `audio_rx.recv_timeout(50ms)` 循环
+    /// 里等待音频块; 只有等这次等待超时并 wake, 才能在下一行检查
+    /// `running` 标志并主动退出. 50ms + 10ms 余量 = 60ms 是经验值,
+    /// 保证旧线程在这个窗口里完成退出, 不被新 cpal Stream 抢占同一
+    /// 设备的独占锁. **不要** 把这个 sleep 去掉或改短 — 会导致 Windows
+    /// WASAPI 上 `Failed to bind audio device` 间歇性失败.
+    ///
+    /// # 为什么 drop old Arc 而不是 abort 旧 ASR 线程
+    ///
+    /// 旧 ASR 线程已经在 `running=false` 后主动退出, 没有强杀的必要.
+    /// `Arc::drop` 让旧 cpal Stream 自然停流 (Drop 调 pause), 旧 sherpa-onnx
+    /// 解码器随 `VoiceManager` 析构释放. 强行 abort 可能让 sherpa-onnx
+    /// 内部状态损坏 (已经加载的模型可能 lock 住无法重建).
+    ///
+    /// # TTS 路径为什么不在这里 cancel
+    ///
+    /// ASR 是"长跑线程" (一直跑直到 running=false), 所以需要 cancel 信号.
+    /// TTS 路径 (`VoiceManager::speak` / `speak_streaming`) 是阻塞调用,
+    /// 跑在 `tokio::task::spawn_blocking` 里, 没人持有它的情况下用户发新
+    /// SetConfig 会触发本函数; 旧 TTS 调用仍在跑, 旧 `VoiceManager` 还
+    /// 被那个 spawn_blocking 闭包持有, 不会被 drop — 旧 device 句柄要等
+    /// TTS 自然结束才释放. 这是已知设计取舍 ("切设备立即打断 TTS" 留
+    /// 给未来 change). 见 `docs/voice-hot-swap.md`.
+    ///
     /// # 失败语义
     ///
     /// 当 `init_voice` 返回 Err (例如新设备被独占占用) 时, 旧
