@@ -8,6 +8,16 @@ use cpal::{Device, Stream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
+
+/// 从 cpal `Device` 同时取稳定 id 和 friendly name; 任一步失败返回 `None`.
+///
+/// 用于 `list_*_devices` 与 `find_*_device` 共享的"开箱"逻辑, 避免在 4 个
+/// 调用点重复 `d.id().ok()?.to_string()` + `d.description().ok()?.name()` 模板.
+fn device_id_and_name(d: &Device) -> Option<(String, String)> {
+    let id = d.id().ok()?.to_string();
+    let name = d.description().ok()?.name().to_string();
+    Some((id, name))
+}
 use std::thread;
 
 use self::tts::{TtsHandler, TtsPlayer};
@@ -91,22 +101,28 @@ unsafe impl Sync for VoiceManager {}
 impl VoiceManager {
     /// 创建voice模块, 通过静音检测截取有效实时音频数据,
     /// 完成后发送到解析线程
+    ///
+    /// `speech_device_id` / `output_device_id` 是 cpal `DeviceId` 序列化的
+    /// 稳定标识, 与 `speech_name` / `output_device_name` 配套传入; 任一为
+    /// `None` 或空时 `find_*_device` 自动按 name 兜底.
     pub fn new(
         asr_paths: AsrModelPaths,
         tts_paths: TtsModelPaths,
         speech_name: &str,
+        speech_device_id: Option<&str>,
         output_device_name: &str,
+        output_device_id: Option<&str>,
     ) -> Result<Self> {
         // 初始化 TTS
         let tts_handler = TtsHandler::new(&tts_paths.model, &tts_paths.tokens, &tts_paths.lexicon)?;
-        let tts_player = Some(TtsPlayer::new(output_device_name)?);
+        let tts_player = Some(TtsPlayer::new(output_device_name, output_device_id)?);
 
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let running = Arc::new(AtomicBool::new(true));
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
 
         // 查找输入麦克风, 当设备不存在时也会继续执行, 只是不会运行到 asr 相关功能
-        let stream = match find_input_device(speech_name) {
+        let stream = match find_input_device(speech_name, speech_device_id) {
             Ok(device) => {
                 let stream = build_asr_stream(&device, volume.clone(), audio_tx)?;
                 stream.play()?;
@@ -266,38 +282,61 @@ impl VoiceManager {
     }
 }
 
-fn find_input_device(speech_name: &str) -> Result<Device> {
+/// 按稳定 ID 查找输入设备, ID 失效或未提供时按 name 兜底, 都没命中则回退默认.
+///
+/// 匹配顺序: cpal `DeviceId` 优先 (Windows: IMMDevice endpoint ID 字符串),
+/// name 仅作为旧 config 或 ID 失效时的兜底. 全部为空或全部失败时回退到
+/// `host.default_input_device()`.
+fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Device> {
     let host = cpal::default_host();
     let devices: Vec<_> = host
         .input_devices()?
         .filter_map(|d| {
-            d.description()
-                .ok()
-                .map(|desc| (desc.name().to_string(), d))
+            let (id, name) = device_id_and_name(&d)?;
+            Some((id, name, d))
         })
         .collect();
-    log::info!(
-        "input audio device: {:?}",
-        devices.iter().map(|(name, _)| name).collect::<Vec<_>>()
+    log::debug!(
+        "target: name={speech_name:?}, id={device_id:?}, input audio devices: {:?}",
+        devices
+            .iter()
+            .map(|(id, name, _)| (id.as_str(), name.as_str()))
+            .collect::<Vec<_>>()
     );
-    // 名称为空时回退到默认输入设备
-    if speech_name.is_empty() {
+
+    let no_id = device_id.map(str::is_empty).unwrap_or(true);
+    if speech_name.is_empty() && no_id {
         return host
             .default_input_device()
             .ok_or_else(|| anyhow!("No default audio input device found"));
     }
-    let device = devices
-        .iter()
-        .find(|(name, _)| name == speech_name)
-        .map(|(_, d)| d.clone())
-        .ok_or_else(|| anyhow!("No audio input device found: {}", speech_name))?;
 
-    // 打印设备配置信息
-    if let Ok(config) = device.default_input_config() {
-        log::info!("Selected audio device config: {config:?} ");
+    // 1. 优先按 cpal DeviceId 匹配
+    if let Some(want_id) = device_id.filter(|s| !s.is_empty()) {
+        if let Some((_, _, d)) = devices.iter().find(|(id, _, _)| id == want_id) {
+            log::info!("Matched input device by id: {want_id}");
+            let device = d.clone();
+            if let Ok(config) = device.default_input_config() {
+                log::info!("Selected audio device config: {config:?}");
+            }
+            return Ok(device);
+        }
+        log::warn!("Input device id '{want_id}' not found, falling back to name match");
     }
 
-    Ok(device)
+    // 2. 兜底按 name 匹配
+    if !speech_name.is_empty() {
+        if let Some((_, _, d)) = devices.iter().find(|(_, n, _)| n == speech_name) {
+            log::info!("Matched input device by name: {speech_name}");
+            let device = d.clone();
+            if let Ok(config) = device.default_input_config() {
+                log::info!("Selected audio device config: {config:?}");
+            }
+            return Ok(device);
+        }
+    }
+
+    anyhow::bail!("No audio input device found: name={speech_name:?}, id={device_id:?}");
 }
 
 /// 设备信息 - 用于在设置页面中显示并区分同名设备
@@ -306,7 +345,10 @@ fn find_input_device(speech_name: &str) -> Result<Device> {
 /// [`list_output_devices_dto`] 转 [`ele_bot_proto::DeviceInfoDto`] 后走 WS.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    /// 实际设备名称 (cpal exact name)
+    /// cpal 稳定设备标识 (Windows: IMMDevice endpoint ID 字符串,
+    /// Linux: ALSA path, macOS: UID). 用于服务端按设备精确匹配.
+    pub id: String,
+    /// 实际设备名称 (cpal exact name). 仅作 `id` 失效时的兜底匹配键.
     pub name: String,
     /// 列表中显示的字符串, 包含通道数 / 采样率等额外信息
     pub display: String,
@@ -320,10 +362,10 @@ pub struct DeviceInfo {
 
 impl DeviceInfo {
     fn new(
+        id: String,
         name: String,
         channels: Option<u16>,
         sample_rate: Option<u32>,
-        _index: usize,
         driver: Option<String>,
     ) -> Self {
         let mut parts: Vec<String> = Vec::new();
@@ -342,6 +384,7 @@ impl DeviceInfo {
             format!("{} ({})", name, parts.join(", "))
         };
         Self {
+            id,
             name,
             display,
             driver,
@@ -356,18 +399,19 @@ pub fn list_input_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.input_devices()
         .map(|it| {
-            it.enumerate()
-                .filter_map(|(i, d)| {
-                    let desc = d.description().ok()?;
-                    let name = desc.name().to_string();
-                    let driver = desc.driver().map(|s| s.to_string());
-                    let (channels, sample_rate) = d
-                        .default_input_config()
-                        .map(|c| (Some(c.channels()), Some(c.sample_rate())))
-                        .unwrap_or((None, None));
-                    Some(DeviceInfo::new(name, channels, sample_rate, i, driver))
-                })
-                .collect()
+            it.filter_map(|d| {
+                let (id, name) = device_id_and_name(&d)?;
+                let driver = d
+                    .description()
+                    .ok()
+                    .and_then(|x| x.driver().map(str::to_string));
+                let (channels, sample_rate) = d
+                    .default_input_config()
+                    .map(|c| (Some(c.channels()), Some(c.sample_rate())))
+                    .unwrap_or((None, None));
+                Some(DeviceInfo::new(id, name, channels, sample_rate, driver))
+            })
+            .collect()
         })
         .unwrap_or_default()
 }
@@ -377,18 +421,19 @@ pub fn list_output_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.output_devices()
         .map(|it| {
-            it.enumerate()
-                .filter_map(|(i, d)| {
-                    let desc = d.description().ok()?;
-                    let name = desc.name().to_string();
-                    let driver = desc.driver().map(|s| s.to_string());
-                    let (channels, sample_rate) = d
-                        .default_output_config()
-                        .map(|c| (Some(c.channels()), Some(c.sample_rate())))
-                        .unwrap_or((None, None));
-                    Some(DeviceInfo::new(name, channels, sample_rate, i, driver))
-                })
-                .collect()
+            it.filter_map(|d| {
+                let (id, name) = device_id_and_name(&d)?;
+                let driver = d
+                    .description()
+                    .ok()
+                    .and_then(|x| x.driver().map(str::to_string));
+                let (channels, sample_rate) = d
+                    .default_output_config()
+                    .map(|c| (Some(c.channels()), Some(c.sample_rate())))
+                    .unwrap_or((None, None));
+                Some(DeviceInfo::new(id, name, channels, sample_rate, driver))
+            })
+            .collect()
         })
         .unwrap_or_default()
 }
@@ -399,6 +444,7 @@ pub fn list_output_devices() -> Vec<DeviceInfo> {
 /// 保持一致; 客户端通过 `display` 是否包含这些信息自行判断真实可用性.
 fn to_dto(info: &DeviceInfo) -> ele_bot_proto::DeviceInfoDto {
     ele_bot_proto::DeviceInfoDto {
+        id: info.id.clone(),
         name: info.name.clone(),
         display: info.display.clone(),
         driver: info.driver.clone(),
@@ -427,24 +473,55 @@ pub fn list_output_devices_dto() -> Vec<ele_bot_proto::DeviceInfoDto> {
     list_output_devices().iter().map(to_dto).collect()
 }
 
-/// 按名称查找输出设备，名称为空或找不到时回退到默认输出设备
-pub fn find_output_device(name: &str) -> Option<Device> {
+/// 按稳定 ID 查找输出设备, ID 失效或未提供时按 name 兜底, 都没命中则回退默认.
+///
+/// 匹配顺序: cpal `DeviceId` 优先 (Windows: IMMDevice endpoint ID 字符串),
+/// name 仅作为旧 config 或 ID 失效时的兜底. 全部为空或全部失败时回退到
+/// `host.default_output_device()`.
+pub fn find_output_device(name: &str, device_id: Option<&str>) -> Option<Device> {
     let host = cpal::default_host();
-    if !name.is_empty() {
-        if let Ok(devices) = host.output_devices() {
-            for d in devices {
-                if let Ok(desc) = d.description() {
-                    if desc.name() == name {
-                        return Some(d);
-                    }
-                }
-            }
-        }
-        log::warn!(
-            "Output device '{}' not found, falling back to default",
-            name
-        );
+    let devices: Vec<_> = host
+        .output_devices()
+        .ok()
+        .map(|it| {
+            it.filter_map(|d| {
+                let (id, name) = device_id_and_name(&d)?;
+                Some((id, name, d))
+            })
+            .collect()
+        })
+        .unwrap_or_default();
+    log::debug!(
+        "target: name={name:?}, id={device_id:?}, output audio devices: {:?}",
+        devices
+            .iter()
+            .map(|(id, name, _)| (id.as_str(), name.as_str()))
+            .collect::<Vec<_>>()
+    );
+
+    let no_id = device_id.map(str::is_empty).unwrap_or(true);
+    if name.is_empty() && no_id {
+        return host.default_output_device();
     }
+
+    // 1. 优先按 cpal DeviceId 匹配
+    if let Some(want_id) = device_id.filter(|s| !s.is_empty()) {
+        if let Some((_, _, d)) = devices.iter().find(|(id, _, _)| id == want_id) {
+            log::info!("Matched output device by id: {want_id}");
+            return Some(d.clone());
+        }
+        log::warn!("Output device id '{want_id}' not found, falling back to name match");
+    }
+
+    // 2. 兜底按 name 匹配
+    if !name.is_empty() {
+        if let Some((_, _, d)) = devices.iter().find(|(_, n, _)| n == name) {
+            log::info!("Matched output device by name: {name}");
+            return Some(d.clone());
+        }
+        log::warn!("Output device name '{name}' not found, falling back to default");
+    }
+
     host.default_output_device()
 }
 
@@ -455,8 +532,9 @@ pub fn play_beep(
     duration_ms: u32,
     interval_ms: u32,
     output_device_name: &str,
+    output_device_id: Option<&str>,
 ) {
-    let device = match find_output_device(output_device_name) {
+    let device = match find_output_device(output_device_name, output_device_id) {
         Some(d) => d,
         None => return,
     };

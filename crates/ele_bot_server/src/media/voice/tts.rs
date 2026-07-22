@@ -242,17 +242,20 @@ impl TtsPlayer {
     ///
     /// # 参数
     /// * `output_device_name` - cpal 设备名. 空字符串 `""` 表示系统默认设备.
+    /// * `output_device_id` - cpal `DeviceId` 序列化的稳定标识. 与
+    ///   `output_device_name` 配套传入; `None` 或空时按 name 兜底.
     ///
     /// # 边界
     /// 找不到设备时返回 `Err`. 设备句柄持有到 `TtsPlayer` Drop.
     ///
     /// # Examples
     /// ```rust,ignore
-    /// let player = TtsPlayer::new("")?; // 默认设备
-    /// let player = TtsPlayer::new("Speakers (Realtek)")?; // 指定设备
+    /// let player = TtsPlayer::new("", None)?; // 默认设备
+    /// let player = TtsPlayer::new("Speakers (Realtek)", None)?;
+    /// let player = TtsPlayer::new("", Some("{0.0.0...}"))?; // 按 id 优先
     /// ```
-    pub fn new(output_device_name: &str) -> Result<Self> {
-        let device = crate::media::voice::find_output_device(output_device_name)
+    pub fn new(output_device_name: &str, output_device_id: Option<&str>) -> Result<Self> {
+        let device = crate::media::voice::find_output_device(output_device_name, output_device_id)
             .ok_or_else(|| anyhow!("No audio output device found"))?;
 
         log::info!("TTS output device: {:?}", device.description());
@@ -395,7 +398,7 @@ impl TtsPlayer {
 impl Default for TtsPlayer {
     fn default() -> Self {
         // unwrap is safe here as it only fails if no audio device exists
-        Self::new("").unwrap()
+        Self::new("", None).unwrap()
     }
 }
 

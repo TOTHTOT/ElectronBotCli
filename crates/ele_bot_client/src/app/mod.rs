@@ -543,11 +543,44 @@ impl App {
     /// - 若本地缓存已就绪 (≥1 个设备), 直接以列表形式打开
     /// - 否则设 `loading=true` 并发 `List*Devices` 请求, 由 `apply_event`
     ///   收到 `*Devices` 后清 loading
+    ///
+    /// **光标默认对齐**: 打开时若当前配置的设备仍在列表里, 直接落到那条,
+    /// 用户 Enter 等于"保持当前选择"; 没匹配上才回 idx 0 (`<系统默认>`).
+    /// 避免无脑 Enter 误中系统默认, 把 `name` 清空、`device_id` 也清掉.
     pub fn enter_device_picker(&mut self, kind: SelectingKind) {
         let devices = self.picker_devices(kind).to_vec();
         let loading = devices.is_empty();
         let mut selecting = SelectingField::new(kind);
         selecting.loading = loading;
+
+        let (current_id, current_name) = match kind {
+            SelectingKind::Input => (
+                self.config.speech_device_id.as_deref(),
+                self.config.speech_name.as_str(),
+            ),
+            SelectingKind::Output => (
+                self.config.output_device_id.as_deref(),
+                self.config.output_device.as_str(),
+            ),
+        };
+        let matched_idx = current_id
+            .and_then(|id| devices.iter().position(|d| d.id == id))
+            .or_else(|| {
+                if current_name.is_empty() {
+                    None
+                } else {
+                    devices.iter().position(|d| d.name == current_name)
+                }
+            });
+        if let Some(idx) = matched_idx {
+            // idx 0 是 `<系统默认>`, 实际设备从 1 开始
+            selecting.cursor = idx + 1;
+            log::debug!(
+                "device picker cursor aligned to current config: idx={}, name={current_name:?}, id={current_id:?}",
+                idx + 1
+            );
+        }
+
         if let Route::Settings { selecting: s, .. } = &mut self.ui.mode.route {
             *s = Some(selecting.clone());
         }
@@ -595,8 +628,9 @@ impl App {
 
     /// 提交 picker 选择
     ///
-    /// - idx 0 → `<系统默认>` (空字符串)
-    /// - idx > 0 → 写 `devices[idx-1].name`
+    /// - idx 0 → `<系统默认>` (空字符串, id 也置 None)
+    /// - idx > 0 → 写 `devices[idx-1].name` 和 `devices[idx-1].id`,
+    ///   服务端按 id 优先匹配, name 仅作兜底
     /// - 设 `last_device_submit`, 清 overlay 与 selecting, 发 `SetConfig`
     pub fn confirm_device_picker(&mut self) {
         let kind = if let Route::Settings {
@@ -616,17 +650,23 @@ impl App {
         } else {
             0
         };
-        let chosen = if cursor == 0 {
-            String::new()
+        let (chosen_name, chosen_id) = if cursor == 0 {
+            (String::new(), None)
         } else {
             match devices.get(cursor - 1) {
-                Some(d) => d.name.clone(),
+                Some(d) => (d.name.clone(), Some(d.id.clone())),
                 None => return,
             }
         };
         match kind {
-            SelectingKind::Input => self.config.speech_name = chosen.clone(),
-            SelectingKind::Output => self.config.output_device = chosen.clone(),
+            SelectingKind::Input => {
+                self.config.speech_name = chosen_name.clone();
+                self.config.speech_device_id = chosen_id.clone();
+            }
+            SelectingKind::Output => {
+                self.config.output_device = chosen_name.clone();
+                self.config.output_device_id = chosen_id.clone();
+            }
         }
         self.last_device_submit = Some(DeviceSubmitStamp {
             at: Instant::now(),
@@ -636,7 +676,7 @@ impl App {
             *s = None;
         }
         self.ui.mode.overlay = None;
-        log::info!("device picker commit: kind={kind:?} name={chosen}");
+        log::info!("device picker commit: kind={kind:?} name={chosen_name} id={chosen_id:?}");
         self.send_cmd(ClientMessage::SetConfig {
             config: self.config.clone(),
         });

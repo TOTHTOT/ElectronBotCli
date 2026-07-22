@@ -116,12 +116,16 @@ pub enum DisplayMode {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub speech_name: String,
+    /// 麦克风设备稳定标识 (cpal `DeviceId`); 与 `speech_name` 二选一优先
+    pub speech_device_id: Option<String>,
     pub camera_index: String,
     pub rotation: RotateAngle,
     pub wifi_ssid: String,
     pub wifi_password: String,
     /// 输出设备名称（空字符串表示使用系统默认设备）
     pub output_device: String,
+    /// 输出设备稳定标识 (cpal `DeviceId`); 与 `output_device` 二选一优先
+    pub output_device_id: Option<String>,
     pub llm_api_base: String,
     pub llm_api_key: String,
     pub llm_model: String,
@@ -134,11 +138,13 @@ impl Default for AppConfig {
     fn default() -> Self {
         Self {
             speech_name: "麦克风阵列".to_string(),
+            speech_device_id: None,
             rotation: RotateAngle::Rotate270,
             camera_index: "0".to_string(),
             wifi_ssid: String::new(),
             wifi_password: String::new(),
             output_device: String::new(),
+            output_device_id: None,
             llm_api_base: String::new(),
             llm_api_key: String::new(),
             llm_model: "doubao-seed-1-6-251015".to_string(),
@@ -158,15 +164,23 @@ pub struct CameraResolution {
 
 /// 音频设备信息(通过 `ListInputDevices` / `ListOutputDevices` 传输)
 ///
-/// `name` 是 cpal 的精确设备名, 写入 `AppConfig.speech_name` / `output_device`
-/// 时必须用此字段做 exact match; `display` 是给人类看的拼接字符串, 客户端
-/// MUST NOT 用正则解析它.
+/// `id` 是 cpal `Device::id()` 序列化的稳定标识符 (Windows 上是 IMMDevice
+/// endpoint ID 字符串, Linux 是 ALSA path, macOS 是 UID). 同一 OS 会话内
+/// 唯一, 跨枚举顺序变化稳定, 用于服务端按设备匹配 — 写入
+/// `AppConfig.speech_device_id` / `output_device_id` 时必须用此字段.
+///
+/// `name` 是 cpal 的精确设备名 (Windows 上是 FriendlyName, 多 endpoint /
+/// 多虚拟设备常重名), 仅作为 `id` 失效时的兜底匹配键以及向后兼容老 config.
+///
+/// `display` 是给人类看的拼接字符串, 客户端 MUST NOT 用正则解析它.
 ///
 /// `driver` 独立成字段而非藏在 `display` 字符串里, 便于客户端按需布局 /
 /// 着色; 见 `enhance-device-picker` spec 中的 "设备显示须呈现驱动字段" 需求.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DeviceInfoDto {
-    /// 精确设备名 (exact match key)
+    /// 稳定设备标识 (cpal `DeviceId` 序列化), 服务端按此匹配
+    pub id: String,
+    /// 精确设备名 (exact match key, 仅作为 id 兜底)
     pub name: String,
     /// 给人类看的拼接串 (e.g. "WASAPI 麦克风阵列 (2ch, 48000Hz)")
     pub display: String,

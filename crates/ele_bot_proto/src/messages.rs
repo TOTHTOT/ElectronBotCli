@@ -7,6 +7,9 @@ use crate::types::*;
 use serde::{Deserialize, Serialize};
 
 /// 客户端发送的命令
+// `AppConfig` 体积较大, 但作为 WS 消息的单一载荷, boxing 会让序列化/反序列化
+// 多一层 Box 解包开销且无实质收益; 这里用 allow 跳过该 lint.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ClientMessage {
@@ -63,6 +66,8 @@ impl ClientMessage {
 }
 
 /// 服务端推送的事件
+// 同 `ClientMessage`: `AppConfig` 体积大但作为单字段载荷 boxing 无收益.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ServerEvent {
@@ -173,6 +178,7 @@ mod tests {
     fn input_devices_event_roundtrip() {
         let evt = ServerEvent::InputDevices {
             devices: vec![DeviceInfoDto {
+                id: "{0.0.0.00000000}.{test-guid}".to_string(),
                 name: "麦克风阵列".to_string(),
                 display: "WASAPI 麦克风阵列 (2ch, 48000Hz)".to_string(),
                 driver: Some("WASAPI".to_string()),

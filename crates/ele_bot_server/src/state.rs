@@ -274,7 +274,9 @@ impl SharedState {
                 AsrModelPaths::new(sense_voice_path, silero_vad_path, tokens_path),
                 TtsModelPaths::new(tts_model_path, tts_tokens_path, tts_lexicon_path),
                 &config.speech_name,
+                config.speech_device_id.as_deref(),
                 &config.output_device,
+                config.output_device_id.as_deref(),
             )
         } else {
             anyhow::bail!("voice model not available");
