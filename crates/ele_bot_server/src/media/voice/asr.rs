@@ -102,12 +102,12 @@ fn recognition_loop(
 
         // VAD detection: 喂当轮新收的 samples (而非 pre_roll 滑动子集),
         // 让 VAD 内部状态跟 cpal 推送的 chunk 对齐.
-        let is_speech = if samples.len() >= 512 {
-            vad.accept_waveform(&samples[..samples.len().min(512)]);
-            vad.detected()
-        } else {
-            false
-        };
+        // 注: cpal 配置 channels=2, process_audio_chunk 里立体声 downmix 到单声道
+        // (每 2 样本 → 1), 所以 samples.len() 通常 = 256 (32ms). 不能用
+        // samples.len() >= 512 守卫, 否则 VAD 永远不会被喂数据.
+        let feed_n = samples.len().min(VAD_WINDOW_SIZE as usize);
+        vad.accept_waveform(&samples[..feed_n]);
+        let is_speech = vad.detected();
 
         if is_speech {
             if !speaking {
