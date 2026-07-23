@@ -172,16 +172,24 @@ fn handle_nav(app: &mut App, code: KeyCode) {
                 .and_then(|i| MenuItem::all().get(i).copied())
                 .unwrap_or(last_entered);
             log::info!("nav selected: {:?}", last);
+
+            // 设备状态页: Enter = 连接/断开, 不进入新 Route
+            // (Route::from(DeviceStatus) 会映射回 Route::Nav, 形成死循环)
+            if last == MenuItem::DeviceStatus {
+                if app.is_connected() {
+                    app.stop_comm_thread();
+                } else {
+                    app.connect_robot();
+                }
+                return;
+            }
+
             app.ui.mode.route = Route::from(last);
             // 进 Settings 时自动拉设备列表, picker 第一次打开就有数据
             if last == MenuItem::Settings {
                 app.refresh_device_lists();
             }
-            if last == MenuItem::DeviceStatus {
-                Some(AppEvent::Menu(MenuEvent::ConnectDevice))
-            } else {
-                None
-            }
+            None
         }
         _ => None,
     };
