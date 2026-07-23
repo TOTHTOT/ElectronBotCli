@@ -94,6 +94,7 @@ impl SharedState {
         let lcd_frame_cache = Arc::new(Mutex::new(None));
 
         // 语音
+        log::debug!("start init voice");
         let voice = match Self::init_voice(&config) {
             Ok(m) => Some(Arc::new(m)),
             Err(e) => {
@@ -103,6 +104,7 @@ impl SharedState {
         };
 
         // LLM
+        log::debug!("start init llm");
         let llm = Self::init_llm(&config)?;
 
         // 事件广播

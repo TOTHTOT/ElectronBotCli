@@ -81,7 +81,7 @@ fn recognition_loop(
                 // 50ms 没数据, 检查取消信号. cpal Stream 已经 Drop
                 // 时 audio_rx 也会 Disconnected, 走下面分支.
                 if !running.load(Ordering::Relaxed) {
-                    log::info!("ASR 线程收到取消信号, 退出");
+                    log::info!("ASR receive exit flag");
                     return Ok(());
                 }
                 continue;
@@ -165,6 +165,41 @@ fn peak_to_volume(peak: f32) -> i32 {
     (((db + 40.0) * (100.0 / 40.0)) as i32).clamp(0, 100)
 }
 
+/// 计算一帧音频的峰值音量并推进音量条 (attack/decay), 然后 downmix
+/// 到单声道推给识别线程.
+///
+/// 音量条更新: 新峰值立即拉升, 否则按 0.95/帧 指数衰减
+/// (半衰期约 0.4s). 多声道按左右声道算术均值降混; 单声道直通.
+/// 函数不获取 `volume` / `audio_tx` 的所有权, 由调用方持有 (通常是
+/// cpal 输入流闭包, 闭包负责把变量 move 进来).
+fn process_audio_chunk(
+    data: &[f32],
+    channels: usize,
+    volume: &Arc<AtomicI32>,
+    audio_tx: &SyncSender<Vec<f32>>,
+) {
+    let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
+    let peak_value = peak_to_volume(peak);
+    let current = volume.load(Ordering::Relaxed);
+    // 实时音量大小
+    let new_value = if peak_value > current {
+        peak_value
+    } else if current > 0 {
+        ((current as f32) * 0.95) as i32
+    } else {
+        0
+    };
+    volume.store(new_value, Ordering::Relaxed);
+
+    // 音频数据
+    let mono: Vec<f32> = if channels == 2 {
+        data.chunks(2).map(|c| (c[0] + c[1]) / 2.0).collect()
+    } else {
+        data.to_vec()
+    };
+    let _ = audio_tx.send(mono);
+}
+
 /// Build audio input stream for ASR
 pub fn build_asr_stream(
     device: &Device,
@@ -179,34 +214,15 @@ pub fn build_asr_stream(
         sample_rate: SAMPLE_RATE as SampleRate,
         buffer_size: cpal::BufferSize::Fixed(512),
     };
-    log::info!("Stream config: {}", stream_config.sample_rate);
 
     let channels = config.channels() as usize;
     let volume_clone = volume.clone();
 
+    // 根据设置的stream_config申请音频流
     Ok(device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
-            let peak_value = peak_to_volume(peak);
-            let current = volume_clone.load(Ordering::Relaxed);
-            let new_value = if peak_value > current {
-                // 新峰值: 立即提升
-                peak_value
-            } else if current > 0 {
-                // 慢速指数衰减 (约 0.95 / 32ms, 半衰期约 0.4s)
-                ((current as f32) * 0.95) as i32
-            } else {
-                0
-            };
-            volume_clone.store(new_value, Ordering::Relaxed);
-
-            let mono: Vec<f32> = if channels == 2 {
-                data.chunks(2).map(|c| (c[0] + c[1]) / 2.0).collect()
-            } else {
-                data.to_vec()
-            };
-            let _ = audio_tx.send(mono);
+            process_audio_chunk(data, channels, &volume_clone, &audio_tx);
         },
         |e| log::error!("Audio stream error: {e}"),
         None,

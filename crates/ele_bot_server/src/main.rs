@@ -37,7 +37,7 @@ async fn main() -> anyhow::Result<()> {
     } else {
         // 文件创建失败时退回到只输出到终端, 保证至少有日志
         let _ = CombinedLogger::init(vec![TermLogger::new(
-            simplelog::LevelFilter::Info,
+            simplelog::LevelFilter::Debug,
             Config::default(),
             TerminalMode::Stderr,
             ColorChoice::Auto,

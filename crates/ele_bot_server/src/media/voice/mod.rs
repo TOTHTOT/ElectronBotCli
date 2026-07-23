@@ -311,10 +311,14 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
             .ok_or_else(|| anyhow!("No default audio input device found"));
     }
 
-    // 1. 优先按 cpal DeviceId 匹配
+    //  优先按 cpal DeviceId 匹配
     if let Some(want_id) = device_id.filter(|s| !s.is_empty()) {
         if let Some((_, _, d)) = devices.iter().find(|(id, _, _)| id == want_id) {
-            log::info!("Matched input device by id: {want_id}");
+            log::info!(
+                "Matched input device by id: {want_id}, name {:?}, driver: {:?}",
+                d.description()?.name(),
+                d.description()?.driver()
+            );
             let device = d.clone();
             if let Ok(config) = device.default_input_config() {
                 log::info!("Selected audio device config: {config:?}");
@@ -324,7 +328,7 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
         log::warn!("Input device id '{want_id}' not found, falling back to name match");
     }
 
-    // 2. 兜底按 name 匹配
+    // 兜底按 name 匹配
     if !speech_name.is_empty() {
         if let Some((_, _, d)) = devices.iter().find(|(_, n, _)| n == speech_name) {
             log::info!("Matched input device by name: {speech_name}");
