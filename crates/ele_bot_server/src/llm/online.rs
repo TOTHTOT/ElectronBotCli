@@ -224,7 +224,10 @@ impl OnlineLlm {
             .choices
             .first()
             .and_then(|c| c.message.content.clone())
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                log::warn!("response is none");
+                String::from("[中性]")
+            });
 
         log::info!("Online LLM response: {}", content);
 
