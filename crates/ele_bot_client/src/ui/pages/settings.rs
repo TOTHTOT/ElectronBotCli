@@ -34,7 +34,10 @@ fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: C
     frame.render_widget(outer_block, area);
 
     let text = if in_edit {
-        "操作: [Enter] 保存  [Esc] 取消  [Backspace] 删除字符"
+        // 编辑态: 列出全部支持的按键. 中文混排, 终端窄 (<80 列) 时
+        // Paragraph 默认会截断, 这里不加 wrap=Word; 用户实际使用的
+        // 终端多在 100 列以上, 80 列以下截断不致命.
+        "操作: [Enter] 保存  [Esc] 取消  [Backspace] 删前  [Delete] 删后  [←→] 移动  [Home/End] 跳首尾"
     } else {
         "操作: [↑/↓] 选择  [Enter] 编辑/选设备  [Esc] 退出  [R] 刷新设备列表"
     };
@@ -69,12 +72,15 @@ fn render_settings_list(
         } else {
             &item.value
         };
+        // caret 字符索引; 仅当 is_editing 时该值有意义, 其它行用 0.
+        let caret_char_idx = if is_editing { vm.edit_cursor } else { 0 };
 
         render_setting_item(
             frame,
             item_area,
             item.label,
             display_value,
+            caret_char_idx,
             is_selected,
             is_editing,
             &item.value,
@@ -83,11 +89,41 @@ fn render_settings_list(
 }
 
 /// 渲染设置项
+///
+/// # caret 渲染策略
+///
+/// 编辑态 (`is_editing == true`) 把 buffer 拆三段:
+///
+/// ```text
+/// <indicator> <label>: <before>█<after>
+///                   ────────反色高亮, █ 是反色块字符作为 caret
+/// ```
+///
+/// **不**用 `Frame::set_cursor_position`: `crate::ui::mod.rs::render`
+/// 的 popup layer 在 `EditField` 上方 `Clear`, 终端原生光标位置会被
+/// Clear 抹掉 — 出现"按键时看见光标动, 静下来位置又不对"的诡异 bug.
+/// 块字符 caret 对 overlay 渲染兼容, 代价是不能闪烁.
+///
+/// 字符切分严格按 `char` 走 (`chars().take(caret_char_idx)`),
+/// `caret_char_idx` 单位是 char 不是 byte — `EditField::before_cursor`
+/// 提供等价行为, 本函数为渲染独立计算避免把 `EditField` 类型漏到 UI 层.
+///
+/// 参数表偏长 (8 个) 是因为:
+/// 1. ratatui 的 `frame` + `area` 必须按值传 (生命周期约束)
+/// 2. `label` / `value` / `raw_value` 是三种不同语义的文本 (`value` 是
+///    编辑态 buffer, `raw_value` 是原始显示用, 用于判定"空值占位色")
+/// 3. `is_selected` / `is_editing` 互不蕴含 (选中不等于编辑)
+/// 4. `caret_char_idx` 仅在 `is_editing` 时有效
+///
+/// 合成 struct 反而把 helper 变成一个轻量 builder, 不符合"渲染一行就地调"
+/// 的本意 — 这里 `#[allow]` 而不是合并.
+#[allow(clippy::too_many_arguments)]
 fn render_setting_item(
     frame: &mut Frame,
     area: Rect,
     label: &str,
     value: &str,
+    caret_char_idx: usize,
     is_selected: bool,
     is_editing: bool,
     raw_value: &str,
@@ -100,23 +136,40 @@ fn render_setting_item(
         Color::White
     };
 
-    let text = vec![Line::from_iter([
-        Span::styled(
-            indicator.to_string(),
-            Style::new().fg(color).add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(format!(" {label}: "), Style::new().fg(color)),
-        Span::styled(
-            value,
-            if is_editing {
-                Style::new().fg(Color::Black).bg(Color::White)
-            } else if raw_value.is_empty() {
-                Style::new().fg(Color::DarkGray)
-            } else {
-                Style::new().fg(Color::Yellow)
-            },
-        ),
-    ])];
+    let base_style = Style::new().fg(color);
+    let indicator_span = Span::styled(
+        indicator.to_string(),
+        base_style.add_modifier(Modifier::BOLD),
+    );
+    let label_span = Span::styled(format!(" {label}: "), base_style);
+
+    let text = if is_editing {
+        // 三段拼接: before + caret(块字符) + after
+        let before: String = value.chars().take(caret_char_idx).collect();
+        let after: String = value.chars().skip(caret_char_idx).collect();
+        let ed_style = Style::new().fg(Color::Black).bg(Color::White);
+        // caret 用 ASCII 块字符 `\u{2588}` 占一列; 同 bg 区分普通 fg.
+        let caret_span = Span::styled("\u{2588}", ed_style);
+        vec![Line::from_iter([
+            indicator_span,
+            label_span,
+            Span::styled(before, ed_style),
+            caret_span,
+            Span::styled(after, ed_style),
+        ])]
+    } else {
+        let val_style = if raw_value.is_empty() {
+            // 占位色 — 不在 UI 上把"空"显示成普通黄字
+            Style::new().fg(Color::DarkGray)
+        } else {
+            Style::new().fg(Color::Yellow)
+        };
+        vec![Line::from_iter([
+            indicator_span,
+            label_span,
+            Span::styled(value, val_style),
+        ])]
+    };
 
     let widget = Paragraph::new(text).style(Style::new().fg(Color::White));
     frame.render_widget(widget, area);

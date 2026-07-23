@@ -63,13 +63,34 @@ impl Default for DeviceCache {
 pub type Runtime = tokio::runtime::Runtime;
 
 /// 设置项标签(供 EditField::label 使用)
-pub const SETTINGS_LABELS: [&str; 4] = ["Wifi名称", "Wifi密码", "麦克风", "扬声器"];
+///
+/// 顺序与下方的 `SETTINGS_IDX_*` 常量一一对应. 列表渲染
+/// (`viewmodel/settings.rs::from_app`) 也按这个顺序构 items.
+/// **新加项时**:
+/// 1. 在数组末尾 (设备项之前) 插入新 label
+/// 2. 在下面追加新常量
+/// 3. `begin_settings_edit` / `commit_settings_edit` 加 match 分支
+pub const SETTINGS_LABELS: [&str; 7] = [
+    "Wifi名称",    // 0
+    "Wifi密码",    // 1
+    "LLM API地址", // 2
+    "LLM API Key", // 3
+    "LLM模型",     // 4
+    "麦克风",      // 5 - picker
+    "扬声器",      // 6 - picker
+];
 
 /// 设置项索引常量 — 列表顺序变更时, 引用方必须同步更新
+///
+/// 设备项 (SPEECH/OUTPUT) 在 idx 5/6, 之前 (idx 2/3/4) 是 LLM 三项.
+/// `begin_settings_edit` 的 `_ => return` 兜底让设备项继续走 picker.
 pub const SETTINGS_IDX_WIFI_SSID: usize = 0;
 pub const SETTINGS_IDX_WIFI_PASSWORD: usize = 1;
-pub const SETTINGS_IDX_SPEECH: usize = 2;
-pub const SETTINGS_IDX_OUTPUT: usize = 3;
+pub const SETTINGS_IDX_LLM_API_BASE: usize = 2;
+pub const SETTINGS_IDX_LLM_API_KEY: usize = 3;
+pub const SETTINGS_IDX_LLM_MODEL: usize = 4;
+pub const SETTINGS_IDX_SPEECH: usize = 5;
+pub const SETTINGS_IDX_OUTPUT: usize = 6;
 
 /// UI 状态
 #[derive(Debug)]
@@ -474,8 +495,9 @@ impl App {
 
     /// 进入设置项编辑(从 Settings 页面 Enter 时调用)
     ///
-    /// 仅对 Wifi 名称 / Wifi 密码 (index 0/1) 生效. 麦克风 / 扬声器 (2/3)
-    /// 由 `enter_device_picker` 处理, 不会进入文本编辑模式.
+    /// 对文本字段 (Wifi×2 + LLM×3, idx 0..=4) 创建 `EditField`, 初始化
+    /// cursor 在 buffer 末尾 (方便用户继续追加). 设备项 (idx 5/6)
+    /// 由 `enter_device_picker` 处理, 此处返回不进编辑态.
     pub fn begin_settings_edit(&mut self) {
         if let Route::Settings {
             selected,
@@ -486,18 +508,30 @@ impl App {
             let initial = match *selected {
                 SETTINGS_IDX_WIFI_SSID => self.config.wifi_ssid.clone(),
                 SETTINGS_IDX_WIFI_PASSWORD => self.config.wifi_password.clone(),
-                // 麦克风 / 扬声器行 (2/3) 走 picker, 此处返回不编辑
+                SETTINGS_IDX_LLM_API_BASE => self.config.llm_api_base.clone(),
+                SETTINGS_IDX_LLM_API_KEY => self.config.llm_api_key.clone(),
+                SETTINGS_IDX_LLM_MODEL => self.config.llm_model.clone(),
+                // 麦克风 / 扬声器行 (5/6) 走 picker, 此处返回不编辑
                 _ => return,
             };
+            // cursor 初始化在末尾字符位置: 用户按 Left 即可微调, 不会
+            // 强制从头开始, 跟"接着改"的常见使用习惯吻合.
+            let cursor = initial.chars().count();
             *editing = Some(EditField::new(
                 *selected,
                 SETTINGS_LABELS[*selected],
                 initial,
+                cursor,
             ));
         }
     }
 
     /// 提交编辑(Enter on EditField overlay)
+    ///
+    /// 把 EditField.buffer 写回 self.config 对应字段, 然后走现有
+    /// `set_config` 路径 — 与"setting-list 顺序变更"无关注, 只是新增
+    /// LLM 三个分支. `_` 兜底对应当前未实现的 idx (8+/out-of-range),
+    /// 防御性 no-op.
     pub fn commit_settings_edit(&mut self) {
         if let Route::Settings {
             selected,
@@ -509,6 +543,9 @@ impl App {
                 match field.index {
                     SETTINGS_IDX_WIFI_SSID => self.config.wifi_ssid = field.buffer,
                     SETTINGS_IDX_WIFI_PASSWORD => self.config.wifi_password = field.buffer,
+                    SETTINGS_IDX_LLM_API_BASE => self.config.llm_api_base = field.buffer,
+                    SETTINGS_IDX_LLM_API_KEY => self.config.llm_api_key = field.buffer,
+                    SETTINGS_IDX_LLM_MODEL => self.config.llm_model = field.buffer,
                     _ => {}
                 }
                 *selected = field.index;

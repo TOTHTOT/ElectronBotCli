@@ -21,7 +21,9 @@ pub use settings::SettingsEvent;
 
 use crate::app::overlay::PopupDismiss;
 use crate::app::route::{DeviceControlMode, SelectingKind};
-use crate::app::{App, MenuItem, Overlay, Route, SETTINGS_IDX_OUTPUT, SETTINGS_IDX_SPEECH};
+use crate::app::{
+    App, EditField, MenuItem, Overlay, Route, SETTINGS_IDX_OUTPUT, SETTINGS_IDX_SPEECH,
+};
 use crate::input::llm_test::handle as handle_llm_test;
 use crate::input::tts_test::handle as handle_tts_test;
 use crossterm::event::{KeyCode, KeyModifiers};
@@ -303,6 +305,46 @@ fn handle_tts_test_route(app: &mut App, code: KeyCode) {
 
 fn handle_about(_app: &mut App, _code: KeyCode) {}
 
+/// 把按键翻译为 `EditField` 上的具体操作
+///
+/// 由 `handle_overlay` 的 `Overlay::EditField` 分支调用; **只**关心
+/// 怎么改 buffer/cursor, 不负责 commit/cancel (那两个走 Enter/Esc
+/// 在 handle_overlay 单独处理).
+///
+/// ## 设计理由
+///
+/// 把按键语义下沉到 helper 而不是膨胀 `handle_overlay` 的 match arm,
+/// 加新按键 (例如 Ctrl+A 全选 / Ctrl+K 删到末尾) 时只要往这里加分支,
+/// 不动分发 match.
+///
+/// ## 字符 vs 控制键
+///
+/// crossterm 把 `Tab` 编为独立 `KeyCode::Tab`, **不会**走 `Char('\t')`
+/// 分支; `Enter` 走自己的 `KeyCode::Enter` 也不到这. 所以 `Char(c)`
+/// 分支可以安全接受任何 UTF-8 char, 不需要过滤控制键. 此假设若被
+/// crossterm 升级打破, 需重新审视 (filter `c.is_control()`).
+///
+/// ## 未识别按键
+///
+/// 不在表内的 `KeyCode` (`F1`/`PageUp`/...) 原样穿透, 不动 buffer
+/// 不动 cursor, 跟改前的 `_ => Some(Overlay::EditField(field))` 语义一致.
+fn apply_edit_key(f: &mut EditField, code: KeyCode) {
+    match code {
+        KeyCode::Left => f.move_cursor_left(1),
+        KeyCode::Right => f.move_cursor_right(1),
+        KeyCode::Home => f.move_cursor_to_start(),
+        KeyCode::End => f.move_cursor_to_end(),
+        KeyCode::Backspace => {
+            let _ = f.delete_back();
+        }
+        KeyCode::Delete => {
+            let _ = f.delete_forward();
+        }
+        KeyCode::Char(c) => f.insert_char(c),
+        _ => {} // 其它按键 (Tab / F1-12 / PageUp 等) 不动 buffer
+    }
+}
+
 /// 模态层: overlay 优先消费按键
 fn handle_overlay(app: &mut App, code: KeyCode) {
     let overlay = app.ui.mode.overlay.take();
@@ -321,23 +363,20 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
                     app.commit_settings_edit();
                     None
                 }
-                KeyCode::Backspace => {
+                // 编辑按键 (Left/Right/Home/End/Delete/Backspace/Char) 全部走
+                // [`apply_edit_key`], 该辅助集中翻译为 EditField 操作. 任何未识别
+                // 的 KeyCode (例如 Tab, F1) 原样穿透, 不改 buffer 也不改 cursor —
+                // 跟现状兼容, 避免未来再加新按键时让 match 越来越胖.
+                code => {
                     let mut f = field;
-                    f.buffer.pop();
+                    apply_edit_key(&mut f, code);
+                    // buffer / cursor 改变后回写 Route.editing, 让 viewmodel 下一帧
+                    // 拿到新值; 同时把 f 放回 overlay 供后续按键继续.
                     if let Route::Settings { editing, .. } = &mut app.ui.mode.route {
                         *editing = Some(f.clone());
                     }
                     Some(Overlay::EditField(f))
                 }
-                KeyCode::Char(c) => {
-                    let mut f = field;
-                    f.buffer.push(c);
-                    if let Route::Settings { editing, .. } = &mut app.ui.mode.route {
-                        *editing = Some(f.clone());
-                    }
-                    Some(Overlay::EditField(f))
-                }
-                _ => Some(Overlay::EditField(field)),
             };
             app.ui.mode.overlay = new_overlay;
         }

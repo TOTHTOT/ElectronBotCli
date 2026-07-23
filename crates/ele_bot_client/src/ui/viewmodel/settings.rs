@@ -9,6 +9,10 @@ pub struct SettingsViewModel {
     pub selected_index: usize,
     pub in_edit_mode: bool,
     pub edit_buffer: String,
+    /// 编辑态 caret 的字符索引, 由渲染层 (`pages/settings.rs::render_setting_item`)
+    /// 用于把 buffer 拆成 `before + caret + after` 三段渲染. 非编辑态值无意义,
+    /// 渲染层只用 `in_edit_mode` 当 gate.
+    pub edit_cursor: usize,
     pub picker: Option<PickerVm>,
     pub failure_overlay: Option<FailureVm>,
 }
@@ -58,6 +62,21 @@ impl SettingsViewModel {
                 label: "Wifi密码",
                 value: app.config.wifi_password.clone(),
             },
+            // LLM 三项 — 顺序需与 `app::SETTINGS_IDX_LLM_*` 索引常量一致;
+            // 即使其中某项为空字符串, 也保留位置, 渲染层负责用暗灰 `<未配置>`
+            // 占位. `llm_api_key` 不掩盖显示 (掩码 UX 是未来 change, 见 spec).
+            SettingItem {
+                label: "LLM API 地址",
+                value: app.config.llm_api_base.clone(),
+            },
+            SettingItem {
+                label: "LLM API Key",
+                value: app.config.llm_api_key.clone(),
+            },
+            SettingItem {
+                label: "LLM 模型",
+                value: app.config.llm_model.clone(),
+            },
         ];
 
         // 麦克风 / 扬声器: 显示当前选择的 display (查设备缓存, 找不到回退原值)
@@ -70,19 +89,20 @@ impl SettingsViewModel {
             value: display_for(&app.devices.outputs, &app.config.output_device),
         });
 
-        // 从 Route::Settings 取 selected + editing
-        let (selected_index, in_edit_mode, edit_buffer, selecting) = match &app.ui.mode.route {
-            Route::Settings {
-                editing: Some(f), ..
-            } => (f.index, true, f.buffer.clone(), None),
-            Route::Settings {
-                selected,
-                selecting: Some(s),
-                ..
-            } => (*selected, false, String::new(), Some(s.clone())),
-            Route::Settings { selected, .. } => (*selected, false, String::new(), None),
-            _ => (0, false, String::new(), None),
-        };
+        // 从 Route::Settings 取 selected + editing + cursor
+        let (selected_index, in_edit_mode, edit_buffer, edit_cursor, selecting) =
+            match &app.ui.mode.route {
+                Route::Settings {
+                    editing: Some(f), ..
+                } => (f.index, true, f.buffer.clone(), f.cursor, None),
+                Route::Settings {
+                    selected,
+                    selecting: Some(s),
+                    ..
+                } => (*selected, false, String::new(), 0, Some(s.clone())),
+                Route::Settings { selected, .. } => (*selected, false, String::new(), 0, None),
+                _ => (0, false, String::new(), 0, None),
+            };
 
         let picker = match &app.ui.mode.overlay {
             Some(Overlay::DevicePicker { selecting, devices }) => {
@@ -132,6 +152,7 @@ impl SettingsViewModel {
             selected_index,
             in_edit_mode,
             edit_buffer,
+            edit_cursor,
             picker,
             failure_overlay,
         }
