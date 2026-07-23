@@ -212,11 +212,9 @@ impl App {
             }
             ServerEvent::Connection { is_connected } => {
                 server.robot_connected = is_connected;
-                // 连接建立后, 自动 dismiss "正在连接设备..." 弹窗
-                if is_connected {
-                    if let Some(Overlay::Popup { .. }) = &self.ui.mode.overlay {
-                        self.ui.mode.overlay = None;
-                    }
+                // 连接建立后, 自动 dismiss "正在连接设备..." 弹窗, 不管失败还是成功都关闭, 避免设备不存在返回失败了还一直显示
+                if let Some(Overlay::Popup { .. }) = &self.ui.mode.overlay {
+                    self.ui.mode.overlay = None;
                 }
             }
             ServerEvent::JointState { state } => {

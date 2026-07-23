@@ -184,6 +184,7 @@ async fn handle_command(
                 Err(e) => {
                     log::warn!("failed to connect: {e}");
                     *state.bot_tx.lock().unwrap() = None;
+                    state.notify_connection(false);
                 }
             }
         }
