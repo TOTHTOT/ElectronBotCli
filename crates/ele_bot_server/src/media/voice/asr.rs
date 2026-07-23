@@ -92,19 +92,18 @@ fn recognition_loop(
             }
         };
 
-        // Sliding window: keep latest 500ms
-        while pre_roll.len() >= PRE_ROLL_SAMPLES {
+        // Sliding window: keep latest 500ms. 用 `len + samples.len() > target`
+        // 一次性 pop 到位, 避免 while >= + extend 后超容量 (旧逻辑让 pre_roll
+        // 涨到 9599, 比 8000 容量上限多留 1599 样本 ≈ 100ms).
+        while pre_roll.len() + samples.len() > PRE_ROLL_SAMPLES {
             pre_roll.pop_front();
         }
         pre_roll.extend(&samples);
 
-        // VAD detection: use pre_roll (already includes current samples)
-        let is_speech = if pre_roll.len() >= VAD_WINDOW_SIZE as usize * 2 {
-            let all_samples: Vec<f32> = pre_roll.iter().copied().collect();
-            // Ensure we have enough samples for VAD
-            if all_samples.len() >= 512 {
-                vad.accept_waveform(&all_samples[..all_samples.len().min(512)]);
-            }
+        // VAD detection: 喂当轮新收的 samples (而非 pre_roll 滑动子集),
+        // 让 VAD 内部状态跟 cpal 推送的 chunk 对齐.
+        let is_speech = if samples.len() >= 512 {
+            vad.accept_waveform(&samples[..samples.len().min(512)]);
             vad.detected()
         } else {
             false
@@ -114,7 +113,9 @@ fn recognition_loop(
             if !speaking {
                 log::info!(">>> Speech start");
                 speaking = true;
-                buffer.extend(&pre_roll);
+                // buffer 已在 speaking=false 期间持续装 samples, 这里不再
+                // extend(&pre_roll), 否则 wav 末尾 100ms 会被装两遍, SenseVoice
+                // 把"体验"识别为"体验体验".
             }
             buffer.extend(&samples);
             silence_count = 0;
@@ -148,6 +149,11 @@ fn recognition_loop(
                 silence_count = 0;
                 vad.clear();
             }
+        } else {
+            // speaking=false 且 is_speech=false (静音段): 仍 extend samples,
+            // 让 buffer 累积 wav 头静音段. speech_start 时 buffer 已包含 wav
+            // 起点, SenseVoice 看到完整时间线.
+            buffer.extend(&samples);
         }
     }
 }
@@ -252,6 +258,19 @@ mod tests {
     use std::io::Read;
     use std::path::Path;
 
+    /// 仓库根目录, 编译期从 crate manifest 目录往上两级.
+    ///
+    /// `cargo test` 的 cwd 不一定是仓库根, 用相对路径 `assets/audio/...`
+    /// 会找不到文件. `CARGO_MANIFEST_DIR` 在编译时被 cargo 替换为 crate
+    /// 目录绝对路径 (`crates/ele_bot_server`), 拼 `../..` 回到仓库根.
+    /// 这样无论从哪个目录跑 `cargo test` 都能定位到 wav.
+    const WORKSPACE_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+    const TEST_WAV_PATH: &str = "assets/audio/asr_example_zh.wav";
+
+    fn test_wav_path() -> std::path::PathBuf {
+        std::path::Path::new(WORKSPACE_ROOT).join(TEST_WAV_PATH)
+    }
+
     fn load_wav_samples(path: &Path) -> anyhow::Result<Vec<f32>> {
         let mut file = File::open(path)?;
         let mut buffer = Vec::new();
@@ -265,6 +284,45 @@ mod tests {
             })
             .collect();
         Ok(samples)
+    }
+
+    /// 找到样本中能量首次超过 dBFS 阈值的样本序号.
+    ///
+    /// 滑动窗口 16ms (256 样本), 计算窗口内 RMS, 第一个 ≥ 阈值的窗口
+    /// 起点即为"真实语音起点". 用于对照 `vad.detected()` 的样本位置,
+    /// 算出触发延迟. 仅做测量用, 不参与产品逻辑.
+    fn first_speech_sample(samples: &[f32], threshold_dbfs: f32) -> usize {
+        const WINDOW: usize = 256; // 16ms @ 16kHz
+        if samples.len() < WINDOW {
+            return samples.len();
+        }
+        let threshold_rms = 10f32.powf(threshold_dbfs / 20.0);
+        let mut sum_sq = 0.0f32;
+        for &s in &samples[..WINDOW] {
+            sum_sq += s * s;
+        }
+        let mut rms = (sum_sq / WINDOW as f32).sqrt();
+        if rms >= threshold_rms {
+            return 0;
+        }
+        for i in WINDOW..samples.len() {
+            let old = samples[i - WINDOW];
+            let new = samples[i];
+            sum_sq = sum_sq - old * old + new * new;
+            rms = (sum_sq / WINDOW as f32).sqrt();
+            if rms >= threshold_rms {
+                return i - WINDOW + 1;
+            }
+        }
+        samples.len()
+    }
+
+    /// 计算两个字符串按 `char` (而不是 byte) 切片的最长公共前缀长度.
+    ///
+    /// 中文 UTF-8 是变长字节, 直接用 `str::as_bytes()` 切到字中间会
+    /// panic. 按 `char` zip 后取共同前缀, 才能正确数"几个字".
+    fn longest_common_prefix_chars(a: &str, b: &str) -> usize {
+        a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
     }
 
     #[test]
@@ -354,5 +412,171 @@ mod tests {
         let results: Vec<String> = result_rx.iter().collect();
         assert!(!results.is_empty(), "no recognition results");
         println!("Recognition results: {:?}", results);
+    }
+
+    /// 端到端跑 recognition_loop, 验证识别 asr_example_zh.wav 必须命中
+    /// 19 字预期文本. 此前实测仅命中 14 字 (丢前 5 字), 现已修复到 19 字.
+    /// 跑法: `cargo test --package ele_bot_server test_recognition_no_lost_chars -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn test_recognition_no_lost_chars() {
+        let samples = load_wav_samples(&test_wav_path()).expect("failed to load wav");
+        let expected = "欢迎大家来体验达摩院推出的语音识别模型";
+
+        let model_path = ModelManager::global()
+            .get("sense_voice")
+            .expect("sense_voice model not found");
+        let vad_path = ModelManager::global()
+            .get("silero_vad")
+            .expect("silero_vad model not found");
+        let tokens_path = ModelManager::global()
+            .get("sense_voice_tokens")
+            .expect("sense_voice_tokens not found");
+
+        let mut recognizer =
+            init_sense_voice(&model_path, &tokens_path).expect("Failed to create recognizer");
+        let mut vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
+
+        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
+        let (result_tx, result_rx) = mpsc::channel::<String>();
+
+        let handle = std::thread::spawn(move || {
+            let chunk_size = 1600;
+            for chunk in samples.chunks(chunk_size) {
+                audio_tx.send(chunk.to_vec()).expect("send failed");
+            }
+            for _ in 0..150 {
+                audio_tx
+                    .send(vec![0.0f32; chunk_size])
+                    .expect("send failed");
+            }
+            drop(audio_tx);
+        });
+
+        let running = Arc::new(AtomicBool::new(true));
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running);
+        handle.join().expect("thread panicked");
+
+        let results: Vec<String> = result_rx.iter().collect();
+        let recognized: String = results.join("");
+        let common = longest_common_prefix_chars(&recognized, expected);
+
+        println!("===== test_recognition_no_lost_chars =====");
+        println!("识别结果: {:?}", recognized);
+        println!("预期文本: {:?}", expected);
+        println!(
+            "共同前缀: {:?} ({} 字)",
+            &expected.chars().take(common).collect::<String>(),
+            common
+        );
+
+        // 硬断言: 必须命中完整 19 字. 若此 fail, 说明 recognition_loop
+        // 又丢首字了, 需要回查修复.
+        assert!(
+            common >= 19,
+            "识别仅 {} 字命中, 期望 ≥19. 完整识别: {:?}",
+            common,
+            recognized
+        );
+    }
+
+    /// 找 wav 真实语音起点 (按 -30 dBFS RMS 阈值) + 逐帧喂 VAD,
+    /// 打印 VAD 触发延迟 (ms). 用于诊断 VAD 配置是否合理.
+    /// 跑法: `cargo test --package ele_bot_server test_vad_trigger_latency -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn test_vad_trigger_latency() {
+        let samples = load_wav_samples(&test_wav_path()).expect("failed to load wav");
+
+        let n_real = first_speech_sample(&samples, -30.0);
+
+        let vad_path = ModelManager::global()
+            .get("silero_vad")
+            .expect("silero_vad model not found");
+        let vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
+
+        const FRAME: usize = 512;
+        let mut n_vad: Option<usize> = None;
+        for (i, chunk) in samples.chunks(FRAME).enumerate() {
+            vad.accept_waveform(chunk);
+            if vad.detected() && n_vad.is_none() {
+                n_vad = Some(i * FRAME);
+                break;
+            }
+        }
+        let n_vad = n_vad.expect("VAD 整段未触发, 阈值或模型配置异常");
+
+        let real_ms = n_real as f32 / 16.0;
+        let vad_ms = n_vad as f32 / 16.0;
+        let latency_ms = vad_ms - real_ms;
+
+        println!("===== test_vad_trigger_latency =====");
+        println!("真实语音起点: 样本 {} ({:.0} ms)", n_real, real_ms);
+        println!("VAD 触发点:   样本 {} ({:.0} ms)", n_vad, vad_ms);
+        println!(
+            "触发延迟:     {:.0} ms (≈ {} 个字 @250ms/字)",
+            latency_ms,
+            latency_ms / 250.0
+        );
+    }
+
+    /// 模拟 recognition_loop 的 pre_roll 滑动窗口, 在 VAD 触发那一刻量
+    /// 实际前文捕获量. 用于确认 pre_roll 容量充足.
+    /// 跑法: `cargo test --package ele_bot_server test_pre_roll_capture_rate -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn test_pre_roll_capture_rate() {
+        let samples = load_wav_samples(&test_wav_path()).expect("failed to load wav");
+
+        let n_real = first_speech_sample(&samples, -30.0);
+
+        let vad_path = ModelManager::global()
+            .get("silero_vad")
+            .expect("silero_vad model not found");
+        let vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
+        const FRAME: usize = 512;
+        let mut n_vad: Option<usize> = None;
+        for (i, chunk) in samples.chunks(FRAME).enumerate() {
+            vad.accept_waveform(chunk);
+            if vad.detected() && n_vad.is_none() {
+                n_vad = Some(i * FRAME);
+                break;
+            }
+        }
+        let n_vad = n_vad.expect("VAD 整段未触发");
+
+        // 标准环形滑动窗口仿真
+        const PRE_ROLL_SAMPLES: usize = 16000 / 1000 * 500;
+        let cap = PRE_ROLL_SAMPLES.min(samples.len());
+        let end = n_vad.min(samples.len());
+        let start = end.saturating_sub(cap);
+        let captured_samples = end - start;
+        let captured_ms = captured_samples as f32 / 16.0;
+
+        let pre_real_samples = if n_vad > n_real {
+            (n_vad - n_real).min(PRE_ROLL_SAMPLES)
+        } else {
+            0
+        };
+        let pre_real_ms = pre_real_samples as f32 / 16.0;
+
+        println!("===== test_pre_roll_capture_rate =====");
+        println!(
+            "pre_roll 容量: {} 样本 ({:.0} ms, 理论值)",
+            PRE_ROLL_SAMPLES,
+            PRE_ROLL_SAMPLES as f32 / 16.0
+        );
+        println!(
+            "pre_roll 实际填到: {} 样本 ({:.0} ms)",
+            captured_samples, captured_ms
+        );
+        println!(
+            "其中真实语音前文: {} 样本 ({:.0} ms, VAD 触发距真实起点)",
+            pre_real_samples, pre_real_ms
+        );
+        println!(
+            "差值 (理论 - 实际): {:.0} ms",
+            PRE_ROLL_SAMPLES as f32 / 16.0 - captured_ms
+        );
     }
 }
