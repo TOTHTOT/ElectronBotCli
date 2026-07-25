@@ -1,7 +1,8 @@
 //! WebSocket 服务
 //!
-//! 接受客户端连接, 接收命令, 推送事件。
+//! 接受客户端连接, 接收命令, 推送事件 (从 EventBus 订阅, 按 variant 过滤).
 
+use crate::event_bus::BusEvent;
 use crate::robot::{self, CommState, DisplayMode, JointConfig};
 use crate::state::{mood_from_proto, SharedState};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -58,19 +59,30 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
         }
     });
 
-    // 订阅任务: 转发广播事件到 out_tx
-    let mut event_rx = state.event_tx.subscribe();
+    // 订阅任务: 从 EventBus 过滤该外发给 WS 的事件, 转发到 out_tx.
+    // BusEvent::ServerEvent 和 Volume 直接 / 转译外发; AsrText/LlmReply/
+    // LlmProcessing 是内部用, 不外发.
+    let mut bus_rx = state.bus_tx.subscribe();
     let out_tx_clone = out_tx.clone();
     let sub_task = tokio::spawn(async move {
         loop {
-            match event_rx.recv().await {
-                Ok(evt) => {
-                    if out_tx_clone.send(evt).is_err() {
+            match bus_rx.recv().await {
+                Ok(BusEvent::ServerEvent(se)) => {
+                    if out_tx_clone.send(se).is_err() {
                         break;
                     }
                 }
+                Ok(BusEvent::Volume(v)) => {
+                    if out_tx_clone
+                        .send(ele_bot_proto::ServerEvent::Volume { value: v })
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                Ok(_) => continue, // AsrText/LlmReply/LlmProcessing 内部用, 不外发
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
-                    log::debug!("event lagged, dropped {n}");
+                    log::debug!("ws bus lagged, dropped {n}");
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
@@ -134,17 +146,9 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
                         }
                     }
                 }
-                // 音量广播: 跟 LCD 帧同一个 50ms tick, 不开新 task.
-                // voice 为 None 时 (初始化失败 / 尚未构造) 输出 0, 与
-                // ServerStateMirror 初始值一致.
-                let volume = state
-                    .voice
-                    .lock()
-                    .unwrap()
-                    .as_ref()
-                    .map(|v| v.volume())
-                    .unwrap_or(0);
-                let _ = state.event_tx.send(ServerEvent::Volume { value: volume });
+                // 音量推送: 由 voice 主动 publish BusEvent::Volume, ws.rs
+                // 通过 sub_task 订阅 BusEvent::Volume 转 ServerEvent::Volume
+                // 外发. 这里不再 50ms tick 轮询.
             }
         }
     }
@@ -237,9 +241,8 @@ async fn handle_command(
             state.set_face_tracking(enabled);
         }
         ClientMessage::SendLlmText { text } => {
-            if let Some(tx) = state.llm_text_tx.lock().unwrap().as_ref() {
-                let _ = tx.send(text);
-            }
+            // 走 EventBus, 跟 ASR 路径统一. LLM task 订阅 BusEvent::AsrText.
+            state.bus_tx.publish(BusEvent::AsrText(text));
         }
         ClientMessage::TtsSpeak {
             text,

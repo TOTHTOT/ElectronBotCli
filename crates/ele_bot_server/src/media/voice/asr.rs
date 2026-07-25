@@ -11,7 +11,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
-use std::sync::{mpsc, Arc};
+use std::sync::Arc;
 use std::time::Duration;
 
 const SAMPLE_RATE: usize = 16000;
@@ -62,11 +62,14 @@ fn init_silero_vad(model_path: &Path) -> anyhow::Result<VoiceActivityDetector> {
 /// 用 `audio_rx.recv_timeout(50ms)` 替代阻塞 `recv`, 每轮检查
 /// `running` 标志: 一旦为 false, 立即返回. 这是 `rebuild_voice`
 /// 软替换旧实例的退出通道, 不依赖 cpal backend 及时停回调.
+///
+/// 识别结果通过 `bus: &EventBus` publish (`BusEvent::AsrText`) 流向 LLM,
+/// 不再用专用 channel (commit event-bus-refactor 改动).
 fn recognition_loop(
     recognizer: &mut OfflineRecognizer,
     vad: &mut VoiceActivityDetector,
     audio_rx: Receiver<Vec<f32>>,
-    result_tx: mpsc::Sender<String>,
+    bus: &crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut buffer: Vec<f32> = Vec::new();
@@ -139,9 +142,8 @@ fn recognition_loop(
                         let text = result.text.trim().to_string();
                         if !text.is_empty() {
                             log::info!("ASR: 【{}】", text);
-                            if let Err(e) = result_tx.send(text) {
-                                log::warn!("Failed to send result: {}", e);
-                            }
+                            // 通过事件总线流向 LLM. publish 永不 panic, 无订阅者时静默丢弃.
+                            bus.publish(crate::event_bus::BusEvent::AsrText(text));
                         }
                     }
                 }
@@ -185,6 +187,7 @@ fn process_audio_chunk(
     channels: usize,
     volume: &Arc<AtomicI32>,
     audio_tx: &SyncSender<Vec<f32>>,
+    bus: &crate::event_bus::EventBus,
 ) {
     let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
     let peak_value = peak_to_volume(peak);
@@ -198,6 +201,9 @@ fn process_audio_chunk(
         0
     };
     volume.store(new_value, Ordering::Relaxed);
+
+    // 音量通过 EventBus 广播给 WS 客户端. publish 永不 panic, 无订阅者静默.
+    bus.publish(crate::event_bus::BusEvent::Volume(new_value));
 
     // 音频数据
     let mono: Vec<f32> = if channels == 2 {
@@ -213,6 +219,7 @@ pub fn build_asr_stream(
     device: &Device,
     volume: Arc<AtomicI32>,
     audio_tx: SyncSender<Vec<f32>>,
+    bus: crate::event_bus::EventBus,
 ) -> anyhow::Result<Stream> {
     let config = device.default_input_config()?;
     log::info!("Audio device: {:?}", config);
@@ -225,12 +232,13 @@ pub fn build_asr_stream(
 
     let channels = config.channels() as usize;
     let volume_clone = volume.clone();
+    let bus_clone = bus.clone();
 
     // 根据设置的stream_config申请音频流
     Ok(device.build_input_stream(
         &stream_config,
         move |data: &[f32], _: &_| {
-            process_audio_chunk(data, channels, &volume_clone, &audio_tx);
+            process_audio_chunk(data, channels, &volume_clone, &audio_tx, &bus_clone);
         },
         |e| log::error!("Audio stream error: {e}"),
         None,
@@ -243,12 +251,12 @@ pub fn recognition_thread(
     silero_vad_model_path: PathBuf,
     tokens_path: PathBuf,
     audio_rx: Receiver<Vec<f32>>,
-    result_tx: mpsc::Sender<String>,
+    bus: &crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut recognizer = init_sense_voice(&sense_voice_model_path, &tokens_path)?;
     let mut vad = init_silero_vad(&silero_vad_model_path)?;
-    recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running)
+    recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running)
 }
 
 /// Use `cargo test test_recognition_with_audio_file -- --ignored --nocapture` to test
@@ -386,8 +394,7 @@ mod tests {
             init_sense_voice(&model_path, &tokens_path).expect("Failed to create recognizer");
         let mut vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
 
-        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
-        let (result_tx, result_rx) = mpsc::channel::<String>();
+        let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(4);
 
         // Feed audio in a separate thread since audio_tx doesn't implement Send
         let handle = std::thread::spawn(move || {
@@ -405,13 +412,21 @@ mod tests {
             drop(audio_tx);
         });
 
-        // Run recognition on main thread since recognizer/vad are not Send
+        // Run recognition on main thread since recognizer/vad are not Send.
+        // 识别结果经 EventBus 流出, 测试通过订阅 bus 收集.
+        let bus = crate::event_bus::EventBus::new(64);
+        let mut bus_rx = bus.subscribe();
         let running = Arc::new(AtomicBool::new(true));
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running);
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, &bus, running);
 
         handle.join().expect("thread panicked");
 
-        let results: Vec<String> = result_rx.iter().collect();
+        let mut results: Vec<String> = Vec::new();
+        while let Ok(evt) = bus_rx.try_recv() {
+            if let crate::event_bus::BusEvent::AsrText(t) = evt {
+                results.push(t);
+            }
+        }
         assert!(!results.is_empty(), "no recognition results");
         println!("Recognition results: {:?}", results);
     }
@@ -439,8 +454,7 @@ mod tests {
             init_sense_voice(&model_path, &tokens_path).expect("Failed to create recognizer");
         let mut vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
 
-        let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4);
-        let (result_tx, result_rx) = mpsc::channel::<String>();
+        let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(4);
 
         let handle = std::thread::spawn(move || {
             let chunk_size = 1600;
@@ -455,11 +469,19 @@ mod tests {
             drop(audio_tx);
         });
 
+        // 识别结果经 EventBus 流出, 测试通过订阅 bus 收集.
+        let bus = crate::event_bus::EventBus::new(64);
+        let mut bus_rx = bus.subscribe();
         let running = Arc::new(AtomicBool::new(true));
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, result_tx, running);
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, &bus, running);
         handle.join().expect("thread panicked");
 
-        let results: Vec<String> = result_rx.iter().collect();
+        let mut results: Vec<String> = Vec::new();
+        while let Ok(evt) = bus_rx.try_recv() {
+            if let crate::event_bus::BusEvent::AsrText(t) = evt {
+                results.push(t);
+            }
+        }
         let recognized: String = results.join("");
         let common = longest_common_prefix_chars(&recognized, expected);
 

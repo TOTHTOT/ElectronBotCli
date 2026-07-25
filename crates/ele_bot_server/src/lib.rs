@@ -4,6 +4,7 @@
 //! 通过 WebSocket 与客户端通信。
 
 pub mod emotion;
+pub mod event_bus;
 pub mod face_tracker;
 pub mod llm;
 pub mod media;

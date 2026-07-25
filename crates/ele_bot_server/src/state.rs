@@ -3,6 +3,7 @@
 //! 集中持有所有硬件资源句柄, 以及向所有客户端广播事件的通道。
 //! ws.rs 中的 WebSocket 处理器从此处读取/写入。
 
+use crate::event_bus::EventBus;
 use crate::face_tracker::{calculate_body_adjustment, smooth_adjustment, BODY_SERVO_INDEX};
 use crate::llm::{LlmManager, LlmResponse};
 use crate::media::video::types::{FrameCache, FrameInfo};
@@ -17,7 +18,7 @@ use ele_bot_proto::{
 };
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
 /// 发送给 USB 通信线程的通道
 type BotFrameTx = std::sync::mpsc::SyncSender<(Vec<u8>, JointConfig)>;
@@ -38,8 +39,9 @@ pub struct SharedState {
     pub llm: Mutex<LlmManager>,
     /// 摄像头帧广播 (供 ws/web preview 订阅)
     pub frame_tx: FrameCache,
-    /// 广播事件给所有 WS 客户端
-    pub event_tx: broadcast::Sender<ServerEvent>,
+    /// 事件总线 - 替代原 `event_tx` (broadcast ServerEvent) + `llm_text_tx` (mpsc String)
+    /// + `voice.asr_text_rx` 三处手工 channel. 新订阅者调 `bus_tx.subscribe()` 即可.
+    pub bus_tx: EventBus,
     /// 发送给 USB 通信线程的通道
     pub bot_tx: Mutex<Option<BotFrameTx>>,
     /// 机器人通信状态(用于停止通信线程)
@@ -52,8 +54,6 @@ pub struct SharedState {
     pub lcd_frame_cache: Arc<Mutex<Option<Vec<u8>>>>,
     /// 摄像头分辨率
     pub camera_resolution: Arc<Mutex<(u32, u32)>>,
-    /// 文本输入通道(给 LLM 处理线程)
-    pub llm_text_tx: Mutex<Option<mpsc::UnboundedSender<String>>>,
     /// 人脸追踪是否启用
     pub face_tracking_enabled: AtomicBool,
     /// 人脸追踪平滑状态(累计调整值, 度)
@@ -93,9 +93,13 @@ impl SharedState {
         // LCD 帧缓存
         let lcd_frame_cache = Arc::new(Mutex::new(None));
 
+        // 事件总线: 替代原 event_tx (broadcast ServerEvent) + llm_text_tx (mpsc String).
+        // 容量 1024 跟原 broadcast 一致.
+        let bus_tx = EventBus::new(1024);
+
         // 语音
         log::debug!("start init voice");
-        let voice = match Self::init_voice(&config) {
+        let voice = match Self::init_voice(&config, bus_tx.clone()) {
             Ok(m) => Some(Arc::new(m)),
             Err(e) => {
                 log::warn!("init voice manager failed: {e}");
@@ -107,9 +111,6 @@ impl SharedState {
         log::debug!("start init llm");
         let llm = Self::init_llm(&config)?;
 
-        // 事件广播
-        let (event_tx, _) = broadcast::channel::<ServerEvent>(1024);
-
         let state = Arc::new(Self {
             config: RwLock::new(config),
             joint,
@@ -118,22 +119,21 @@ impl SharedState {
             voice: Mutex::new(voice),
             llm: Mutex::new(llm),
             frame_tx: frame_tx.clone(),
-            event_tx,
+            bus_tx,
             bot_tx: Mutex::new(None),
             comm_state: Mutex::new(None),
             robot_connected: AtomicBool::new(false),
             llm_processing: AtomicBool::new(false),
             lcd_frame_cache,
             camera_resolution,
-            llm_text_tx: Mutex::new(None),
             face_tracking_enabled: AtomicBool::new(false),
             face_tracking_adjustment: AtomicI32::new(0),
         });
 
-        // 启动 LLM 处理线程
+        // 启动 LLM 处理 tokio task (订阅 EventBus::AsrText)
         state.spawn_llm_thread();
-        // 启动 ASR → LLM 桥接 (从 VoiceManager 抽 ASR 文本转发到 llm_text_tx)
-        state.spawn_asr_bridge_thread();
+        // 启动 TTS trigger tokio task (订阅 EventBus::LlmReply)
+        state.spawn_tts_trigger_thread();
         // 启动人脸追踪后台任务
         state.spawn_face_tracking_task(frame_tx);
 
@@ -232,7 +232,7 @@ impl SharedState {
         }
 
         // 4. 构造新实例并替换 (旧 Arc 在本函数末尾 Drop)
-        let new_voice = Self::init_voice(&config)?;
+        let new_voice = Self::init_voice(&config, self.bus_tx.clone())?;
         *self.voice.lock().unwrap() = Some(Arc::new(new_voice));
         // 旧 Arc 在这里随 `old` 一起 Drop, 旧 cpal Stream 停流
         drop(old);
@@ -255,7 +255,7 @@ impl SharedState {
         (cfg.speech_name.clone(), cfg.output_device.clone())
     }
 
-    fn init_voice(config: &AppConfig) -> anyhow::Result<VoiceManager> {
+    fn init_voice(config: &AppConfig, bus: EventBus) -> anyhow::Result<VoiceManager> {
         use crate::media::voice::{AsrModelPaths, TtsModelPaths};
 
         let mm = ModelManager::global();
@@ -281,123 +281,141 @@ impl SharedState {
                 config.speech_device_id.as_deref(),
                 &config.output_device,
                 config.output_device_id.as_deref(),
+                bus,
             )
         } else {
             anyhow::bail!("voice model not available");
         }
     }
 
-    /// 启动 LLM 处理线程(消费 mpsc 文本, 调用 LLM chat + analyze_mood, 广播结果, 触发 TTS)
+    /// 启动 LLM 处理任务 (tokio task, 订阅 EventBus::AsrText).
+    ///
+    /// 流程: AsrText → chat (生成回复) + analyze_mood (情感+动作) → 发布
+    /// ServerEvent::LlmResponse + BusEvent::LlmReply (供 TTS trigger 消费).
     fn spawn_llm_thread(self: &Arc<Self>) {
-        let (text_tx, mut text_rx) = mpsc::unbounded_channel::<String>();
-        *self.llm_text_tx.lock().unwrap() = Some(text_tx);
-
         let state = self.clone();
-        std::thread::spawn(move || {
-            while let Some(text) = text_rx.blocking_recv() {
-                if text.is_empty() {
-                    continue;
-                }
-                log::debug!("LLM thread received: {}", text);
-                state.llm_processing.store(true, Ordering::Relaxed);
-                let _ = state.event_tx.send(ServerEvent::LlmProcessing {
-                    is_processing: true,
-                });
+        let mut rx = state.bus_tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(crate::event_bus::BusEvent::AsrText(text)) => {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        log::debug!("LLM task received: {}", text);
+                        state.llm_processing.store(true, Ordering::Relaxed);
+                        state
+                            .bus_tx
+                            .publish(crate::event_bus::BusEvent::ServerEvent(
+                                ServerEvent::LlmProcessing {
+                                    is_processing: true,
+                                },
+                            ));
 
-                // 阶段 1: chat — 生成对话文本 (走 TTS 播报)
-                let reply_text = {
-                    let llm = state.llm.lock().unwrap();
-                    llm.chat(&text).unwrap_or_else(|e| {
-                        log::warn!("chat failed: {e:?}");
-                        format!("[LLM 错误: {e}]")
-                    })
-                };
-                log::info!("LLM reply: {}", reply_text);
+                        // 阶段 1: chat — 生成对话文本
+                        let reply_text = {
+                            let llm = state.llm.lock().unwrap();
+                            llm.chat(&text).unwrap_or_else(|e| {
+                                log::warn!("chat failed: {e:?}");
+                                format!("[LLM 错误: {e}]")
+                            })
+                        };
+                        log::info!("LLM reply: {}", reply_text);
 
-                // 阶段 2: analyze_mood — 情感 + 舵机动作
-                let response = {
-                    let llm = state.llm.lock().unwrap();
-                    llm.analyze_mood(&text).unwrap_or_else(|e| {
-                        log::warn!("analyze_mood failed: {e:?}");
-                        LlmResponse::default()
-                    })
-                };
+                        // 阶段 2: analyze_mood — 情感 + 舵机动作
+                        let response = {
+                            let llm = state.llm.lock().unwrap();
+                            llm.analyze_mood(&text).unwrap_or_else(|e| {
+                                log::warn!("analyze_mood failed: {e:?}");
+                                LlmResponse::default()
+                            })
+                        };
 
-                state.llm_processing.store(false, Ordering::Relaxed);
-                let _ = state.event_tx.send(ServerEvent::LlmProcessing {
-                    is_processing: false,
-                });
+                        state.llm_processing.store(false, Ordering::Relaxed);
+                        state
+                            .bus_tx
+                            .publish(crate::event_bus::BusEvent::ServerEvent(
+                                ServerEvent::LlmProcessing {
+                                    is_processing: false,
+                                },
+                            ));
 
-                let proto_response = ProtoLlmResponse {
-                    mood: mood_to_proto(response.mood),
-                    actions: response.actions.iter().map(action_to_proto).collect(),
-                    reply_text: if reply_text.is_empty() {
-                        None
-                    } else {
-                        Some(reply_text.clone())
-                    },
-                };
-                let _ = state.event_tx.send(ServerEvent::LlmResponse {
-                    response: proto_response,
-                });
+                        let proto_response = ProtoLlmResponse {
+                            mood: mood_to_proto(response.mood),
+                            actions: response.actions.iter().map(action_to_proto).collect(),
+                            reply_text: if reply_text.is_empty() {
+                                None
+                            } else {
+                                Some(reply_text.clone())
+                            },
+                        };
+                        state
+                            .bus_tx
+                            .publish(crate::event_bus::BusEvent::ServerEvent(
+                                ServerEvent::LlmResponse {
+                                    response: proto_response,
+                                },
+                            ));
 
-                if let Ok(mut lcd) = state.lcd.lock() {
-                    lcd.set_eyes_mood(response.mood);
-                }
+                        if let Ok(mut lcd) = state.lcd.lock() {
+                            lcd.set_eyes_mood(response.mood);
+                        }
 
-                // 触发 TTS 播报 reply_text. spawn_blocking 异步, 不阻塞 LLM 循环.
-                // VoiceManager 不可用 (热重建中) 时静默跳过 + log warn.
-                if !reply_text.is_empty() {
-                    if let Some(voice) = state.voice.lock().unwrap().clone() {
-                        let text_for_tts = reply_text.clone();
-                        tokio::task::spawn_blocking(move || {
-                            if let Err(e) = voice.speak(&text_for_tts, 1.0, None) {
-                                log::warn!("TTS playback failed: {e:?}");
-                            }
-                        });
-                    } else {
-                        log::warn!("voice manager not available for TTS");
+                        // 发布 LlmReply, 触发 TTS trigger 任务播报.
+                        if !reply_text.is_empty() {
+                            state
+                                .bus_tx
+                                .publish(crate::event_bus::BusEvent::LlmReply(reply_text));
+                        }
                     }
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("LLM task lagged, dropped {n} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
     }
 
-    /// 启动 ASR → LLM 桥接线程
+    /// 启动 TTS 触发任务 (tokio task, 订阅 EventBus::LlmReply).
     ///
-    /// `VoiceManager` 内部 ASR 线程把识别结果 send 到 `asr_text_rx` 字段,
-    /// 这里一次性 take 出来, 转发到 `llm_text_tx`. 若不桥接, ASR 文本会
-    /// 积压在 VoiceManager 内部直到 drop, LLM 永远收不到真实语音.
-    fn spawn_asr_bridge_thread(self: &Arc<Self>) {
-        let asr_rx = {
-            let voice_opt = self.voice.lock().unwrap();
-            match voice_opt.as_ref() {
-                Some(voice) => voice.take_asr_text_rx(),
-                None => {
-                    log::warn!("voice manager not available, ASR bridge disabled");
-                    return;
-                }
-            }
-        };
-        let Some(asr_rx) = asr_rx else {
-            log::warn!("ASR text rx already taken, bridge disabled");
-            return;
-        };
+    /// LLM 任务发布 BusEvent::LlmReply 后, 这里收到就调 `voice.speak`
+    /// 触发 TTS 播报. 用 `spawn_blocking` 异步不阻塞 bus 消费循环.
+    /// VoiceManager 不可用 (热重建中) 时 log warn 跳过.
+    fn spawn_tts_trigger_thread(self: &Arc<Self>) {
         let state = self.clone();
-        std::thread::spawn(move || {
-            while let Ok(text) = asr_rx.recv() {
-                if text.is_empty() {
-                    continue;
-                }
-                log::info!("ASR → LLM: {}", text);
-                let tx_opt = state.llm_text_tx.lock().unwrap().clone();
-                if let Some(tx) = tx_opt {
-                    if let Err(e) = tx.send(text) {
-                        log::warn!("failed to forward ASR text to LLM: {e}");
+        let mut rx = state.bus_tx.subscribe();
+        tokio::spawn(async move {
+            loop {
+                match rx.recv().await {
+                    Ok(crate::event_bus::BusEvent::LlmReply(text)) => {
+                        if text.is_empty() {
+                            continue;
+                        }
+                        log::info!("TTS trigger: {}", text);
+                        let voice_opt = state.voice.lock().unwrap().clone();
+                        match voice_opt {
+                            Some(voice) => {
+                                let text_for_tts = text;
+                                tokio::task::spawn_blocking(move || {
+                                    if let Err(e) = voice.speak(&text_for_tts, 1.0, None) {
+                                        log::warn!("TTS playback failed: {e:?}");
+                                    }
+                                });
+                            }
+                            None => {
+                                log::warn!("voice manager not available for TTS");
+                            }
+                        }
                     }
+                    Ok(_) => continue,
+                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                        log::warn!("TTS trigger lagged, dropped {n} events");
+                    }
+                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
                 }
             }
-            log::info!("ASR bridge thread exited");
         });
     }
 
@@ -419,7 +437,11 @@ impl SharedState {
                         };
 
                         // 始终广播给客户端(可选 UI 显示)
-                        let _ = state.event_tx.send(ServerEvent::Face { position });
+                        state
+                            .bus_tx
+                            .publish(crate::event_bus::BusEvent::ServerEvent(ServerEvent::Face {
+                                position,
+                            }));
 
                         // 仅在追踪开启时调整舵机
                         if state.face_tracking_enabled.load(Ordering::Relaxed) && position.has_face
@@ -494,7 +516,9 @@ impl SharedState {
     /// 通知连接状态变化
     pub fn notify_connection(&self, is_connected: bool) {
         self.robot_connected.store(is_connected, Ordering::Relaxed);
-        let _ = self.event_tx.send(ServerEvent::Connection { is_connected });
+        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
+            ServerEvent::Connection { is_connected },
+        ));
     }
 
     /// 停止机器人通信线程
@@ -526,14 +550,18 @@ impl SharedState {
             values: self.joint.values(),
             selected: self.joint.selected(),
         };
-        let _ = self.event_tx.send(ServerEvent::JointState { state });
+        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
+            ServerEvent::JointState { state },
+        ));
     }
 
     /// 广播当前 JointConfig(用于预览/调试)
     pub fn broadcast_joint_config(&self) {
-        let _ = self.event_tx.send(ServerEvent::JointConfig {
-            config: joint_config_to_proto(&self.joint.config()),
-        });
+        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
+            ServerEvent::JointConfig {
+                config: joint_config_to_proto(&self.joint.config()),
+            },
+        ));
     }
 
     /// 获取当前 config
@@ -552,13 +580,17 @@ impl SharedState {
         let audio_changed = cfg.speech_name != old_mic || cfg.output_device != old_spk;
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
-        let _ = self.event_tx.send(ServerEvent::Config { config: cfg });
+        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
+            ServerEvent::Config { config: cfg },
+        ));
         if audio_changed {
             if let Err(e) = self.rebuild_voice() {
                 log::warn!("rebuild_voice failed: {e:?}");
-                let _ = self.event_tx.send(ServerEvent::Error {
-                    message: format!("voice rebuild failed: {e}"),
-                });
+                self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
+                    ServerEvent::Error {
+                        message: format!("voice rebuild failed: {e}"),
+                    },
+                ));
             }
         }
         Ok(())
