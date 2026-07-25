@@ -36,7 +36,7 @@ pub struct SharedState {
     /// 语音/ASR/TTS - 用 Arc 包装以便在 WS 任务中安全共享
     pub voice: Mutex<Option<Arc<VoiceManager>>>,
     /// LLM 管理
-    pub llm: Mutex<LlmManager>,
+    pub llm: tokio::sync::Mutex<LlmManager>,
     /// 摄像头帧广播 (供 ws/web preview 订阅)
     pub frame_tx: FrameCache,
     /// 事件总线 - 替代原 `event_tx` (broadcast ServerEvent) + `llm_text_tx` (mpsc String)
@@ -116,7 +116,7 @@ impl SharedState {
             lcd: Mutex::new(lcd),
             video: Mutex::new(video_capture),
             voice: Mutex::new(voice),
-            llm: Mutex::new(llm),
+            llm: tokio::sync::Mutex::new(llm),
             frame_tx: frame_tx.clone(),
             bus_tx,
             bot_tx: Mutex::new(None),
@@ -224,8 +224,7 @@ impl SharedState {
         };
         if let Some(old) = &old {
             // 2. 通知旧 ASR 线程退出
-            old.running()
-                .store(false, std::sync::atomic::Ordering::Relaxed);
+            old.running().store(false, Ordering::Relaxed);
             // 3. 给退出窗口 (recv_timeout=50ms, 留 10ms 余量)
             std::thread::sleep(std::time::Duration::from_millis(60));
         }
@@ -311,24 +310,33 @@ impl SharedState {
                                 },
                             ));
 
-                        // 阶段 1: chat — 生成对话文本
-                        let reply_text = {
-                            let llm = state.llm.lock().unwrap();
-                            llm.chat(&text).unwrap_or_else(|e| {
-                                log::warn!("chat failed: {e:?}");
-                                format!("[LLM 错误: {e}]")
-                            })
-                        };
+                        // 阶段 1: chat — 生成对话文本.
+                        // state.llm 是 tokio::sync::Mutex, lock() 返 future.
+                        // await 拿 Guard, Guard 跨 await 安全 (tokio Mutex 设计).
+                        let reply_text =
+                            state
+                                .llm
+                                .lock()
+                                .await
+                                .chat(&text)
+                                .await
+                                .unwrap_or_else(|e| {
+                                    log::warn!("chat failed: {e:?}");
+                                    format!("[LLM 错误: {e}]")
+                                });
                         log::info!("LLM reply: {}", reply_text);
 
-                        // 阶段 2: analyze_mood — 情感 + 舵机动作
-                        let response = {
-                            let llm = state.llm.lock().unwrap();
-                            llm.analyze_mood(&text).unwrap_or_else(|e| {
+                        // 阶段 2: analyze_mood — 情感 + 舵机动作. analyze_mood 也是 async.
+                        let response = state
+                            .llm
+                            .lock()
+                            .await
+                            .analyze_mood(&text)
+                            .await
+                            .unwrap_or_else(|e| {
                                 log::warn!("analyze_mood failed: {e:?}");
                                 LlmResponse::default()
-                            })
-                        };
+                            });
 
                         state.llm_processing.store(false, Ordering::Relaxed);
                         state
@@ -368,10 +376,13 @@ impl SharedState {
                         }
                     }
                     Ok(_) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("LLM task lagged, dropped {n} events");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Closed) => {
+                        log::warn!("LLM task closed");
+                        break;
+                    }
                 }
             }
         });
@@ -409,10 +420,10 @@ impl SharedState {
                         }
                     }
                     Ok(_) => continue,
-                    Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
+                    Err(broadcast::error::RecvError::Lagged(n)) => {
                         log::warn!("TTS trigger lagged, dropped {n} events");
                     }
-                    Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
+                    Err(broadcast::error::RecvError::Closed) => break,
                 }
             }
         });
@@ -645,7 +656,7 @@ pub fn action_to_proto(a: &crate::llm::response::Action) -> ele_bot_proto::Actio
 }
 
 /// 内部 JointConfig -> proto::JointConfig
-pub fn joint_config_to_proto(c: &crate::robot::JointConfig) -> ele_bot_proto::JointConfig {
+pub fn joint_config_to_proto(c: &JointConfig) -> ele_bot_proto::JointConfig {
     ele_bot_proto::JointConfig {
         enable: c.enable,
         angles: c.angles,

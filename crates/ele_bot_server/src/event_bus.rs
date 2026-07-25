@@ -65,10 +65,10 @@ impl EventBus {
     pub fn publish(&self, event: BusEvent) {
         match self.inner.send(event) {
             Ok(_) => {}
-            Err(_) => {
+            Err(e) => {
                 // broadcast::send 失败要么是没人订阅, 要么是 channel 关了.
                 // channel 关 = EventBus drop = 服务端关, 此时 publish 已被忽略.
-                log::debug!("event bus publish: no subscribers or channel closed");
+                log::debug!("event bus publish: no subscribers or channel closed, error: {e:?}");
             }
         }
     }

@@ -18,6 +18,7 @@ use async_openai::types::chat::{
     CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
+use async_trait::async_trait;
 use std::collections::{HashMap, VecDeque};
 
 /// 在线 LLM 实现
@@ -311,17 +312,14 @@ impl OnlineLlm {
     }
 }
 
+#[async_trait]
 impl LlmTrait for OnlineLlm {
-    fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
-        // 由于调用方可能在非 async 上下文（如 std::thread）中调用，
-        // 需要创建新的 Tokio runtime 来执行异步代码
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(self.analyze_mood_async(user_input))
+    async fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
+        self.analyze_mood_async(user_input).await
     }
 
-    fn chat(&mut self, user_input: &str) -> Result<String> {
-        let rt = tokio::runtime::Runtime::new()?;
-        rt.block_on(self.chat_async(user_input))
+    async fn chat(&mut self, user_input: &str) -> Result<String> {
+        self.chat_async(user_input).await
     }
 
     fn set_session_id(&mut self, session_id: &str) {

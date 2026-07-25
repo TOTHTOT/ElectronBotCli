@@ -2,6 +2,7 @@ use crate::emotion::parse_mood;
 use crate::llm::trait_::LlmTrait;
 use crate::llm::LlmResponse;
 use anyhow::Result;
+use async_trait::async_trait;
 use boteyes::Mood;
 use candle_core::quantized::gguf_file::Content;
 use candle_core::{Device, Tensor};
@@ -96,8 +97,9 @@ impl QwenLlm {
 }
 
 // 为 QwenLlm 实现 LlmTrait
+#[async_trait]
 impl LlmTrait for QwenLlm {
-    fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
+    async fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse> {
         let mood = QwenLlm::analyze_mood(self, user_input)?;
         Ok(LlmResponse {
             mood,
@@ -105,7 +107,7 @@ impl LlmTrait for QwenLlm {
         })
     }
 
-    fn chat(&mut self, user_input: &str) -> Result<String> {
+    async fn chat(&mut self, user_input: &str) -> Result<String> {
         let prompt = build_chat_prompt(user_input);
         let text = QwenLlm::generate(self, &prompt, 64)?;
         Ok(text.trim().to_string())

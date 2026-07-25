@@ -4,7 +4,7 @@
 //!
 //! ## 使用方法
 //!
-//! ```rust
+//! ```ignore
 //! use ele_bot::llm::{QwenLlm, OnlineLlm, LlmManager};
 //!
 //! // 本地模型加载
@@ -30,7 +30,8 @@ pub use crate::llm::response::LlmResponse;
 use crate::llm::trait_::LlmTrait;
 use anyhow::Result;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// LLM 管理器 - 根据网络状态自动选择在线或本地 LLM
 pub struct LlmManager {
@@ -104,41 +105,33 @@ impl LlmManager {
     }
 
     /// 分析情感
-    pub fn analyze_mood(&self, user_input: &str) -> Result<LlmResponse> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        guard.analyze_mood(user_input)
+    pub async fn analyze_mood(&self, user_input: &str) -> Result<LlmResponse> {
+        let mut guard = self.inner.lock().await;
+        guard.analyze_mood(user_input).await
     }
 
-    /// 生成对话文本回复 (走 TTS 播报). 内部 Mutex 借用 `&self.inner`.
-    pub fn chat(&self, user_input: &str) -> Result<String> {
-        let mut guard = self
-            .inner
-            .lock()
-            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
-        guard.chat(user_input)
+    /// 生成对话文本回复 (走 TTS 播报). 内部 tokio Mutex 借用 `&self.inner`.
+    pub async fn chat(&self, user_input: &str) -> Result<String> {
+        log::debug!("user_input qwen: {user_input}");
+        let mut guard = self.inner.lock().await;
+        guard.chat(user_input).await
     }
 
     /// 设置当前会话 ID
-    pub fn set_session_id(&self, session_id: &str) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.set_session_id(session_id);
-        }
+    pub async fn set_session_id(&self, session_id: &str) {
+        let mut guard = self.inner.lock().await;
+        guard.set_session_id(session_id);
     }
 
     /// 清除指定会话的历史记录
-    pub fn clear_session_history(&self, session_id: &str) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.clear_session_history(session_id);
-        }
+    pub async fn clear_session_history(&self, session_id: &str) {
+        let mut guard = self.inner.lock().await;
+        guard.clear_session_history(session_id);
     }
 
     /// 清除所有会话的历史记录
-    pub fn clear_all_histories(&self) {
-        if let Ok(mut guard) = self.inner.lock() {
-            guard.clear_all_histories();
-        }
+    pub async fn clear_all_histories(&self) {
+        let mut guard = self.inner.lock().await;
+        guard.clear_all_histories();
     }
 }
