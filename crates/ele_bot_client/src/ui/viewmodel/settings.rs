@@ -1,4 +1,4 @@
-use crate::app::overlay::{DeviceKind, Overlay};
+use crate::app::overlay::{DeviceKind, Overlay, PickerEntry};
 use crate::app::route::{Route, SelectingKind};
 use crate::app::App;
 use std::time::Instant;
@@ -88,6 +88,11 @@ impl SettingsViewModel {
             label: "扬声器",
             value: display_for(&app.devices.outputs, &app.config.output_device),
         });
+        // 摄像头: 显示当前 index, 查 cameras 缓存拿 display 替换.
+        items.push(SettingItem {
+            label: "摄像头",
+            value: display_for_camera(&app.devices.cameras, &app.config.camera_index),
+        });
 
         // 从 Route::Settings 取 selected + editing + cursor
         let (selected_index, in_edit_mode, edit_buffer, edit_cursor, selecting) =
@@ -113,11 +118,27 @@ impl SettingsViewModel {
                     highlighted_name: String::new(),
                     dim_suffix: String::new(),
                 });
-                for d in devices {
-                    let (name, suffix) = split_driver_and_suffix(d);
+                // Audio 走 split_driver_and_suffix 把 name / 后缀拆开,
+                // 让 driver 段亮, 通道数段 dim. Camera 没有 driver 后缀,
+                // 整行都亮.
+                for entry in devices {
+                    let (label, suffix) = match entry {
+                        PickerEntry::Audio(d) => {
+                            let (name, suf) = split_driver_and_suffix(d);
+                            let full = if suf.is_empty() {
+                                name
+                            } else if name.is_empty() {
+                                suf
+                            } else {
+                                format!("{name} {suf}")
+                            };
+                            (full, String::new())
+                        }
+                        PickerEntry::Camera(d) => (d.display.clone(), String::new()),
+                    };
                     rows.push(PickerRow {
-                        label: d.display.clone(),
-                        highlighted_name: name,
+                        label,
+                        highlighted_name: String::new(),
                         dim_suffix: suffix,
                     });
                 }
@@ -169,6 +190,21 @@ fn display_for(devices: &[ele_bot_proto::DeviceInfoDto], name: &str) -> String {
             .find(|d| d.name == name)
             .map_or_else(|| name.to_string(), |d| d.display.clone())
     }
+}
+
+/// 把当前 `camera_index` 字符串映射成 "display or <系统默认>"
+///
+/// 摄像头没有 OS 标准命名差异 (不像 cpal 设备), 所以按 `id` 严格匹配.
+/// `id` 为空时显示 `<系统默认>`. 找不到对应设备 (还没收到 `Cameras` 事件)
+/// 时回退到原 id 字符串.
+fn display_for_camera(devices: &[ele_bot_proto::CameraInfoDto], id: &str) -> String {
+    if id.is_empty() {
+        return "<系统默认>".to_string();
+    }
+    devices
+        .iter()
+        .find(|d| d.id == id)
+        .map_or_else(|| id.to_string(), |d| d.display.clone())
 }
 
 /// 把 DTO 的 display 拆成 "name" 和 "suffix" 两段, 给 UI 高亮 / dim 区分.

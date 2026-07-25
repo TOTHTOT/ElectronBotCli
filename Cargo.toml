@@ -54,6 +54,7 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 ratatui = "0.30.0"
 crossterm = "0.29.0"
 tokio-tungstenite = { version = "0.24", features = ["connect", "tokio-native-tls"] }
+unicode-width = "0.1"
 
 [profile.release]
 opt-level = 3

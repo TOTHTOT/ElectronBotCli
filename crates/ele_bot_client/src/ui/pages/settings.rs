@@ -3,6 +3,7 @@ use crate::ui::viewmodel::settings::{FailureVm, PickerVm};
 use crate::ui::viewmodel::SettingsViewModel;
 use crate::ui_components::{create_block, get_indicator};
 use ratatui::{prelude::*, widgets::Clear, widgets::Paragraph};
+use unicode_width::UnicodeWidthStr;
 
 pub fn render(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_color: Color) {
     let outer_block = create_block("设置".to_string(), border_color, border_color);
@@ -176,14 +177,40 @@ fn render_setting_item(
 }
 
 /// 居中弹窗: 设备选择器
+///
+/// 宽高按内容自适应:
+/// - 宽度 = `最长行 display width + 光标占位 2 + 内边距 2`, 再 clamp 到
+///   `area.width - 4` 留左右空隙, 仍超宽时按可视宽截断 (不期待真实场景
+///   长于此, 终端 < 30 列极少).
+/// - 高度 = rows 总数 + 提示行 1 + border 2 + 内边距 2, clamp 到
+///   `area.height - 4`. 超高时仅显示 cursor 居中的窗口, 滚动窗口随 cursor
+///   移动 — 让用户始终能看到当前选中的行.
 fn render_device_picker(frame: &mut Frame, area: Rect, picker: &PickerVm) {
     let title = match picker.kind {
         crate::app::route::SelectingKind::Input => " 选择麦克风 ",
         crate::app::route::SelectingKind::Output => " 选择扬声器 ",
+        crate::app::route::SelectingKind::Camera => " 选择摄像头 ",
     };
-    let popup_w = 60u16.min(area.width.saturating_sub(4));
-    let max_rows = picker.rows.len() as u16 + 2; // +2 border
-    let popup_h = max_rows.min(area.height.saturating_sub(4)).max(5);
+
+    // 宽度: 最长行的可见字符数 + 2(cursor 箭头) + 2(边距) + 2(border).
+    let mut max_label_w: u16 = 0;
+    for row in &picker.rows {
+        let w = UnicodeWidthStr::width(row.label.as_str()) as u16;
+        if w > max_label_w {
+            max_label_w = w;
+        }
+    }
+    let needed_w = (max_label_w + 6).max(title_width(title));
+    let max_w = area.width.saturating_sub(2).max(8); // 至少留 2 列空隙
+    let popup_w = needed_w.min(max_w).max(10);
+
+    // 高度: 顶部 hint + rows + border + 上下边距. rows 远超可视时按
+    // 可视高度 - 6 限, 然后用 cursor-centered 滚动窗口.
+    let content_rows_needed = picker.rows.len() as u16 + 1; // +1 hint
+    let ideal_h = content_rows_needed + 4; // +2 border +2 padding
+    let max_h = area.height.saturating_sub(2).max(5);
+    let popup_h = ideal_h.min(max_h).max(5);
+
     let popup_area = centered_rect(popup_w, popup_h, area);
 
     frame.render_widget(Clear, popup_area);
@@ -211,47 +238,63 @@ fn render_device_picker(frame: &mut Frame, area: Rect, picker: &PickerVm) {
         return;
     }
 
-    let mut lines: Vec<Line> = Vec::with_capacity(picker.rows.len() + 2);
+    let inner_h = inner.height as usize;
+    // inner 减去 hint(1) = rows 可用行数, 至少 1 行
+    let rows_visible = inner_h.saturating_sub(1).max(1);
+    let total_rows = picker.rows.len();
+    let cursor = picker.cursor.min(total_rows.saturating_sub(1));
+    // 滚动窗口: 围绕 cursor 居中. 窗口起点 = max(0, cursor - rows_visible/2),
+    // 然后 clamp 到 total_rows - rows_visible.
+    let window_start = if total_rows <= rows_visible {
+        0
+    } else {
+        let half = rows_visible / 2;
+        let mut start = cursor as i32 - half as i32;
+        let max_start = total_rows as i32 - rows_visible as i32;
+        if start < 0 {
+            start = 0;
+        }
+        if start > max_start {
+            start = max_start;
+        }
+        start as usize
+    };
+    let window_end = (window_start + rows_visible).min(total_rows);
+
+    let mut lines: Vec<Line> = Vec::with_capacity(rows_visible + 1);
     let hint = Span::styled(
         "[↑/↓] 选择  [Enter] 确认  [Esc] 取消  [R] 刷新",
         Style::new().fg(Color::DarkGray),
     );
     lines.push(Line::from(hint));
-    for (i, row) in picker.rows.iter().enumerate() {
-        let is_cursor = i == picker.cursor;
+
+    for idx in window_start..window_end {
+        let row = &picker.rows[idx];
+        let is_cursor = idx == cursor;
         let arrow = if is_cursor { "▶ " } else { "  " };
-        let mut spans = vec![Span::styled(
-            arrow,
-            Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
-        )];
-        if row.dim_suffix.is_empty() {
-            // idx 0 = `<系统默认>`, 直接显示
-            spans.push(Span::styled(
-                row.label.clone(),
-                if is_cursor {
-                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::new().fg(Color::White)
-                },
-            ));
+        let label_style = if is_cursor {
+            Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
         } else {
-            // driver (亮) + name (亮) + suffix (dim)
-            // 这里 `row.highlighted_name` 已经把 name 拆出, 显示完整
-            // display 时 driver 与 name 都亮, 后缀 dim.
-            // 简化: 直接拿 display, 但把 `(...)` 末尾标 dim.
-            spans.push(Span::styled(
-                row.label.clone(),
-                if is_cursor {
-                    Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::new().fg(Color::White)
-                },
-            ));
-        }
-        lines.push(Line::from(spans));
+            Style::new().fg(Color::White)
+        };
+        lines.push(Line::from_iter([
+            Span::styled(
+                arrow,
+                Style::new().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(row.label.clone(), label_style),
+        ]));
     }
+    // rows 还多但窗口放不下时, 不画底部指示行 (会挤掉 cursor), 用户滚到底自
+    // 然看得见 — 跟 `enter_device_picker` 的 cursor auto-align 配套.
+
     let paragraph = Paragraph::new(lines);
     frame.render_widget(paragraph, inner);
+}
+
+/// 计算 title 的可见字符宽 (含两侧空格), 给 popup 最小宽度参考.
+fn title_width(title: &str) -> u16 {
+    UnicodeWidthStr::width(title) as u16 + 4 // +4 padding
 }
 
 /// 居中弹窗: 设备切换失败 transient
@@ -259,6 +302,7 @@ fn render_failure_overlay(frame: &mut Frame, area: Rect, fail: &FailureVm) {
     let title = match fail.kind {
         DeviceKind::Input => " 麦克风切换失败 ",
         DeviceKind::Output => " 扬声器切换失败 ",
+        DeviceKind::Camera => " 摄像头切换失败 ",
     };
     let popup_w = 60u16.min(area.width.saturating_sub(4));
     let popup_h = 7u16.min(area.height.saturating_sub(4));

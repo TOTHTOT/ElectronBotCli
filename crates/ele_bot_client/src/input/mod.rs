@@ -22,7 +22,8 @@ pub use settings::SettingsEvent;
 use crate::app::overlay::PopupDismiss;
 use crate::app::route::{DeviceControlMode, SelectingKind};
 use crate::app::{
-    App, EditField, MenuItem, Overlay, Route, SETTINGS_IDX_OUTPUT, SETTINGS_IDX_SPEECH,
+    App, EditField, MenuItem, Overlay, Route, SETTINGS_IDX_CAMERA, SETTINGS_IDX_OUTPUT,
+    SETTINGS_IDX_SPEECH,
 };
 use crate::input::llm_test::handle as handle_llm_test;
 use crate::input::tts_test::handle as handle_tts_test;
@@ -283,6 +284,7 @@ fn handle_settings(app: &mut App, code: KeyCode) {
             let kind = match selected {
                 SETTINGS_IDX_SPEECH => Some(SelectingKind::Input),
                 SETTINGS_IDX_OUTPUT => Some(SelectingKind::Output),
+                SETTINGS_IDX_CAMERA => Some(SelectingKind::Camera),
                 _ => None,
             };
             if let Some(k) = kind {

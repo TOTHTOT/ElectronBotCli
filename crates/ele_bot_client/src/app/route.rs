@@ -11,6 +11,8 @@ pub enum SelectingKind {
     Input,
     /// 选择扬声器输出设备
     Output,
+    /// 选择摄像头设备 (走 `ListCameras` / `ServerEvent::Cameras`)
+    Camera,
 }
 
 /// 设备选择器子状态

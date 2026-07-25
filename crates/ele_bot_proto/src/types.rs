@@ -203,6 +203,32 @@ pub struct FacePosition {
     pub has_face: bool,
 }
 
+/// 摄像头信息(通过 `ListCameras` / `Cameras` 传输)
+///
+/// `id` 是 nokhwa 摄像头枚举结果的稳定标识: 当 `AppConfig.camera_index`
+/// 能被解析为整数时, 服务端把它映射成 `nokhwa::CameraIndex::Index`,
+/// 此时 `id` 取 `index.to_string()`; 当配置里是 USB path / 设备描述字符串
+/// 时, 服务端用 `CameraIndex::String`, 此时 `id` 与配置字符串相等.
+/// 客户端持久化 picker 选择时应直接把 `id` 写入 `AppConfig.camera_index`.
+///
+/// `name` 是 nokhwa `CameraInfo::human_readable_name`(或 `description`)
+/// 兜底用, 不参与匹配.
+///
+/// `display` 是给人类看的拼接字符串, 客户端 MUST NOT 用正则解析.
+///
+/// 字段命名刻意比 `DeviceInfoDto` 简单, 摄像头不像 cpal 设备那样有 driver/
+/// 通道数/采样率维度.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CameraInfoDto {
+    /// 稳定摄像头标识 (nokhwa `CameraInfo.index` 序列化或路径字符串),
+    /// 服务端按此匹配, 与 `AppConfig.camera_index` 一一对应.
+    pub id: String,
+    /// 精确摄像头名 (match 兜底).
+    pub name: String,
+    /// 给人类看的拼接串 (e.g. "Integrated Camera (id=0, USB)").
+    pub display: String,
+}
+
 impl AppConfig {
     pub const CONFIG_PATH: &'static str = "config.toml";
 

@@ -12,12 +12,12 @@ use crate::net::Client;
 use crate::ui::pages::llm_test::LlmTestState;
 use crate::ui::pages::tts_test::TtsTestState;
 use ele_bot_proto::{
-    Action, AppConfig, ClientMessage, DeviceInfoDto, DisplayMode, LlmResponse, Mood, ServerEvent,
-    SERVO_COUNT,
+    Action, AppConfig, CameraInfoDto, ClientMessage, DeviceInfoDto, DisplayMode, LlmResponse, Mood,
+    ServerEvent, SERVO_COUNT,
 };
 pub use menu::*;
 use mode::AppMode;
-pub use overlay::{DeviceKind, Overlay, PopupConfig, PopupDismiss};
+pub use overlay::{DeviceKind, Overlay, PickerEntry, PopupConfig, PopupDismiss};
 use ratatui::widgets::ListState;
 pub use route::{DeviceControlMode, EditField, Route, SelectingField, SelectingKind};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -40,12 +40,13 @@ const DEVICE_SUBMIT_WINDOW: std::time::Duration = std::time::Duration::from_secs
 
 /// 跨 Route 共享的设备列表缓存
 ///
-/// 进 Settings 时一次性从服务端拉到 `inputs` / `outputs`, picker 与
-/// 失败 UX 都从这里读. 跨帧之间 in-place 更新, 不复制.
+/// 进 Settings 时一次性从服务端拉到 `inputs` / `outputs` / `cameras`,
+/// picker 与失败 UX 都从这里读. 跨帧之间 in-place 更新, 不复制.
 #[derive(Debug, Clone)]
 pub struct DeviceCache {
     pub inputs: Vec<DeviceInfoDto>,
     pub outputs: Vec<DeviceInfoDto>,
+    pub cameras: Vec<CameraInfoDto>,
     pub loaded_at: Instant,
 }
 
@@ -54,6 +55,7 @@ impl Default for DeviceCache {
         Self {
             inputs: Vec::new(),
             outputs: Vec::new(),
+            cameras: Vec::new(),
             loaded_at: Instant::now(),
         }
     }
@@ -70,7 +72,7 @@ pub type Runtime = tokio::runtime::Runtime;
 /// 1. 在数组末尾 (设备项之前) 插入新 label
 /// 2. 在下面追加新常量
 /// 3. `begin_settings_edit` / `commit_settings_edit` 加 match 分支
-pub const SETTINGS_LABELS: [&str; 7] = [
+pub const SETTINGS_LABELS: [&str; 8] = [
     "Wifi名称",    // 0
     "Wifi密码",    // 1
     "LLM API地址", // 2
@@ -78,11 +80,12 @@ pub const SETTINGS_LABELS: [&str; 7] = [
     "LLM模型",     // 4
     "麦克风",      // 5 - picker
     "扬声器",      // 6 - picker
+    "摄像头",      // 7 - picker
 ];
 
 /// 设置项索引常量 — 列表顺序变更时, 引用方必须同步更新
 ///
-/// 设备项 (SPEECH/OUTPUT) 在 idx 5/6, 之前 (idx 2/3/4) 是 LLM 三项.
+/// 设备项 (SPEECH/OUTPUT/CAMERA) 在 idx 5/6/7, 之前 (idx 2/3/4) 是 LLM 三项.
 /// `begin_settings_edit` 的 `_ => return` 兜底让设备项继续走 picker.
 pub const SETTINGS_IDX_WIFI_SSID: usize = 0;
 pub const SETTINGS_IDX_WIFI_PASSWORD: usize = 1;
@@ -91,6 +94,7 @@ pub const SETTINGS_IDX_LLM_API_KEY: usize = 3;
 pub const SETTINGS_IDX_LLM_MODEL: usize = 4;
 pub const SETTINGS_IDX_SPEECH: usize = 5;
 pub const SETTINGS_IDX_OUTPUT: usize = 6;
+pub const SETTINGS_IDX_CAMERA: usize = 7;
 
 /// UI 状态
 #[derive(Debug)]
@@ -225,11 +229,22 @@ impl App {
             self.refresh_picker_after_load(SelectingKind::Output);
             return;
         }
+        if let ServerEvent::Cameras { cameras } = evt {
+            log::info!("received {} cameras", cameras.len());
+            self.devices.cameras = cameras;
+            self.devices.loaded_at = Instant::now();
+            self.refresh_picker_after_load(SelectingKind::Camera);
+            return;
+        }
         let mut server = self.server.lock().unwrap();
         match evt {
             ServerEvent::Pong => {}
             ServerEvent::Config { config } => {
                 self.config = config;
+                // 首条 Config 表示连上服务端 + config 已就绪, 顺带拉一次设备
+                // 列表让 Settings 行能显示 device display 而不是 raw id/name.
+                // 后续 picker 进入再单独按需拉 (见 enter_device_picker).
+                self.refresh_device_lists();
             }
             ServerEvent::Connection { is_connected } => {
                 server.robot_connected = is_connected;
@@ -277,6 +292,7 @@ impl App {
                         let old_device_name = match kind {
                             DeviceKind::Input => self.config.speech_name.clone(),
                             DeviceKind::Output => self.config.output_device.clone(),
+                            DeviceKind::Camera => self.config.camera_index.clone(),
                         };
                         self.ui.mode.overlay = Some(Overlay::DeviceSwitchFailure {
                             kind,
@@ -300,8 +316,10 @@ impl App {
             ServerEvent::Volume { value } => {
                 server.volume = value;
             }
-            // InputDevices / OutputDevices 已在 apply_event 入口短路处理
-            ServerEvent::InputDevices { .. } | ServerEvent::OutputDevices { .. } => {}
+            // InputDevices / OutputDevices / Cameras 已在 apply_event 入口短路处理
+            ServerEvent::InputDevices { .. }
+            | ServerEvent::OutputDevices { .. }
+            | ServerEvent::Cameras { .. } => {}
         }
     }
 
@@ -566,10 +584,17 @@ impl App {
         }
     }
 
-    /// 拉取输入/输出设备列表(并发两条 `List*Devices` 消息)
+    /// 拉取所有设备列表(并发三条 `List*Devices` 消息: 输入 / 输出 / 摄像头).
+    ///
+    /// 调用时机:
+    /// - 收到首条 `Config` 事件 (连上服务端, config 已就绪) — 自动拉一次,
+    ///   让 `app.devices.{inputs,outputs,cameras}` 非空, Settings 显示
+    ///   "麦克风/扬声器/摄像头" 行的设备 display 而不是 raw id.
+    /// - 用户在 Settings 按 R 手动刷.
     pub fn refresh_device_lists(&self) {
         self.send_cmd(ClientMessage::ListInputDevices);
         self.send_cmd(ClientMessage::ListOutputDevices);
+        self.send_cmd(ClientMessage::ListCameras);
     }
 
     /// 进入设备选择器 — 由 `SettingsEvent::EnterPicker` 调用
@@ -583,7 +608,7 @@ impl App {
     /// 用户 Enter 等于"保持当前选择"; 没匹配上才回 idx 0 (`<系统默认>`).
     /// 避免无脑 Enter 误中系统默认, 把 `name` 清空、`device_id` 也清掉.
     pub fn enter_device_picker(&mut self, kind: SelectingKind) {
-        let devices = self.picker_devices(kind).to_vec();
+        let devices = self.picker_devices(kind);
         let loading = devices.is_empty();
         let mut selecting = SelectingField::new(kind);
         selecting.loading = loading;
@@ -597,16 +622,31 @@ impl App {
                 self.config.output_device_id.as_deref(),
                 self.config.output_device.as_str(),
             ),
+            // 摄像头不分 name / id, 只比 id 字符串
+            SelectingKind::Camera => (Some(self.config.camera_index.as_str()), ""),
         };
-        let matched_idx = current_id
-            .and_then(|id| devices.iter().position(|d| d.id == id))
-            .or_else(|| {
-                if current_name.is_empty() {
-                    None
-                } else {
-                    devices.iter().position(|d| d.name == current_name)
-                }
-            });
+        let matched_idx = match kind {
+            SelectingKind::Camera => current_id.and_then(|id| {
+                devices
+                    .iter()
+                    .position(|d| matches!(d, PickerEntry::Camera(c) if c.id == id))
+            }),
+            _ => current_id
+                .and_then(|id| {
+                    devices
+                        .iter()
+                        .position(|d| matches!(d, PickerEntry::Audio(a) if a.id == id))
+                })
+                .or_else(|| {
+                    if current_name.is_empty() {
+                        None
+                    } else {
+                        devices.iter().position(
+                            |d| matches!(d, PickerEntry::Audio(a) if a.name == current_name),
+                        )
+                    }
+                }),
+        };
         if let Some(idx) = matched_idx {
             // idx 0 是 `<系统默认>`, 实际设备从 1 开始
             selecting.cursor = idx + 1;
@@ -676,7 +716,6 @@ impl App {
         } else {
             return;
         };
-        let devices = self.picker_devices(kind).to_vec();
         let cursor = if let Route::Settings {
             selecting: Some(s), ..
         } = &self.ui.mode.route
@@ -685,11 +724,12 @@ impl App {
         } else {
             0
         };
-        let (chosen_name, chosen_id) = if cursor == 0 {
-            (String::new(), None)
+        let (chosen_name, chosen_id, chosen_cam_id) = if cursor == 0 {
+            (String::new(), None, String::new())
         } else {
-            match devices.get(cursor - 1) {
-                Some(d) => (d.name.clone(), Some(d.id.clone())),
+            match self.picker_devices(kind).get(cursor - 1) {
+                Some(PickerEntry::Audio(d)) => (d.name.clone(), Some(d.id.clone()), String::new()),
+                Some(PickerEntry::Camera(d)) => (String::new(), None, d.id.clone()),
                 None => return,
             }
         };
@@ -701,6 +741,9 @@ impl App {
             SelectingKind::Output => {
                 self.config.output_device = chosen_name.clone();
                 self.config.output_device_id = chosen_id.clone();
+            }
+            SelectingKind::Camera => {
+                self.config.camera_index = chosen_cam_id.clone();
             }
         }
         self.last_device_submit = Some(DeviceSubmitStamp {
@@ -764,10 +807,29 @@ impl App {
 
     // ---- 内部辅助 ----
 
-    fn picker_devices(&self, kind: SelectingKind) -> &[DeviceInfoDto] {
+    fn picker_devices(&self, kind: SelectingKind) -> Vec<PickerEntry> {
         match kind {
-            SelectingKind::Input => &self.devices.inputs,
-            SelectingKind::Output => &self.devices.outputs,
+            SelectingKind::Input => self
+                .devices
+                .inputs
+                .iter()
+                .cloned()
+                .map(PickerEntry::Audio)
+                .collect(),
+            SelectingKind::Output => self
+                .devices
+                .outputs
+                .iter()
+                .cloned()
+                .map(PickerEntry::Audio)
+                .collect(),
+            SelectingKind::Camera => self
+                .devices
+                .cameras
+                .iter()
+                .cloned()
+                .map(PickerEntry::Camera)
+                .collect(),
         }
     }
 
@@ -783,6 +845,7 @@ impl App {
         match kind {
             SelectingKind::Input => self.send_cmd(ClientMessage::ListInputDevices),
             SelectingKind::Output => self.send_cmd(ClientMessage::ListOutputDevices),
+            SelectingKind::Camera => self.send_cmd(ClientMessage::ListCameras),
         }
     }
 

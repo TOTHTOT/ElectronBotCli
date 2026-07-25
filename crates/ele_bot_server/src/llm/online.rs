@@ -208,7 +208,7 @@ impl OnlineLlm {
             .build()?;
 
         log::debug!(
-            "Online LLM request: {}",
+            "Online LLM request: {:#?}",
             serde_json::to_string(&request).unwrap_or_default()
         );
 

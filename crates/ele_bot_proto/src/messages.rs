@@ -4,8 +4,8 @@
 //! 协议基于 JSON, 消息体序列化为单一字符串。
 
 use crate::types::{
-    AppConfig, DeviceInfoDto, DisplayMode, FacePosition, JointConfig, JointState, LlmResponse,
-    Mood, SERVO_COUNT,
+    AppConfig, CameraInfoDto, DeviceInfoDto, DisplayMode, FacePosition, JointConfig, JointState,
+    LlmResponse, Mood, SERVO_COUNT,
 };
 use serde::{Deserialize, Serialize};
 
@@ -54,6 +54,8 @@ pub enum ClientMessage {
     ListInputDevices,
     /// 请求所有音频输出设备 (服务端响应 `ServerEvent::OutputDevices`)
     ListOutputDevices,
+    /// 请求所有摄像头 (服务端响应 `ServerEvent::Cameras`)
+    ListCameras,
 }
 
 impl ClientMessage {
@@ -104,6 +106,9 @@ pub enum ServerEvent {
     InputDevices { devices: Vec<DeviceInfoDto> },
     /// 服务端枚举到的所有音频输出设备 (响应 `ListOutputDevices`)
     OutputDevices { devices: Vec<DeviceInfoDto> },
+    /// 服务端枚举到的所有摄像头 (响应 `ListCameras`).
+    /// 列表为空时表示当前没有任何可用摄像头, 不代表错误.
+    Cameras { cameras: Vec<CameraInfoDto> },
 }
 
 impl ServerEvent {
@@ -175,6 +180,12 @@ mod tests {
         let json = msg.to_json().unwrap();
         let parsed = ClientMessage::from_json(&json).unwrap();
         assert!(matches!(parsed, ClientMessage::ListOutputDevices));
+
+        let msg = ClientMessage::ListCameras;
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("\"type\":\"list_cameras\""));
+        let parsed = ClientMessage::from_json(&json).unwrap();
+        assert!(matches!(parsed, ClientMessage::ListCameras));
     }
 
     #[test]
@@ -212,5 +223,40 @@ mod tests {
         assert!(json.contains("\"type\":\"output_devices\""));
         let parsed = ServerEvent::from_json(&json).unwrap();
         assert!(matches!(parsed, ServerEvent::OutputDevices { .. }));
+    }
+
+    #[test]
+    fn cameras_event_roundtrip() {
+        let evt = ServerEvent::Cameras {
+            cameras: vec![CameraInfoDto {
+                id: "0".to_string(),
+                name: "Integrated Camera".to_string(),
+                display: "Integrated Camera (id=0, USB)".to_string(),
+            }],
+        };
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"cameras\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        match parsed {
+            ServerEvent::Cameras { cameras } => {
+                assert_eq!(cameras.len(), 1);
+                assert_eq!(cameras[0].id, "0");
+                assert_eq!(cameras[0].display, "Integrated Camera (id=0, USB)");
+            }
+            _ => panic!("expected Cameras event"),
+        }
+    }
+
+    #[test]
+    fn cameras_event_empty_is_ok() {
+        // 没有任何摄像头时, 服务端仍回 Cameras { cameras: vec![] },
+        // 客户端 picker 不应报错.
+        let evt = ServerEvent::Cameras { cameras: vec![] };
+        let json = evt.to_json().unwrap();
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        match parsed {
+            ServerEvent::Cameras { cameras } => assert!(cameras.is_empty()),
+            _ => panic!("expected Cameras event"),
+        }
     }
 }

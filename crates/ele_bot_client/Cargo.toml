@@ -27,6 +27,7 @@ simplelog = { workspace = true }
 # TUI
 ratatui = { workspace = true }
 crossterm = { workspace = true }
+unicode-width = { workspace = true }
 
 # WebSocket 客户端
 tokio-tungstenite = { workspace = true }

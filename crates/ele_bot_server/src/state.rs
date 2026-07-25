@@ -6,6 +6,7 @@
 use crate::event_bus::{BusEvent, EventBus};
 use crate::face_tracker::{calculate_body_adjustment, smooth_adjustment, BODY_SERVO_INDEX};
 use crate::llm::{LlmManager, LlmResponse};
+use crate::media::video::capture::parse_camera_index;
 use crate::media::video::VideoCapture;
 use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
@@ -31,8 +32,10 @@ pub struct SharedState {
     pub joint: Arc<Joint>,
     /// LCD 帧渲染
     pub lcd: Mutex<Lcd>,
-    /// 摄像头捕获
-    pub video: Mutex<VideoCapture>,
+    /// 摄像头捕获 - 用 `Mutex<Option<Arc>>` 包装以便热切换 (`rebuild_video`).
+    /// `None` 表示视频子系统不可用 (启动时枚举失败或热重建中途的中间态).
+    /// `Arc` 让旧实例能在取走后被并发任务继续持有, 等到引用计数归零才 Drop.
+    pub video: Mutex<Option<Arc<VideoCapture>>>,
     /// 语音/ASR/TTS - 用 Arc 包装以便在 WS 任务中安全共享
     pub voice: Mutex<Option<Arc<VoiceManager>>>,
     /// LLM 管理
@@ -76,12 +79,7 @@ impl SharedState {
         let joint = Arc::new(Joint::new());
 
         // 摄像头
-        let camera_index: nokhwa::utils::CameraIndex =
-            if let Ok(idx) = config.camera_index.parse::<u32>() {
-                nokhwa::utils::CameraIndex::Index(idx)
-            } else {
-                nokhwa::utils::CameraIndex::String(config.camera_index.clone())
-            };
+        let camera_index = parse_camera_index(&config.camera_index);
 
         let mut video_capture = VideoCapture::new(
             camera_index,
@@ -97,7 +95,8 @@ impl SharedState {
         });
         video_capture.start_capture_frames_thread();
 
-        // 摄像头分辨率缓存
+        // 摄像头分辨率缓存 - 直接持有 Arc<Mutex<(w, h)>> 让分辨率跨实例共享
+        // (旧实例 Drop 不影响新实例写分辨率, 反之亦然)
         let camera_resolution = video_capture.resolution_arc();
         // LCD 帧缓存
         let lcd_frame_cache = Arc::new(Mutex::new(None));
@@ -120,7 +119,7 @@ impl SharedState {
             config: RwLock::new(config),
             joint,
             lcd: Mutex::new(lcd),
-            video: Mutex::new(video_capture),
+            video: Mutex::new(Some(Arc::new(video_capture))),
             voice: Mutex::new(voice),
             llm: tokio::sync::Mutex::new(llm),
             // frame_tx: frame_tx.clone(),
@@ -258,6 +257,89 @@ impl SharedState {
     pub fn current_audio_config(&self) -> (String, String) {
         let cfg = self.config.read().unwrap();
         (cfg.speech_name.clone(), cfg.output_device.clone())
+    }
+
+    /// 返回当前生效的 `camera_index`, 给 `set_config` 路径做
+    /// "是否需要重建 VideoCapture" 的判断. 与 `current_audio_config` 对称.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// let old_idx = state.current_video_config();
+    /// if new_cfg.camera_index != old_idx {
+    ///     state.rebuild_video()?;
+    /// }
+    /// ```
+    #[must_use]
+    pub fn current_video_config(&self) -> String {
+        self.config.read().unwrap().camera_index.clone()
+    }
+
+    /// 获取当前视频实例的 `Arc` 快照. 热切换后调用此方法拿到的就是
+    /// 新实例; 旧实例的 `Arc` 还在别处被持有 (face tracking / web preview)
+    /// 则仍可用, 不会因为 `take()` 而立即析构.
+    #[must_use]
+    pub fn video(&self) -> Option<Arc<VideoCapture>> {
+        self.video.lock().unwrap().clone()
+    }
+
+    /// 用当前 `AppConfig` 重新构造 `VideoCapture`, 替换 `self.video`.
+    ///
+    /// 用户在 picker 切换摄像头后, `set_config` 检测到 `camera_index` 变化
+    /// 立即调此函数, 不重启 ws 服务.
+    ///
+    /// # 替换语义 (与 [`Self::rebuild_voice`] 对齐)
+    ///
+    /// 1. `take()` 移出旧实例 (旧 `Arc` 还在本函数栈, capture frame 线程继续跑)
+    /// 2. 函数末尾 Drop 旧 `Arc` → `VideoCapture::Drop` 自动 `running=false`
+    ///    + `handle.join()` (capture thread 等当前一帧抓完再退出, 约几十毫秒)
+    /// 3. 用新 `CameraIndex` 构造 `VideoCapture` + `start_capture_frames_thread`
+    ///    → 推回 `Option`
+    ///
+    /// 与 audio 端不同: audio 端旧实例 Drop 让 cpal Stream 自然停流,
+    /// 摄像头端 `VideoCapture::Drop` 会同步 join capture thread, 阻塞
+    /// 当前函数 (调用方 `set_config`), 期间 ws 任务在 `handle_command`
+    /// `await` 同步段. 这是已知设计取舍 — 摄像头比音频"卡顿"一点
+    /// 但不影响用户体验.
+    ///
+    /// # 失败语义
+    ///
+    /// `VideoCapture::new` 报错时 (设备被独占 / 路径不存在), 函数返回
+    /// `Err`, 调用方 (`set_config`) 负责推 `ServerEvent::Error` 给客户端.
+    /// 此函数**不会**自动回退旧 index —— 设计上切成"用户已表达选择
+    /// 意图", 失败由 `set_config` 用旧 index 重建一个 fallback 实例保证
+    /// 视频流不断.
+    ///
+    /// # Examples
+    ///
+    /// ```rust,ignore
+    /// if let Err(e) = state.rebuild_video() {
+    ///     state.bus_tx.publish(BusEvent::ServerEvent(ServerEvent::Error {
+    ///         message: format!("camera rebuild failed: {e}"),
+    ///     }));
+    /// }
+    /// ```
+    pub fn rebuild_video(&self) -> anyhow::Result<()> {
+        let config = self.config.read().unwrap().clone();
+        let new_index = parse_camera_index(&config.camera_index);
+        let rotation = rotate_proto_to_local(config.rotation);
+
+        // 1. 移出旧实例. 旧 Arc 仍在本函数栈, 所以 capture thread 还在跑.
+        let old = {
+            let mut guard = self.video.lock().unwrap();
+            guard.take()
+        };
+
+        // 2. 构造新实例. 即使中途失败, "旧实例已 take + 新实例尚未替换"
+        // 这个中间态会在 Err 返回时被调用方 (set_config fallback) 接手.
+        let mut new_capture = VideoCapture::new(new_index, self.bus_tx.clone(), rotation);
+        new_capture.start_capture_frames_thread();
+        *self.video.lock().unwrap() = Some(Arc::new(new_capture));
+
+        // 3. 替换成功后 Drop 旧实例 — Drop impl 会 join capture thread,
+        // 等当前帧抓完自然退出.
+        drop(old);
+        Ok(())
     }
 
     fn init_voice(config: &AppConfig, bus: EventBus) -> anyhow::Result<VoiceManager> {
@@ -587,16 +669,22 @@ impl SharedState {
     /// 更新 config
     ///
     /// 若 `speech_name` / `output_device` 与旧值不同, 立即重建
-    /// `VoiceManager` (热生效). 重建失败时 config 仍按本次值持久化
+    /// `VoiceManager` (热生效); 若 `camera_index` 与旧值不同, 立即重建
+    /// `VideoCapture` (热生效). 重建失败时 config 仍按本次值持久化
     /// (用户已经表达过选择意图), 但通过 `ServerEvent::Error` 告知
-    /// 客户端当前 ASR/TTS 仍在用旧设备.
+    /// 客户端当前 ASR/TTS/摄像头仍在用旧设备. 视频端在 `rebuild_video`
+    /// 失败时**额外**用旧 index 尝试 fallback, 确保视频流不中断.
     pub fn set_config(&self, cfg: AppConfig) -> anyhow::Result<()> {
         let (old_mic, old_spk) = self.current_audio_config();
+        let old_cam = self.current_video_config();
         let audio_changed = cfg.speech_name != old_mic || cfg.output_device != old_spk;
+        let video_changed = cfg.camera_index != old_cam;
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
         self.bus_tx
-            .publish(BusEvent::ServerEvent(ServerEvent::Config { config: cfg }));
+            .publish(BusEvent::ServerEvent(ServerEvent::Config {
+                config: cfg.clone(),
+            }));
         if audio_changed {
             if let Err(e) = self.rebuild_voice() {
                 log::warn!("rebuild_voice failed: {e:?}");
@@ -606,6 +694,63 @@ impl SharedState {
                     }));
             }
         }
+        if video_changed {
+            if let Err(e) = self.rebuild_video() {
+                log::warn!("rebuild_video failed: {e:?}");
+                // fallback: 用内存里"用户提交前的旧 index"重建一次, 让视频流不断.
+                // 失败也要再尝试 — 第一次失败可能是新设备独占占用, 再 fallback 也可能再失败.
+                if !old_cam.is_empty() && old_cam != cfg.camera_index {
+                    if let Err(e2) = self.rebuild_with_override(&old_cam) {
+                        log::error!("camera rebuild fallback also failed: {e2:?}");
+                        self.bus_tx
+                            .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                message: format!(
+                                    "camera rebuild failed: {e}; fallback also failed: {e2}"
+                                ),
+                            }));
+                    } else {
+                        self.bus_tx
+                            .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                message: format!(
+                                    "camera rebuild failed: {e}; switched back to '{old_cam}'"
+                                ),
+                            }));
+                    }
+                } else {
+                    self.bus_tx
+                        .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                            message: format!("camera rebuild failed: {e}"),
+                        }));
+                }
+            } else {
+                // 成功: 把新分辨率推给客户端.
+                let (w, h) = self.video().map(|v| v.resolution()).unwrap_or((0, 0));
+                self.bus_tx
+                    .publish(BusEvent::ServerEvent(ServerEvent::CameraResolution {
+                        width: w,
+                        height: h,
+                    }));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl SharedState {
+    /// 用临时 index 重建一次 `VideoCapture`, 不动 `self.config`.
+    /// `set_config` 的 fallback 路径专用 — 用旧 index 重建一次, 让视频流不断.
+    fn rebuild_with_override(&self, cam_index: &str) -> anyhow::Result<()> {
+        let new_index = parse_camera_index(cam_index);
+        let rotation = rotate_proto_to_local(self.config.read().unwrap().rotation);
+
+        let old = {
+            let mut guard = self.video.lock().unwrap();
+            guard.take()
+        };
+        let mut new_capture = VideoCapture::new(new_index, self.bus_tx.clone(), rotation);
+        new_capture.start_capture_frames_thread();
+        *self.video.lock().unwrap() = Some(Arc::new(new_capture));
+        drop(old);
         Ok(())
     }
 }

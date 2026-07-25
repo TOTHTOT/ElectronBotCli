@@ -21,6 +21,97 @@ use std::thread;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+/// 把 `AppConfig.camera_index` 字符串解析成 `nokhwa` 可识别的 [`CameraIndex`].
+///
+/// 整数走 `CameraIndex::Index` (USB 常见), 非整数走 `CameraIndex::String`
+/// (IPC / 路径). 失败时回退到 `CameraIndex::Index(0)`, 不报错 — 与
+/// `SharedState::new` 原有语义对齐, 防止 config 损坏导致服务起不来.
+#[must_use]
+pub(crate) fn parse_camera_index(s: &str) -> CameraIndex {
+    if let Ok(idx) = s.parse::<u32>() {
+        CameraIndex::Index(idx)
+    } else if s.is_empty() {
+        CameraIndex::Index(0)
+    } else {
+        CameraIndex::String(s.to_string())
+    }
+}
+
+/// 枚举系统所有摄像头, 转成 wire 上的 [`ele_bot_proto::CameraInfoDto`].
+///
+/// 当前没有任何 USB / IPC 摄像头时返回 `vec![]` (非 `Err`), 让调用方
+/// (ws) 直接空回复 `ServerEvent::Cameras { cameras: vec![] }`, 客户端
+/// 把这个状态当"无设备可选"展示, 不显示错误弹窗.
+///
+/// # Examples
+///
+/// ```rust,ignore
+/// let cameras = list_cameras_dto();
+/// for d in &cameras { log::info!("{}: {}", d.id, d.display); }
+/// ```
+#[must_use]
+pub fn list_cameras_dto() -> Vec<ele_bot_proto::CameraInfoDto> {
+    match VideoCapture::list_cameras() {
+        Ok(list) => list.into_iter().map(|ci| camera_info_to_dto(&ci)).collect(),
+        Err(e) => {
+            log::warn!("list_cameras failed: {e:?}");
+            Vec::new()
+        }
+    }
+}
+
+/// 单个 nokhwa `CameraInfo` -> `CameraInfoDto`.
+///
+/// 字段映射规则, 按 platform 上 nokhwa 0.10 实际行为校准:
+///
+/// - `nokhwa::CameraInfo::misc` 是设备硬件路径
+///   (Windows MSMF 上是完整的 `\\?\usb#vid_...&pid_...#...\{GUID}\global`,
+///   Linux V4L2 上是 `/dev/videoN` 类), 跟"驱动/后端名"不是一回事,
+///   **不能直接展示给用户**.
+/// - `description` 才是真正的人类可读"驱动/后端"标签
+///   (Windows 上固定 `MediaFoundation Camera`,
+///   macOS 上 `AVFoundation Camera`, Linux V4L2 上偶尔空).
+/// - `human_name` 是设备厂商起的型号名 (`USB 2.0 PC Cam` 等),
+///   主要识别位.
+///
+/// `display` 拼成 `<description-or-placeholder> <human_name> (id=<n>)`.
+/// 缺 `human_name` 时退到 `Camera N`; 缺 `description` 时 driver 段也退到
+/// `Camera N` 且跟 `name` 段合并避免重复.
+fn camera_info_to_dto(ci: &CameraInfo) -> ele_bot_proto::CameraInfoDto {
+    let id = ci.index().as_string();
+    let human = ci.human_name();
+    let desc = ci.description().to_string();
+
+    let has_human = !human.trim().is_empty();
+    let has_desc = !desc.trim().is_empty();
+    // 两个字段给任何一个人类字符串就 OK. 都空时统一用 `Camera {id}` 占位,
+    // 避免 DTO display 出现空字符串.
+    let name = if has_human {
+        human.clone()
+    } else {
+        format!("Camera {id}")
+    };
+    let driver = if has_desc {
+        desc.clone()
+    } else {
+        format!("Camera {id}")
+    };
+
+    let display = if driver == name {
+        // driver 段退化到与 name 段同名 (两者都退到 "Camera N" 时),
+        // 避免输出 `Camera 0 Camera 0 (id=0)` 这种重复. 退化成单段.
+        format!("Camera {id} (id={id})")
+    } else {
+        format!("{driver} {name} (id={id})")
+    };
+    ele_bot_proto::CameraInfoDto {
+        id,
+        // `name` 字段: 兜底匹配用, 沿用优先用 human_name, 没有就拿 description.
+        name: if has_human { human } else { desc },
+        display,
+    }
+}
+
 /// 帧率计算器
 #[cfg(feature = "fps-counter")]
 struct FrameRateCounter {
@@ -254,7 +345,7 @@ fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
         FrameFormat::YUYV,
         30,
     ));
-    log::info!("cameras: {:#?}", VideoCapture::list_cameras());
+    log::info!("Supported cameras: {:?}", VideoCapture::list_cameras());
     let query = RequestedFormat::new::<RgbFormat>(format_type);
     Ok(Camera::new(index, query)?)
 }

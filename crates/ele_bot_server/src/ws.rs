@@ -280,6 +280,10 @@ async fn handle_command(
             let devices = crate::media::voice::list_output_devices_dto();
             let _ = out_tx.send(ServerEvent::OutputDevices { devices });
         }
+        ClientMessage::ListCameras => {
+            let cameras = crate::media::video::capture::list_cameras_dto();
+            let _ = out_tx.send(ServerEvent::Cameras { cameras });
+        }
     }
     Ok(())
 }
