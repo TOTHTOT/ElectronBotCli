@@ -139,7 +139,9 @@ fn recognition_loop(
                         let text = result.text.trim().to_string();
                         if !text.is_empty() {
                             log::info!("ASR: 【{}】", text);
-                            let _ = result_tx.send(text);
+                            if let Err(e) = result_tx.send(text) {
+                                log::warn!("Failed to send result: {}", e);
+                            }
                         }
                     }
                 }
@@ -267,8 +269,8 @@ mod tests {
     const WORKSPACE_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
     const TEST_WAV_PATH: &str = "assets/audio/asr_example_zh.wav";
 
-    fn test_wav_path() -> std::path::PathBuf {
-        std::path::Path::new(WORKSPACE_ROOT).join(TEST_WAV_PATH)
+    fn test_wav_path() -> PathBuf {
+        Path::new(WORKSPACE_ROOT).join(TEST_WAV_PATH)
     }
 
     fn load_wav_samples(path: &Path) -> anyhow::Result<Vec<f32>> {

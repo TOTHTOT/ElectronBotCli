@@ -104,9 +104,28 @@ impl LlmTrait for QwenLlm {
             actions: Vec::new(),
         })
     }
+
+    fn chat(&mut self, user_input: &str) -> Result<String> {
+        let prompt = build_chat_prompt(user_input);
+        let text = QwenLlm::generate(self, &prompt, 64)?;
+        Ok(text.trim().to_string())
+    }
 }
 fn build_emotion_prompt(user_input: &str) -> String {
     format!(
         "<|im_start|>system\n分析用户输入的情感，只输出情感标签。\n情感选项：开心、难过、生气、困惑、害怕、中性\n输出格式：[情感]<|im_end|>\n<|im_start|>user\n{user_input}\n<|im_end|>\n<|im_start|>assistant\n"
+    )
+}
+
+/// 桌宠对话 prompt. 简短中文回复 (≤ 30 字), 不要解释, 不要 markdown.
+fn build_chat_prompt(user_input: &str) -> String {
+    format!(
+        "system
+你是一个桌面机器人, 用简短中文回复用户 (≤ 30 字). 不要解释, 不要 markdown.
+user
+{user_input}
+
+assistant
+"
     )
 }

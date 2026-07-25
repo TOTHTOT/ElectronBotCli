@@ -11,6 +11,14 @@ pub trait LlmTrait: Send {
     /// 分析用户输入的情感
     fn analyze_mood(&mut self, user_input: &str) -> Result<LlmResponse>;
 
+    /// 生成对用户输入的对话文本回复 (走 TTS 播报).
+    ///
+    /// 默认实现返回 "LLM chat not implemented" 字符串, 方便 trait
+    /// 的占位实现和测试用; 实际 `QwenLlm` / `OnlineLlm` 都 MUST 覆盖.
+    fn chat(&mut self, _user_input: &str) -> Result<String> {
+        Ok("[LLM chat not implemented]".to_string())
+    }
+
     /// 设置当前会话 ID
     fn set_session_id(&mut self, _session_id: &str) {}
 

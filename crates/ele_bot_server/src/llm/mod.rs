@@ -112,6 +112,15 @@ impl LlmManager {
         guard.analyze_mood(user_input)
     }
 
+    /// 生成对话文本回复 (走 TTS 播报). 内部 Mutex 借用 `&self.inner`.
+    pub fn chat(&self, user_input: &str) -> Result<String> {
+        let mut guard = self
+            .inner
+            .lock()
+            .map_err(|e| anyhow::anyhow!("Lock error: {}", e))?;
+        guard.chat(user_input)
+    }
+
     /// 设置当前会话 ID
     pub fn set_session_id(&self, session_id: &str) {
         if let Ok(mut guard) = self.inner.lock() {

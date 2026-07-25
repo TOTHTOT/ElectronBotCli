@@ -262,6 +262,53 @@ impl OnlineLlm {
             (content.trim(), "[]")
         }
     }
+
+    /// 对话 system prompt. 用 ≤ 30 字简短中文回复, 不要解释, 不要 markdown.
+    fn chat_system_prompt() -> &'static str {
+        "你是一个桌面机器人, 用简短中文回复用户 (≤ 30 字). 不要解释, 不要 markdown."
+    }
+
+    /// chat 用: 构造 [system + history + user] 消息序列, 跟 analyze_mood 共用 histories.
+    fn build_chat_messages(&self, user_input: &str) -> Vec<ChatCompletionRequestMessage> {
+        let mut messages = vec![ChatCompletionRequestSystemMessageArgs::default()
+            .content(Self::chat_system_prompt())
+            .build()
+            .expect("system message build")
+            .into()];
+        if let Some(history) = self.histories.get(&self.current_session) {
+            messages.extend(history.iter().cloned());
+        }
+        messages.push(Self::create_user_message(user_input));
+        messages
+    }
+
+    /// chat 异步实现: 调 chat completions, 把 user + assistant 都写入 history, 返回内容.
+    async fn chat_async(&mut self, user_input: &str) -> Result<String> {
+        let messages = self.build_chat_messages(user_input);
+        let request = CreateChatCompletionRequestArgs::default()
+            .model(&self.model)
+            .messages(messages)
+            .temperature(0.7)
+            .max_tokens(80u32)
+            .build()?;
+        let response = self
+            .client
+            .chat()
+            .create(request)
+            .await
+            .context("LLM chat API 调用失败")?;
+        let content = response
+            .choices
+            .first()
+            .and_then(|c| c.message.content.clone())
+            .unwrap_or_default();
+        let content = content.trim().to_string();
+
+        // 写入 history
+        self.add_message_to_history(Self::create_user_message(user_input));
+        self.add_message_to_history(Self::create_assistant_message(&content));
+        Ok(content)
+    }
 }
 
 impl LlmTrait for OnlineLlm {
@@ -270,6 +317,11 @@ impl LlmTrait for OnlineLlm {
         // 需要创建新的 Tokio runtime 来执行异步代码
         let rt = tokio::runtime::Runtime::new()?;
         rt.block_on(self.analyze_mood_async(user_input))
+    }
+
+    fn chat(&mut self, user_input: &str) -> Result<String> {
+        let rt = tokio::runtime::Runtime::new()?;
+        rt.block_on(self.chat_async(user_input))
     }
 
     fn set_session_id(&mut self, session_id: &str) {

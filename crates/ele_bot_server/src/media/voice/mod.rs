@@ -7,7 +7,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Mutex};
 
 /// 从 cpal `Device` 同时取稳定 id 和 friendly name; 任一步失败返回 `None`.
 ///
@@ -79,7 +79,11 @@ impl TtsModelPaths {
 #[allow(dead_code)]
 pub struct VoiceManager {
     _stream: Option<Stream>,
-    _rx: mpsc::Receiver<String>,
+    /// ASR 识别文本接收端. 由 SharedState 在 init 后调 `take_asr_text_rx`
+    /// 一次性取走 (返回所有权), 避免文本积压到 VoiceManager drop.
+    /// 包成 `Arc<Mutex<Option<...>>>` 是因为 `VoiceManager` 自身是
+    /// `Arc<VoiceManager>`, 多引用时拿不到 `&mut self`.
+    asr_text_rx: Arc<Mutex<Option<mpsc::Receiver<String>>>>,
     volume: Arc<AtomicI32>,
     tts_handler: TtsHandler,
     tts_player: Option<TtsPlayer>,
@@ -152,12 +156,19 @@ impl VoiceManager {
 
         Ok(Self {
             _stream: stream,
-            _rx: text_rx,
+            asr_text_rx: Arc::new(Mutex::new(Some(text_rx))),
             volume,
             tts_handler,
             tts_player,
             running,
         })
+    }
+
+    /// 取出 ASR 识别文本接收端. SharedState 在 init 后调一次, 启动
+    /// bridge 线程把识别结果转发到 `llm_text_tx`. 一次性 take, 避免文本
+    /// 积压在 VoiceManager 内部直到 drop. 第二次调用返回 None.
+    pub fn take_asr_text_rx(&self) -> Option<mpsc::Receiver<String>> {
+        self.asr_text_rx.lock().unwrap().take()
     }
 
     /// 获取实时音量

@@ -89,6 +89,9 @@ impl Default for Action {
 pub struct LlmResponse {
     pub mood: Mood,
     pub actions: Vec<Action>,
+    /// LLM 生成的对用户回复文本 (走 TTS 播报). 旧客户端忽略 None 字段.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reply_text: Option<String>,
 }
 
 /// 摄像头旋转角度
