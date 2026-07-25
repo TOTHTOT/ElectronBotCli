@@ -28,7 +28,7 @@ pub struct SelectingField {
 
 impl SelectingField {
     /// 新建: 输入/输出, 起始 cursor=0 (即 `<系统默认>`), 列表非空时立刻就绪.
-    #[must_use] 
+    #[must_use]
     pub fn new(kind: SelectingKind) -> Self {
         Self {
             kind,
@@ -82,7 +82,7 @@ impl EditField {
     /// 新建 `EditField`. 调用方传入 cursor 时 SHOULD 取
     /// `buffer.chars().count()` (末尾) 或 `0` (开头); 越界值会被方法
     /// 内部的 char/byte 转换兜底 clamp 到合法范围.
-    #[must_use] 
+    #[must_use]
     pub fn new(index: usize, label: &'static str, buffer: String, cursor: usize) -> Self {
         let chars = buffer.chars().count();
         Self {
@@ -182,13 +182,13 @@ impl EditField {
     }
 
     /// 取 cursor 之前的字符 (渲染 caret 前的部分)
-    #[must_use] 
+    #[must_use]
     pub fn before_cursor(&self) -> String {
         self.buffer.chars().take(self.cursor).collect()
     }
 
     /// 取 cursor 之后的字符 (渲染 caret 后的部分)
-    #[must_use] 
+    #[must_use]
     pub fn after_cursor(&self) -> String {
         self.buffer.chars().skip(self.cursor).collect()
     }
@@ -221,7 +221,7 @@ pub enum Route {
 impl Route {
     /// 把当前 Route 映射回侧边栏高亮用的 `MenuItem`。
     /// `Nav` 使用 `last_entered`; 其它变体直接对应。
-    #[must_use] 
+    #[must_use]
     pub fn menu_item(&self) -> MenuItem {
         match self {
             Route::Nav { last_entered } => *last_entered,

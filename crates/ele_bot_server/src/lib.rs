@@ -13,5 +13,5 @@ pub mod robot;
 pub mod state;
 pub mod test_mode;
 pub mod vision;
-pub mod ws;
 pub mod web;
+pub mod ws;

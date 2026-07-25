@@ -166,7 +166,8 @@ fn display_for(devices: &[ele_bot_proto::DeviceInfoDto], name: &str) -> String {
     } else {
         devices
             .iter()
-            .find(|d| d.name == name).map_or_else(|| name.to_string(), |d| d.display.clone())
+            .find(|d| d.name == name)
+            .map_or_else(|| name.to_string(), |d| d.display.clone())
     }
 }
 

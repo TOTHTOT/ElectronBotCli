@@ -86,7 +86,7 @@ impl VideoCapture {
     /// * `camera_index` - 摄像头索引
     /// * `frame_cache` - 帧缓存通道
     /// * `rotate_angle` - 旋转角度
-    #[must_use] 
+    #[must_use]
     pub fn new(camera_index: CameraIndex, bus: FrameCache, rotate_angle: RotateAngle) -> Self {
         log::info!(
             "Creating VideoCapture with index: {camera_index:?}, rotation: {rotate_angle:?}"
@@ -111,25 +111,25 @@ impl VideoCapture {
     }
 
     /// 获取旋转角度
-    #[must_use] 
+    #[must_use]
     pub fn rotate_angle(&self) -> RotateAngle {
         self.rotate_angle
     }
 
     /// 获取帧缓存
-    #[must_use] 
+    #[must_use]
     pub fn frame_cache(&self) -> FrameCache {
         self.bus.clone()
     }
 
     /// 获取实际分辨率
-    #[must_use] 
+    #[must_use]
     pub fn resolution(&self) -> (u32, u32) {
         self.resolution.lock().map(|guard| *guard).unwrap_or((0, 0))
     }
 
     /// 获取分辨率的 Arc 句柄（用于跨线程共享）
-    #[must_use] 
+    #[must_use]
     pub fn resolution_arc(&self) -> Arc<Mutex<(u32, u32)>> {
         self.resolution.clone()
     }
@@ -172,7 +172,7 @@ impl VideoCapture {
     }
 
     /// 获取摄像头支持的格式列表
-    #[must_use] 
+    #[must_use]
     pub fn get_supported_formats(device_index: usize) -> Vec<LocalCameraFormat> {
         let mut formats = Vec::new();
 

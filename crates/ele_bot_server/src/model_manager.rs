@@ -101,7 +101,7 @@ impl ModelManager {
     }
 
     /// 获取模型路径
-    #[must_use] 
+    #[must_use]
     pub fn get(&self, key: &str) -> Option<PathBuf> {
         self.paths.get(key).cloned()
     }

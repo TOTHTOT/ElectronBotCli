@@ -27,7 +27,7 @@ pub struct Action {
 #[allow(dead_code)]
 impl Action {
     /// 创建新的动作
-    #[must_use] 
+    #[must_use]
     pub fn new(servo_index: u8, angle: i16, duration_ms: u32) -> Self {
         Self {
             servo_index,
@@ -37,25 +37,25 @@ impl Action {
     }
 
     /// 预设动作：左手挥动
-    #[must_use] 
+    #[must_use]
     pub fn wave_hand_left() -> Self {
         Self::new(2, 90, 500)
     }
 
     /// 预设动作：右手挥动
-    #[must_use] 
+    #[must_use]
     pub fn wave_hand_right() -> Self {
         Self::new(4, 90, 500)
     }
 
     /// 预设动作：点头
-    #[must_use] 
+    #[must_use]
     pub fn nod_head() -> Self {
         Self::new(0, 10, 200)
     }
 
     /// 预设动作：摇头
-    #[must_use] 
+    #[must_use]
     pub fn shake_head() -> Self {
         Self::new(0, 15, 200)
     }

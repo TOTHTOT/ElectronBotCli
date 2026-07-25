@@ -162,7 +162,7 @@ impl TtsHandler {
     }
 
     /// Get the TTS sample rate
-    #[must_use] 
+    #[must_use]
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate as u32
     }
@@ -233,7 +233,7 @@ impl StreamPlayerHandle {
     }
 
     /// 是否播放完成 (合成结束 + buffer 已消费完).
-    #[must_use] 
+    #[must_use]
     pub fn is_done(&self) -> bool {
         self.playback_done.load(Ordering::SeqCst)
     }

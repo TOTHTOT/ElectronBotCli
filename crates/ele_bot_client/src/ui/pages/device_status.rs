@@ -1,6 +1,9 @@
 use crate::app::App;
 use crate::ui_components::create_block;
-use ratatui::{prelude::*, widgets::{Table, Row, Cell, Paragraph}};
+use ratatui::{
+    prelude::*,
+    widgets::{Cell, Paragraph, Row, Table},
+};
 
 /// 音量条宽度 — 总共 20 个字符宽, 含两端的方括号
 const VOLUME_BAR_WIDTH: usize = 20;

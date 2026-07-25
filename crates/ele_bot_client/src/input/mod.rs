@@ -262,9 +262,7 @@ fn handle_settings(app: &mut App, code: KeyCode) {
             KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::PickerDown)),
             KeyCode::Enter => Some(AppEvent::Settings(SettingsEvent::PickerConfirm)),
             KeyCode::Esc => Some(AppEvent::Settings(SettingsEvent::PickerCancel)),
-            KeyCode::Char('r' | 'R') => {
-                Some(AppEvent::Settings(SettingsEvent::PickerRefresh))
-            }
+            KeyCode::Char('r' | 'R') => Some(AppEvent::Settings(SettingsEvent::PickerRefresh)),
             _ => None,
         };
         if let Some(e) = event {
@@ -293,9 +291,7 @@ fn handle_settings(app: &mut App, code: KeyCode) {
                 Some(AppEvent::Settings(SettingsEvent::Enter))
             }
         }
-        KeyCode::Char('r' | 'R') => {
-            Some(AppEvent::Settings(SettingsEvent::RefreshList))
-        }
+        KeyCode::Char('r' | 'R') => Some(AppEvent::Settings(SettingsEvent::RefreshList)),
         _ => None,
     };
     if let Some(e) = event {

@@ -238,7 +238,9 @@ impl OnlineLlm {
         let actions = parse_actions(actions_str);
 
         log::info!("Mood: {:?}, Actions count: {}", mood, actions.len());
-        for action in &actions { log::info!("Action: {action:?}"); }
+        for action in &actions {
+            log::info!("Action: {action:?}");
+        }
 
         // 保存 user message 到历史
         self.add_message_to_history(Self::create_user_message(user_input));

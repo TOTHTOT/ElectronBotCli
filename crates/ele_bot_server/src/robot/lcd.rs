@@ -49,7 +49,7 @@ pub struct Lcd {
 
 #[allow(dead_code)]
 impl Lcd {
-    #[must_use] 
+    #[must_use]
     pub fn new() -> Self {
         let eyes_config = RoboEyesConfig {
             eye_width: 50,

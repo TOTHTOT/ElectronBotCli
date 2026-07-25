@@ -220,7 +220,10 @@ impl WebPreview {
     /// 启动服务器（阻塞）
     pub async fn run(self) {
         let addr = format!("0.0.0.0:{}", self.port);
-        log::info!("Starting web preview server at http://{}", addr);
+        log::info!(
+            "Starting web preview server at http://127.0.0.1:{}",
+            self.port
+        );
 
         let app = Router::new()
             .route("/", get(index))

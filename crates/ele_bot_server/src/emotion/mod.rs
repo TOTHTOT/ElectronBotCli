@@ -3,7 +3,7 @@ use boteyes::Mood;
 use crate::llm::response::Action;
 
 /// LLM 返回的情感标签直接映射到 Mood
-#[must_use] 
+#[must_use]
 pub fn parse_mood(llm_output: &str) -> Mood {
     for (label, mood) in &[
         ("[开心]", Mood::Happy),
@@ -22,7 +22,7 @@ pub fn parse_mood(llm_output: &str) -> Mood {
 /// 解析动作 JSON 字符串
 ///
 /// 期望格式：[{"servo": 0-5, "angle": -180-180, "duration": 100-5000}, ...]
-#[must_use] 
+#[must_use]
 pub fn parse_actions(json_str: &str) -> Vec<Action> {
     let json_str = json_str.trim();
 

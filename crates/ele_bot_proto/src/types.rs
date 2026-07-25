@@ -23,7 +23,7 @@ pub enum Mood {
 }
 
 impl Mood {
-    #[must_use] 
+    #[must_use]
     pub fn as_str(&self) -> &'static str {
         match self {
             Mood::Default => "default",
@@ -207,7 +207,7 @@ impl AppConfig {
     pub const CONFIG_PATH: &'static str = "config.toml";
 
     /// 从文件加载, 失败则使用默认值
-    #[must_use] 
+    #[must_use]
     pub fn load_or_default() -> Self {
         match std::fs::read_to_string(Self::CONFIG_PATH) {
             Ok(content) => toml::from_str::<Self>(&content).unwrap_or_else(|e| {

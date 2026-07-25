@@ -22,7 +22,7 @@ pub struct QwenLlm {
 }
 
 impl QwenLlm {
-    #[must_use] 
+    #[must_use]
     pub fn load(model_path: PathBuf) -> Self {
         Self {
             model_path,

@@ -60,7 +60,7 @@ pub struct EventBus {
 impl EventBus {
     /// 构造指定容量的事件总线. capacity = 同时保留的事件数,
     /// 满了会覆盖最老的, 订阅者下次 recv 收到 `Err(Lagged(n))`.
-    #[must_use] 
+    #[must_use]
     pub fn new(capacity: usize) -> Self {
         let (tx, _) = broadcast::channel(capacity);
         Self { inner: tx }
@@ -80,13 +80,13 @@ impl EventBus {
 
     /// 订阅事件总线. 每次调都拿新的独立 receiver, 后到的 publish
     /// 看不到订阅前的旧事件 (broadcast 语义).
-    #[must_use] 
+    #[must_use]
     pub fn subscribe(&self) -> broadcast::Receiver<BusEvent> {
         self.inner.subscribe()
     }
 
     /// 当前活跃订阅者数 (debug 用).
-    #[must_use] 
+    #[must_use]
     pub fn subscriber_count(&self) -> usize {
         self.inner.receiver_count()
     }

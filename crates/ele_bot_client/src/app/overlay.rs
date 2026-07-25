@@ -50,7 +50,7 @@ impl Default for PopupConfig {
 
 impl PopupConfig {
     /// "正在连接设备..." 默认配置
-    #[must_use] 
+    #[must_use]
     pub fn connecting() -> Self {
         Self {
             title: " 连接设备 ".to_string(),
@@ -60,7 +60,7 @@ impl PopupConfig {
     }
 
     /// "确认退出" 默认配置
-    #[must_use] 
+    #[must_use]
     pub fn confirm_quit() -> Self {
         Self {
             title: " 确认退出 ".to_string(),

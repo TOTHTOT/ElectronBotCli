@@ -159,7 +159,7 @@ impl VoiceManager {
     }
 
     /// 获取实时音量
-    #[must_use] 
+    #[must_use]
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
     }
@@ -178,20 +178,20 @@ impl VoiceManager {
     ///     v.running().store(false, Ordering::Relaxed);
     /// }
     /// ```
-    #[must_use] 
+    #[must_use]
     pub fn running(&self) -> Arc<AtomicBool> {
         self.running.clone()
     }
 
     /// ASR 线程是否仍在跑 (running 标志当前值).
     #[allow(dead_code)]
-    #[must_use] 
+    #[must_use]
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
 
     /// 获取 TTS handler
-    #[must_use] 
+    #[must_use]
     pub fn tts_handler(&self) -> &TtsHandler {
         &self.tts_handler
     }
@@ -279,7 +279,7 @@ impl VoiceManager {
     }
 
     /// 检查 TTS 是否可用
-    #[must_use] 
+    #[must_use]
     pub fn is_tts_available(&self) -> bool {
         self.tts_player.is_some()
     }
@@ -402,7 +402,7 @@ impl DeviceInfo {
 }
 
 /// 枚举系统所有输入设备, 包含通道数和采样率等额外信息
-#[must_use] 
+#[must_use]
 pub fn list_input_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.input_devices()
@@ -425,7 +425,7 @@ pub fn list_input_devices() -> Vec<DeviceInfo> {
 }
 
 /// 枚举系统所有输出设备, 包含通道数和采样率等额外信息
-#[must_use] 
+#[must_use]
 pub fn list_output_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.output_devices()
@@ -615,7 +615,9 @@ fn play_output_samples(
     )?;
 
     stream.play()?;
-    thread::sleep(std::time::Duration::from_millis(u64::from(duration_ms) + 50));
+    thread::sleep(std::time::Duration::from_millis(
+        u64::from(duration_ms) + 50,
+    ));
 
     Ok(())
 }

@@ -110,7 +110,7 @@ pub fn preprocess_image(
 }
 
 /// 后处理 - 将模型输出转换为检测结果
-#[must_use] 
+#[must_use]
 pub fn postprocess_output(
     output_slice: &[f32],
     scale: f32,

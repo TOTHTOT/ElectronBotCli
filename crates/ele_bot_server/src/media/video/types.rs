@@ -1,8 +1,8 @@
 //! 视频模块 - 类型定义
 
+use crate::event_bus::EventBus;
 use crate::vision::face::detector::FaceDetectionResult;
 use bytes::Bytes;
-use crate::event_bus::EventBus;
 
 /// 帧数据 - 使用 Bytes 避免内存复制
 #[derive(Debug, Clone)]
@@ -39,7 +39,7 @@ impl FrameData {
 }
 
 /// 一帧图像数据包含的内容
-#[derive(Debug, Clone, )]
+#[derive(Debug, Clone)]
 pub struct FrameInfo {
     pub frame_data: FrameData,          // 原始一帧数据, 以及画过框的
     pub face_info: FaceDetectionResult, // 脸部信息, 原始宽坐标
