@@ -1,4 +1,4 @@
-//! ElectronBotCli 服务端库
+//! `ElectronBotCli` 服务端库
 //!
 //! 持有所有硬件资源(机器人、摄像头、麦克风、LLM 推理等),
 //! 通过 WebSocket 与客户端通信。
@@ -14,3 +14,4 @@ pub mod state;
 pub mod test_mode;
 pub mod vision;
 pub mod ws;
+pub mod web;

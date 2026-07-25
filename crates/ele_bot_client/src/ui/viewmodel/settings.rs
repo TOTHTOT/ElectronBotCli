@@ -23,7 +23,7 @@ pub struct SettingItem {
     pub value: String,
 }
 
-/// picker 视图模型 — Overlay::DevicePicker 的纯数据投影
+/// picker 视图模型 — `Overlay::DevicePicker` 的纯数据投影
 #[allow(dead_code)]
 pub struct PickerVm {
     pub kind: SelectingKind,
@@ -166,9 +166,7 @@ fn display_for(devices: &[ele_bot_proto::DeviceInfoDto], name: &str) -> String {
     } else {
         devices
             .iter()
-            .find(|d| d.name == name)
-            .map(|d| d.display.clone())
-            .unwrap_or_else(|| name.to_string())
+            .find(|d| d.name == name).map_or_else(|| name.to_string(), |d| d.display.clone())
     }
 }
 

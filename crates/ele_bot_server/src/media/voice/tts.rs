@@ -1,6 +1,6 @@
 //! TTS (Text-to-Speech) 播放层
 //!
-//! 提供基于 sherpa-onnx VITS 的文本合成, 通过 cpal OutputStream 推到扬声器.
+//! 提供基于 sherpa-onnx VITS 的文本合成, 通过 cpal `OutputStream` 推到扬声器.
 //!
 //! **所有权约定**: cpal `OutputStream` 必须绑到返回的 handle (`StreamPlayerHandle`
 //! 或 `OwnedOutputStream` + 临时变量) 上, 由调用方持有到播放结束再 Drop. 这保证
@@ -65,13 +65,13 @@ impl TtsHandler {
         let lexicon_path = lexicon_path.as_ref();
 
         if !model_path.exists() {
-            anyhow::bail!("Model path {:?} does not exist", model_path);
+            anyhow::bail!("Model path {model_path:?} does not exist");
         }
         if !tokens_path.exists() {
-            anyhow::bail!("Tokens path {:?} does not exist", tokens_path);
+            anyhow::bail!("Tokens path {tokens_path:?} does not exist");
         }
         if !lexicon_path.exists() {
-            anyhow::bail!("Lexicon path {:?} does not exist", lexicon_path);
+            anyhow::bail!("Lexicon path {lexicon_path:?} does not exist");
         }
 
         let config = OfflineTtsConfig {
@@ -93,7 +93,7 @@ impl TtsHandler {
         let tts = OfflineTts::create(&config).ok_or_else(|| anyhow!("Failed to create TTS"))?;
 
         let sample_rate = tts.sample_rate();
-        log::info!("TTS initialized with sample rate: {}", sample_rate);
+        log::info!("TTS initialized with sample rate: {sample_rate}");
 
         Ok(Self {
             tts: Arc::new(Mutex::new(tts)),
@@ -162,6 +162,7 @@ impl TtsHandler {
     }
 
     /// Get the TTS sample rate
+    #[must_use] 
     pub fn sample_rate(&self) -> u32 {
         self.sample_rate as u32
     }
@@ -189,7 +190,7 @@ impl Drop for OwnedOutputStream {
     }
 }
 
-/// TTS 播放器, 把 TTS 合成出的音频推到扬声器 (cpal OutputStream).
+/// TTS 播放器, 把 TTS 合成出的音频推到扬声器 (cpal `OutputStream`).
 ///
 /// 持有 cpal `Device`, 具体到播放时的 `OutputStream` 通过 `play` / `start_streaming`
 /// 返回, 调用方负责持有到结束. 这样 `SharedState::rebuild_voice` 在切音频设备
@@ -201,7 +202,7 @@ pub struct TtsPlayer {
 
 /// 流式 TTS 播放句柄.
 ///
-/// 持有一个共享 buffer (合成线程写入) + 一个 cpal OutputStream (回调线程读取).
+/// 持有一个共享 buffer (合成线程写入) + 一个 cpal `OutputStream` (回调线程读取).
 /// 调用方**必须**持有本句柄到 `is_done()` 返回 `true` 再 Drop, Drop 链上的
 /// `OwnedOutputStream` 才会停流并释放 device 句柄. 切音频设备时
 /// `SharedState::rebuild_voice` 会通过 `Arc` drop 链触发本类型 Drop.
@@ -212,7 +213,7 @@ pub struct StreamPlayerHandle {
     synthesis_done: Arc<AtomicBool>,
     /// 播放完成标志 (cpal 回调 set)
     playback_done: Arc<AtomicBool>,
-    /// cpal OutputStream RAII 包装, Drop 时停流 + 释放 device 句柄
+    /// cpal `OutputStream` RAII 包装, Drop 时停流 + 释放 device 句柄
     _stream: OwnedOutputStream,
 }
 
@@ -221,7 +222,7 @@ impl StreamPlayerHandle {
     pub fn write_chunk(&self, chunk: &[f32], progress: f32) {
         if let Ok(mut buffer) = self.buffer.lock() {
             buffer.extend_from_slice(chunk);
-            log::info!("deal progress: {}", progress);
+            log::info!("deal progress: {progress}");
         }
     }
 
@@ -232,6 +233,7 @@ impl StreamPlayerHandle {
     }
 
     /// 是否播放完成 (合成结束 + buffer 已消费完).
+    #[must_use] 
     pub fn is_done(&self) -> bool {
         self.playback_done.load(Ordering::SeqCst)
     }
@@ -263,7 +265,7 @@ impl TtsPlayer {
         Ok(Self { device })
     }
 
-    /// 构造一个 cpal OutputStream 回调闭包, 把 `samples` 写到 cpal 推过来的
+    /// 构造一个 cpal `OutputStream` 回调闭包, 把 `samples` 写到 cpal 推过来的
     /// 输出 buffer, 同时累计已写入样本数到 `played` (供 `play` 等播放完成用).
     fn write_audio_callback(
         samples: Vec<f32>,
@@ -285,7 +287,7 @@ impl TtsPlayer {
     }
 
     /// 把 TTS 音频推完整个 buffer. 阻塞到 cpal 回调真正把 `audio.samples.len()`
-    /// 个样本写过 OutputStream 才返回.
+    /// 个样本写过 `OutputStream` 才返回.
     ///
     /// 不再用 wall-clock `thread::sleep` 估算时长 — 设备采样率不匹配 / buffer
     /// 大小 / OS 调度抖动都会让 sleep 提前返回截断音频. 改用回调里累计的
@@ -303,7 +305,7 @@ impl TtsPlayer {
         let stream = self.device.build_output_stream(
             &config,
             Self::write_audio_callback(audio.samples.clone(), played.clone()),
-            |err| log::error!("TTS 流错误: {}", err),
+            |err| log::error!("TTS 流错误: {err}"),
             None,
         )?;
 
@@ -318,7 +320,7 @@ impl TtsPlayer {
         Ok(())
     }
 
-    /// 启动流式播放. 返回的 `StreamPlayerHandle` 持有 cpal OutputStream,
+    /// 启动流式播放. 返回的 `StreamPlayerHandle` 持有 cpal `OutputStream`,
     /// 调用方必须持有到 `is_done()` 返回 `true` 再 Drop. Drop 时
     /// `OwnedOutputStream` 停流并释放 device 句柄.
     ///
@@ -379,7 +381,7 @@ impl TtsPlayer {
                     playback_done_clone.store(true, Ordering::SeqCst);
                 }
             },
-            |err| log::error!("TTS 流错误: {}", err),
+            |err| log::error!("TTS 流错误: {err}"),
             None,
         )?;
 
@@ -415,9 +417,9 @@ impl TtsAudio {
         let num_channels = self.channels;
         let bits_per_sample: u16 = 16;
         let num_samples = self.samples.len() as u32;
-        let byte_rate = sample_rate * num_channels as u32 * bits_per_sample as u32 / 8;
+        let byte_rate = sample_rate * u32::from(num_channels) * u32::from(bits_per_sample) / 8;
         let block_align = num_channels * bits_per_sample / 8;
-        let data_size = num_samples * num_channels as u32 * bits_per_sample as u32 / 8;
+        let data_size = num_samples * u32::from(num_channels) * u32::from(bits_per_sample) / 8;
 
         let mut file = std::fs::File::create(path)?;
 
@@ -446,7 +448,7 @@ impl TtsAudio {
             file.write_all(&sample_i16.to_le_bytes())?;
         }
 
-        log::info!("Saved WAV file: {:?}", path);
+        log::info!("Saved WAV file: {path:?}");
         Ok(())
     }
 }

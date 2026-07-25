@@ -1,7 +1,7 @@
 use crate::app::App;
 use ele_bot_proto::SERVO_COUNT;
 
-/// 舵机名称(与服务端 robot::joint::SERVOS 保持一致)
+/// 舵机名称(与服务端 `robot::joint::SERVOS` 保持一致)
 const SERVO_NAMES: [&str; SERVO_COUNT] = ["头部", "左肩", "左臂", "右肩", "右臂", "身体"];
 
 /// 舵机角度范围
@@ -30,7 +30,7 @@ impl DeviceControlViewModel {
         let servo_names: Vec<&'static str> = SERVO_NAMES.to_vec();
         let servo_ranges: Vec<String> = SERVO_RANGES
             .iter()
-            .map(|(min, max)| format!("{}° ~ {}°", min, max))
+            .map(|(min, max)| format!("{min}° ~ {max}°"))
             .collect();
 
         Self {

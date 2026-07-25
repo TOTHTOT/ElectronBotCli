@@ -28,7 +28,7 @@ pub const CHUNK_SIZE: usize = 1600; // 100ms at 16kHz
 #[allow(dead_code)]
 pub const SAMPLE_RATE: u32 = 16000;
 
-/// ASR 模型路径集合 (sense_voice + silero_vad + tokens)
+/// ASR 模型路径集合 (`sense_voice` + `silero_vad` + tokens)
 ///
 /// 三者必须同时存在才能跑识别, 打包在一起避免漏传.
 #[derive(Debug, Clone)]
@@ -99,7 +99,7 @@ unsafe impl Sync for VoiceManager {}
 #[allow(dead_code)]
 impl VoiceManager {
     /// 创建voice模块, 通过静音检测截取有效实时音频数据,
-    /// 完成后通过 EventBus 发出 ASR 识别文本
+    /// 完成后通过 `EventBus` 发出 ASR 识别文本
     ///
     /// `speech_device_id` / `output_device_id` 是 cpal `DeviceId` 序列化的
     /// 稳定标识, 与 `speech_name` / `output_device_name` 配套传入; 任一为
@@ -129,7 +129,7 @@ impl VoiceManager {
                 Some(stream)
             }
             Err(e) => {
-                log::warn!("Cannot find input device: {}", e);
+                log::warn!("Cannot find input device: {e}");
                 None
             }
         };
@@ -159,6 +159,7 @@ impl VoiceManager {
     }
 
     /// 获取实时音量
+    #[must_use] 
     pub fn volume(&self) -> i32 {
         self.volume.load(Ordering::Relaxed)
     }
@@ -177,17 +178,20 @@ impl VoiceManager {
     ///     v.running().store(false, Ordering::Relaxed);
     /// }
     /// ```
+    #[must_use] 
     pub fn running(&self) -> Arc<AtomicBool> {
         self.running.clone()
     }
 
     /// ASR 线程是否仍在跑 (running 标志当前值).
     #[allow(dead_code)]
+    #[must_use] 
     pub fn is_running(&self) -> bool {
         self.running.load(Ordering::Relaxed)
     }
 
     /// 获取 TTS handler
+    #[must_use] 
     pub fn tts_handler(&self) -> &TtsHandler {
         &self.tts_handler
     }
@@ -275,6 +279,7 @@ impl VoiceManager {
     }
 
     /// 检查 TTS 是否可用
+    #[must_use] 
     pub fn is_tts_available(&self) -> bool {
         self.tts_player.is_some()
     }
@@ -282,7 +287,7 @@ impl VoiceManager {
 
 /// 按稳定 ID 查找输入设备, ID 失效或未提供时按 name 兜底, 都没命中则回退默认.
 ///
-/// 匹配顺序: cpal `DeviceId` 优先 (Windows: IMMDevice endpoint ID 字符串),
+/// 匹配顺序: cpal `DeviceId` 优先 (Windows: `IMMDevice` endpoint ID 字符串),
 /// name 仅作为旧 config 或 ID 失效时的兜底. 全部为空或全部失败时回退到
 /// `host.default_input_device()`.
 fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Device> {
@@ -302,7 +307,7 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
             .collect::<Vec<_>>()
     );
 
-    let no_id = device_id.map(str::is_empty).unwrap_or(true);
+    let no_id = device_id.is_none_or(str::is_empty);
     if speech_name.is_empty() && no_id {
         return host
             .default_input_device()
@@ -347,18 +352,18 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
 /// [`list_output_devices_dto`] 转 [`ele_bot_proto::DeviceInfoDto`] 后走 WS.
 #[derive(Debug, Clone)]
 pub struct DeviceInfo {
-    /// cpal 稳定设备标识 (Windows: IMMDevice endpoint ID 字符串,
+    /// cpal 稳定设备标识 (Windows: `IMMDevice` endpoint ID 字符串,
     /// Linux: ALSA path, macOS: UID). 用于服务端按设备精确匹配.
     pub id: String,
     /// 实际设备名称 (cpal exact name). 仅作 `id` 失效时的兜底匹配键.
     pub name: String,
     /// 列表中显示的字符串, 包含通道数 / 采样率等额外信息
     pub display: String,
-    /// 后端驱动名 (cpal Device::description().driver()), 不可用为 None
+    /// 后端驱动名 (cpal `Device::description().driver()`), 不可用为 None
     pub driver: Option<String>,
-    /// 输入/输出通道数, default_input_config 失败时为 None
+    /// 输入/输出通道数, `default_input_config` 失败时为 None
     pub channels: Option<u16>,
-    /// 默认采样率, default_input_config 失败时为 None
+    /// 默认采样率, `default_input_config` 失败时为 None
     pub sample_rate: Option<u32>,
 }
 
@@ -372,13 +377,13 @@ impl DeviceInfo {
     ) -> Self {
         let mut parts: Vec<String> = Vec::new();
         if let Some(driver) = driver.as_ref() {
-            parts.push(format!("{} ", driver));
+            parts.push(format!("{driver} "));
         }
         if let Some(ch) = channels {
-            parts.push(format!("{}ch", ch));
+            parts.push(format!("{ch}ch"));
         }
         if let Some(sr) = sample_rate {
-            parts.push(format!("{}Hz", sr));
+            parts.push(format!("{sr}Hz"));
         }
         let display = if parts.is_empty() {
             name.clone()
@@ -397,6 +402,7 @@ impl DeviceInfo {
 }
 
 /// 枚举系统所有输入设备, 包含通道数和采样率等额外信息
+#[must_use] 
 pub fn list_input_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.input_devices()
@@ -419,6 +425,7 @@ pub fn list_input_devices() -> Vec<DeviceInfo> {
 }
 
 /// 枚举系统所有输出设备, 包含通道数和采样率等额外信息
+#[must_use] 
 pub fn list_output_devices() -> Vec<DeviceInfo> {
     let host = cpal::default_host();
     host.output_devices()
@@ -477,7 +484,7 @@ pub fn list_output_devices_dto() -> Vec<ele_bot_proto::DeviceInfoDto> {
 
 /// 按稳定 ID 查找输出设备, ID 失效或未提供时按 name 兜底, 都没命中则回退默认.
 ///
-/// 匹配顺序: cpal `DeviceId` 优先 (Windows: IMMDevice endpoint ID 字符串),
+/// 匹配顺序: cpal `DeviceId` 优先 (Windows: `IMMDevice` endpoint ID 字符串),
 /// name 仅作为旧 config 或 ID 失效时的兜底. 全部为空或全部失败时回退到
 /// `host.default_output_device()`.
 pub fn find_output_device(name: &str, device_id: Option<&str>) -> Option<Device> {
@@ -501,7 +508,7 @@ pub fn find_output_device(name: &str, device_id: Option<&str>) -> Option<Device>
             .collect::<Vec<_>>()
     );
 
-    let no_id = device_id.map(str::is_empty).unwrap_or(true);
+    let no_id = device_id.is_none_or(str::is_empty);
     if name.is_empty() && no_id {
         return host.default_output_device();
     }
@@ -603,12 +610,12 @@ fn play_output_samples(
     let stream = device.build_output_stream(
         config,
         write_audio_callback(samples),
-        |err| log::error!("Beep stream error: {}", err),
+        |err| log::error!("Beep stream error: {err}"),
         None,
     )?;
 
     stream.play()?;
-    thread::sleep(std::time::Duration::from_millis(duration_ms as u64 + 50));
+    thread::sleep(std::time::Duration::from_millis(u64::from(duration_ms) + 50));
 
     Ok(())
 }

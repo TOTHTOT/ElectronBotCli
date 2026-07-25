@@ -22,6 +22,7 @@ pub struct QwenLlm {
 }
 
 impl QwenLlm {
+    #[must_use] 
     pub fn load(model_path: PathBuf) -> Self {
         Self {
             model_path,
@@ -33,7 +34,7 @@ impl QwenLlm {
 
     pub fn load_tokenizer(&mut self, tokenizer_path: impl AsRef<Path>) -> Result<()> {
         let tokenizer = tokenizers::Tokenizer::from_file(tokenizer_path)
-            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load tokenizer: {e}"))?;
         self.tokenizer = Some(tokenizer);
         Ok(())
     }
@@ -69,7 +70,7 @@ impl QwenLlm {
 
         let encoding = tokenizer
             .encode(prompt, true)
-            .map_err(|e| anyhow::anyhow!("Encode error: {}", e))?;
+            .map_err(|e| anyhow::anyhow!("Encode error: {e}"))?;
         let mut all_tokens: Vec<u32> = encoding.get_ids().to_vec();
         let prompt_len = all_tokens.len();
         let eos_token = tokenizer.token_to_id("<|im_end|>").unwrap_or(151645);

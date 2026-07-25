@@ -23,16 +23,16 @@ use std::collections::{HashMap, VecDeque};
 
 /// 在线 LLM 实现
 ///
-/// 使用 async-openai 库的异步客户端，支持任意兼容 OpenAI API 格式的后端。
+/// 使用 async-openai 库的异步客户端，支持任意兼容 `OpenAI` API 格式的后端。
 ///
 /// # 线程安全
 /// 该结构体实现了 `Send + Sync`，可以在多线程间共享同一个实例。
 pub struct OnlineLlm {
-    /// 异步 OpenAI 客户端
+    /// 异步 `OpenAI` 客户端
     client: Client<OpenAIConfig>,
     /// 模型名称
     model: String,
-    /// 对话历史记录：session_id -> 消息列表
+    /// `对话历史记录：session_id` -> 消息列表
     histories: HashMap<String, VecDeque<ChatCompletionRequestMessage>>,
     /// 当前会话 ID
     current_session: String,
@@ -140,12 +140,12 @@ impl OnlineLlm {
     /// 创建用户消息
     fn create_user_message(content: &str) -> ChatCompletionRequestMessage {
         ChatCompletionRequestUserMessageArgs::default()
-            .content(format!("用户输入：{}", content))
+            .content(format!("用户输入：{content}"))
             .build()
-            .map(|m| m.into())
+            .map(std::convert::Into::into)
             .unwrap_or_else(|_| {
                 ChatCompletionRequestUserMessageArgs::default()
-                    .content(format!("用户输入：{}", content))
+                    .content(format!("用户输入：{content}"))
                     .build()
                     .unwrap()
                     .into()
@@ -157,7 +157,7 @@ impl OnlineLlm {
         ChatCompletionRequestAssistantMessageArgs::default()
             .content(content.to_string())
             .build()
-            .map(|m| m.into())
+            .map(std::convert::Into::into)
             .unwrap_or_else(|_| {
                 ChatCompletionRequestAssistantMessageArgs::default()
                     .content(content.to_string())
@@ -230,7 +230,7 @@ impl OnlineLlm {
                 String::from("[中性]")
             });
 
-        log::info!("Online LLM response: {}", content);
+        log::info!("Online LLM response: {content}");
 
         // 分离情感和动作
         let (mood_str, actions_str) = Self::split_response(&content);
@@ -238,9 +238,7 @@ impl OnlineLlm {
         let actions = parse_actions(actions_str);
 
         log::info!("Mood: {:?}, Actions count: {}", mood, actions.len());
-        actions
-            .iter()
-            .for_each(|action| log::info!("Action: {action:?}"));
+        for action in &actions { log::info!("Action: {action:?}"); }
 
         // 保存 user message 到历史
         self.add_message_to_history(Self::create_user_message(user_input));
@@ -269,7 +267,7 @@ impl OnlineLlm {
         "你是一个桌面机器人, 用简短中文回复用户 (≤ 30 字). 不要解释, 不要 markdown."
     }
 
-    /// chat 用: 构造 [system + history + user] 消息序列, 跟 analyze_mood 共用 histories.
+    /// chat 用: 构造 [system + history + user] 消息序列, 跟 `analyze_mood` 共用 histories.
     fn build_chat_messages(&self, user_input: &str) -> Vec<ChatCompletionRequestMessage> {
         let mut messages = vec![ChatCompletionRequestSystemMessageArgs::default()
             .content(Self::chat_system_prompt())

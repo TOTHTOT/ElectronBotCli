@@ -2,7 +2,7 @@
 //!
 //! 240x240 RGB LCD 显示控制
 //!
-//! 使用 [ImageBuffer] 实现底层图片操作
+//! 使用 [`ImageBuffer`] 实现底层图片操作
 //! 使用 [boteyes] 库渲染机器人眼睛动画
 
 use anyhow::Result;
@@ -19,7 +19,7 @@ pub const FRAME_SIZE: usize = LCD_WIDTH * LCD_HEIGHT * 3;
 fn compute_hash(data: &[u8]) -> u64 {
     let mut hash = 0xcbf29ce484222325;
     for &byte in data {
-        hash ^= byte as u64;
+        hash ^= u64::from(byte);
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
@@ -49,6 +49,7 @@ pub struct Lcd {
 
 #[allow(dead_code)]
 impl Lcd {
+    #[must_use] 
     pub fn new() -> Self {
         let eyes_config = RoboEyesConfig {
             eye_width: 50,
@@ -96,7 +97,7 @@ impl Lcd {
     pub fn load_image(&mut self, path: &str) -> Result<()> {
         self.buffer
             .load_from_file(path)
-            .map_err(|e| anyhow::anyhow!("Failed to load image {}: {}", path, e))?;
+            .map_err(|e| anyhow::anyhow!("Failed to load image {path}: {e}"))?;
         self.image_data = Some(self.buffer.as_data().to_vec());
         Ok(())
     }

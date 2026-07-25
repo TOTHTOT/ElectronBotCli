@@ -1,14 +1,14 @@
 //! 共享数据类型
 //!
 //! 服务端与客户端之间传输的所有数据类型都在此定义。
-//! 注意:这里定义的类型独立于第三方库(boteyes/electron_bot 等),
+//! `注意:这里定义的类型独立于第三方库(boteyes/electron_bot` 等),
 //! 在 server/client 边界做转换。
 
 use serde::{Deserialize, Serialize};
 
 /// 情感状态
 ///
-/// 与 boteyes::Mood 一一对应, 通过 `From` 互转。
+/// 与 `boteyes::Mood` 一一对应, 通过 `From` 互转。
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Mood {
@@ -23,6 +23,7 @@ pub enum Mood {
 }
 
 impl Mood {
+    #[must_use] 
     pub fn as_str(&self) -> &'static str {
         match self {
             Mood::Default => "default",
@@ -167,12 +168,12 @@ pub struct CameraResolution {
 
 /// 音频设备信息(通过 `ListInputDevices` / `ListOutputDevices` 传输)
 ///
-/// `id` 是 cpal `Device::id()` 序列化的稳定标识符 (Windows 上是 IMMDevice
+/// `id` 是 cpal `Device::id()` 序列化的稳定标识符 (Windows 上是 `IMMDevice`
 /// endpoint ID 字符串, Linux 是 ALSA path, macOS 是 UID). 同一 OS 会话内
 /// 唯一, 跨枚举顺序变化稳定, 用于服务端按设备匹配 — 写入
 /// `AppConfig.speech_device_id` / `output_device_id` 时必须用此字段.
 ///
-/// `name` 是 cpal 的精确设备名 (Windows 上是 FriendlyName, 多 endpoint /
+/// `name` 是 cpal 的精确设备名 (Windows 上是 `FriendlyName`, 多 endpoint /
 /// 多虚拟设备常重名), 仅作为 `id` 失效时的兜底匹配键以及向后兼容老 config.
 ///
 /// `display` 是给人类看的拼接字符串, 客户端 MUST NOT 用正则解析它.
@@ -206,6 +207,7 @@ impl AppConfig {
     pub const CONFIG_PATH: &'static str = "config.toml";
 
     /// 从文件加载, 失败则使用默认值
+    #[must_use] 
     pub fn load_or_default() -> Self {
         match std::fs::read_to_string(Self::CONFIG_PATH) {
             Ok(content) => toml::from_str::<Self>(&content).unwrap_or_else(|e| {

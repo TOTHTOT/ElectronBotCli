@@ -10,6 +10,7 @@ pub enum MenuItem {
 }
 
 impl MenuItem {
+    #[must_use] 
     pub fn title(&self) -> &'static str {
         match self {
             MenuItem::DeviceStatus => "设备状态",
@@ -21,6 +22,7 @@ impl MenuItem {
         }
     }
 
+    #[must_use] 
     pub fn all() -> [Self; 6] {
         [
             MenuItem::DeviceStatus,

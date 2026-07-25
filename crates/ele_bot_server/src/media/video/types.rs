@@ -2,7 +2,7 @@
 
 use crate::vision::face::detector::FaceDetectionResult;
 use bytes::Bytes;
-use tokio::sync::broadcast;
+use crate::event_bus::EventBus;
 
 /// 帧数据 - 使用 Bytes 避免内存复制
 #[derive(Debug, Clone)]
@@ -39,8 +39,7 @@ impl FrameData {
 }
 
 /// 一帧图像数据包含的内容
-#[allow(dead_code)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, )]
 pub struct FrameInfo {
     pub frame_data: FrameData,          // 原始一帧数据, 以及画过框的
     pub face_info: FaceDetectionResult, // 脸部信息, 原始宽坐标
@@ -50,7 +49,7 @@ pub struct FrameInfo {
 
 /// 帧缓存类型 - 使用 tokio broadcast 通道实现事件驱动
 /// Sender 用于发送帧，Receiver 用于接收帧
-pub type FrameCache = broadcast::Sender<FrameInfo>;
+pub type FrameCache = EventBus;
 
 /// 摄像头支持的格式和分辨率
 #[allow(dead_code)]

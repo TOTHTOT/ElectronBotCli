@@ -11,6 +11,7 @@
 /// # Returns
 ///
 /// 身体转动角度调整值 (度)
+#[must_use] 
 pub fn calculate_body_adjustment(face_x: f32) -> i32 {
     // 人脸在画面中心(0.5)时不需要调整
     // 每偏移 0.1 移动 5 度身体
@@ -18,6 +19,7 @@ pub fn calculate_body_adjustment(face_x: f32) -> i32 {
 }
 
 /// 平滑处理角度调整值
+#[must_use] 
 pub fn smooth_adjustment(current: i32, target: i32, smoothing: f32) -> i32 {
     (current as f32 + (target as f32 - current as f32) * smoothing).round() as i32
 }

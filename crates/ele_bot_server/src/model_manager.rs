@@ -6,13 +6,13 @@ pub struct ModelManager {
     paths: HashMap<String, PathBuf>,
 }
 
-/// 全局 ModelManager 实例 - 懒加载
+/// 全局 `ModelManager` 实例 - 懒加载
 static MODEL_MANAGER: OnceLock<ModelManager> = OnceLock::new();
 
-/// 模型配置: (key, repo_id, filename, rknn_path)
+/// 模型配置: (key, `repo_id`, filename, `rknn_path`)
 type ModelConfig = (&'static str, &'static str, &'static str, &'static str);
 
-/// 从 HuggingFace 下载模型
+/// 从 `HuggingFace` 下载模型
 fn download_from_hf(
     key: &str,
     repo_id: &str,
@@ -20,21 +20,21 @@ fn download_from_hf(
     api: &hf_hub::api::sync::Api,
 ) -> Option<PathBuf> {
     let repo = api.model(repo_id.to_string());
-    log::info!("正在下载 [{}] from {}/{} ...", key, repo_id, filename);
+    log::info!("正在下载 [{key}] from {repo_id}/{filename} ...");
     match repo.get(filename) {
         Ok(path) => {
-            log::info!("✓ 资源就绪 [{}]: {:?}", key, path);
+            log::info!("✓ 资源就绪 [{key}]: {path:?}");
             Some(path)
         }
         Err(e) => {
-            log::error!("✗ 资源缺失 [{}]: {:?}", key, e);
+            log::error!("✗ 资源缺失 [{key}]: {e:?}");
             None
         }
     }
 }
 
 impl ModelManager {
-    /// 获取全局 ModelManager 实例（懒初始化）
+    /// 获取全局 `ModelManager` 实例（懒初始化）
     pub fn global() -> &'static ModelManager {
         MODEL_MANAGER.get_or_init(|| Self::init().expect("Failed to initialize ModelManager"))
     }
@@ -91,7 +91,7 @@ impl ModelManager {
 
             for (key, repo, filename, _rknn) in &models {
                 if let Some(path) = download_from_hf(key, repo, filename, &api) {
-                    paths.insert(key.to_string(), path);
+                    paths.insert((*key).to_string(), path);
                 }
             }
         }
@@ -101,6 +101,7 @@ impl ModelManager {
     }
 
     /// 获取模型路径
+    #[must_use] 
     pub fn get(&self, key: &str) -> Option<PathBuf> {
         self.paths.get(key).cloned()
     }

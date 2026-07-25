@@ -70,6 +70,7 @@ impl Default for JointConfig {
 
 impl JointConfig {
     /// 转换为 32 字节格式
+    #[must_use] 
     pub fn as_bytes(self) -> [u8; 32] {
         let mut bytes = [0u8; 32];
         bytes[0] = self.enable;
@@ -93,26 +94,28 @@ pub struct ServoState {
 #[allow(dead_code)]
 impl ServoState {
     /// 获取舵机名称
+    #[must_use] 
     pub fn name(index: usize) -> &'static str {
-        SERVOS.get(index).map(|s| s.name).unwrap_or("Unknown")
+        SERVOS.get(index).map_or("Unknown", |s| s.name)
     }
 
     /// 获取舵机最小角度
+    #[must_use] 
     pub fn min_angle(index: usize) -> i16 {
-        SERVOS.get(index).map(|s| s.min).unwrap_or(-125)
+        SERVOS.get(index).map_or(-125, |s| s.min)
     }
 
     /// 获取舵机最大角度
+    #[must_use] 
     pub fn max_angle(index: usize) -> i16 {
-        SERVOS.get(index).map(|s| s.max).unwrap_or(125)
+        SERVOS.get(index).map_or(125, |s| s.max)
     }
 
     /// 获取舵机范围字符串
+    #[must_use] 
     pub fn range_str(index: usize) -> String {
         SERVOS
-            .get(index)
-            .map(|s| format!("{}° ~ {}°", s.min, s.max))
-            .unwrap_or_else(|| "Unknown".to_string())
+            .get(index).map_or_else(|| "Unknown".to_string(), |s| format!("{}° ~ {}°", s.min, s.max))
     }
 
     /// 选择下一个舵机
@@ -144,11 +147,12 @@ impl ServoState {
         }
     }
 
-    /// 转换为 JointConfig
+    /// 转换为 `JointConfig`
+    #[must_use] 
     pub fn as_config(&self) -> JointConfig {
         JointConfig {
             enable: 1,
-            angles: self.values.map(|x| x as f32),
+            angles: self.values.map(f32::from),
         }
     }
 }
@@ -166,6 +170,7 @@ pub struct Joint {
 #[allow(dead_code)]
 impl Joint {
     /// 创建新的关节控制器
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(ServoState::default())),
@@ -173,6 +178,7 @@ impl Joint {
     }
 
     /// 获取内部 Mutex 的 Arc 引用（供其他线程使用）
+    #[must_use] 
     pub fn state_arc(&self) -> Arc<Mutex<ServoState>> {
         self.state.clone()
     }
@@ -188,11 +194,13 @@ impl Joint {
     }
 
     /// 获取所有舵机值
+    #[must_use] 
     pub fn values(&self) -> [i16; SERVO_COUNT] {
         self.state.lock().map(|s| s.values).unwrap_or_default()
     }
 
     /// 获取当前选中的舵机索引
+    #[must_use] 
     pub fn selected(&self) -> usize {
         self.state.lock().map(|s| s.selected).unwrap_or(0)
     }
@@ -226,6 +234,7 @@ impl Joint {
     }
 
     /// 获取当前关节配置
+    #[must_use] 
     pub fn config(&self) -> JointConfig {
         self.state.lock().map(|s| s.as_config()).unwrap_or_default()
     }

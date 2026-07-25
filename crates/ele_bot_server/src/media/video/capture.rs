@@ -5,7 +5,6 @@ use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, 
 use crate::model_manager::ModelManager;
 use crate::vision::face::create_face_detector;
 use crate::vision::face::FaceDetectorTrait;
-use anyhow::Context;
 use bytes::Bytes;
 use image::RgbImage;
 use nokhwa::pixel_format::RgbFormat;
@@ -55,7 +54,7 @@ impl FrameRateCounter {
 /// 视频捕获器 - 使用共享缓存
 pub struct VideoCapture {
     /// 帧缓存
-    frame_cache: FrameCache,
+    bus: FrameCache,
     /// 运行标志
     running: Arc<AtomicBool>,
     /// 摄像头索引
@@ -87,17 +86,14 @@ impl VideoCapture {
     /// * `camera_index` - 摄像头索引
     /// * `frame_cache` - 帧缓存通道
     /// * `rotate_angle` - 旋转角度
-    pub fn new(
-        camera_index: CameraIndex,
-        frame_cache: FrameCache,
-        rotate_angle: RotateAngle,
-    ) -> Self {
+    #[must_use] 
+    pub fn new(camera_index: CameraIndex, bus: FrameCache, rotate_angle: RotateAngle) -> Self {
         log::info!(
             "Creating VideoCapture with index: {camera_index:?}, rotation: {rotate_angle:?}"
         );
 
         Self {
-            frame_cache,
+            bus,
             running: Arc::new(AtomicBool::new(false)),
             camera_index,
             resolution: Arc::new(Mutex::new((0, 0))),
@@ -110,26 +106,30 @@ impl VideoCapture {
     pub fn set_rotate_angle(&mut self, angle: RotateAngle) {
         self.rotate_angle = angle;
         if !matches!(angle, RotateAngle::None) {
-            log::info!("Rotation set to {:?}", angle);
+            log::info!("Rotation set to {angle:?}");
         }
     }
 
     /// 获取旋转角度
+    #[must_use] 
     pub fn rotate_angle(&self) -> RotateAngle {
         self.rotate_angle
     }
 
     /// 获取帧缓存
+    #[must_use] 
     pub fn frame_cache(&self) -> FrameCache {
-        self.frame_cache.clone()
+        self.bus.clone()
     }
 
     /// 获取实际分辨率
+    #[must_use] 
     pub fn resolution(&self) -> (u32, u32) {
         self.resolution.lock().map(|guard| *guard).unwrap_or((0, 0))
     }
 
     /// 获取分辨率的 Arc 句柄（用于跨线程共享）
+    #[must_use] 
     pub fn resolution_arc(&self) -> Arc<Mutex<(u32, u32)>> {
         self.resolution.clone()
     }
@@ -143,13 +143,17 @@ impl VideoCapture {
         self.running.store(true, Ordering::Relaxed);
 
         let camera_index = self.camera_index.clone();
-        let frame_cache = self.frame_cache.clone();
+        let frame_cache = self.bus.clone();
         let running = self.running.clone();
         let resolution = self.resolution.clone();
         let rotate_angle = self.rotate_angle;
 
         let handle = thread::spawn(move || {
-            capture_frames(camera_index, frame_cache, running, resolution, rotate_angle);
+            if let Err(e) =
+                capture_frames(camera_index, frame_cache, running, resolution, rotate_angle)
+            {
+                log::error!("Capture thread panicked: {e:?}");
+            }
         });
         self.capture_thread = Some(handle);
 
@@ -168,6 +172,7 @@ impl VideoCapture {
     }
 
     /// 获取摄像头支持的格式列表
+    #[must_use] 
     pub fn get_supported_formats(device_index: usize) -> Vec<LocalCameraFormat> {
         let mut formats = Vec::new();
 
@@ -201,21 +206,21 @@ impl VideoCapture {
 ///
 /// # Examples
 ///
-/// ```
+/// ```ignore
 /// ensure_camera_ready(0)?;
 /// ```
 #[allow(dead_code)]
-fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<()> {
+pub(crate) fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<()> {
     let CameraIndex::Index(idx) = device_index else {
         anyhow::bail!("Device index does not exist");
     };
-    let device_path = format!("/dev/video{}", idx);
+    let device_path = format!("/dev/video{idx}");
 
     if !Path::new(&device_path).exists() {
-        return Err(anyhow::anyhow!("can not find camera: {}", device_path));
+        return Err(anyhow::anyhow!("can not find camera: {device_path}"));
     }
 
-    log::info!("正在唤醒摄像头驱动 {} ...", device_path);
+    log::info!("正在唤醒摄像头驱动 {device_path} ...");
 
     let status = Command::new("v4l2-ctl")
         .args([
@@ -237,10 +242,10 @@ fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<()> {
 
 /// 打开摄像头
 fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
-    log::info!("Opening camera with index: {:?}", index);
+    log::info!("Opening camera with index: {index:?}");
     // 构建指定要求的摄像头参数 480p, yuyv格式, 30帧, 如果拿不到这个要求的配置直接报错, 修复了摄像头不配置帧率会报错的问题
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    let _ = ensure_camera_ready(&index);
+    ensure_camera_ready(&index)?;
     let format_type = RequestedFormatType::Exact(CameraFormat::new(
         Resolution {
             width_x: 640,
@@ -257,35 +262,22 @@ fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
 /// 捕获帧循环
 fn capture_frames(
     camera_index: CameraIndex,
-    frame_cache: FrameCache,
+    bus: FrameCache,
     running: Arc<AtomicBool>,
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
-) {
-    let mut camera = match open_camera_default(camera_index) {
-        Ok(mut c) => {
-            if let Err(e) = c.open_stream().context("Failed to open camera stream") {
-                log::error!("Could not open camera stream: {e}");
-                return;
-            }
-            c
-        }
-        Err(e) => {
-            log::error!("Could not open camera in capture loop, error: {e}");
-            return;
-        }
-    };
+) -> anyhow::Result<()> {
+    let mut camera = open_camera_default(camera_index)?;
 
     // 获取摄像头的信息
     let camera_fmt = camera.camera_format();
-    log::info!("camera info: {:?}", camera_fmt);
+    log::info!("camera info: {camera_fmt:?}");
     let width = camera_fmt.width();
     let height = camera_fmt.height();
 
     // 加载人脸检测器
     let Ok(mut face_detector) = get_face_detector() else {
-        log::error!("Could not get face_detector");
-        return;
+        anyhow::bail!("Could not get face_detector");
     };
 
     // 如果需要旋转 90 或 270 度，宽高交换
@@ -299,12 +291,7 @@ fn capture_frames(
     }
     let format = camera_fmt.format();
     log::info!(
-        "Camera resolution: {}x{} (rotate: {:?}, output: {}x{})",
-        width,
-        height,
-        rotate_angle,
-        out_width,
-        out_height
+        "Camera resolution: {width}x{height} (rotate: {rotate_angle:?}, output: {out_width}x{out_height})"
     );
 
     // 帧率计算
@@ -314,7 +301,7 @@ fn capture_frames(
         let frame = match camera.frame() {
             Ok(f) => f,
             Err(e) => {
-                log::error!("Camera frame error: {:?}", e);
+                log::error!("Camera frame error: {e:?}");
                 thread::sleep(Duration::from_millis(100));
                 continue;
             }
@@ -341,11 +328,13 @@ fn capture_frames(
             log::info!("Camera FPS: {:.1}", fps);
         }
         // 通过通道发送帧
-        // 使用 broadcast
-        let _ = frame_cache.send(frame_data);
+        bus.publish(crate::event_bus::BusEvent::CameraVideo(Arc::new(
+            frame_data,
+        )));
     }
 
     log::info!("Video capture loop stopped");
+    Ok(())
 }
 
 /// 获取人脸检测器
@@ -402,7 +391,7 @@ fn process_and_rotate(
 /// * `src_height`: 摄像头的高
 /// * `face_detector`:
 ///
-/// returns: FrameData
+/// returns: `FrameData`
 ///
 /// # Examples
 ///
@@ -438,7 +427,7 @@ fn process_frame_by_format(
             )
         }
         _ => {
-            anyhow::bail!("Unsupported frame format {:?}", format);
+            anyhow::bail!("Unsupported frame format {format:?}");
         }
     }
 }

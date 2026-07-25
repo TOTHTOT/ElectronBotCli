@@ -5,6 +5,7 @@ use ratatui::{
 };
 
 /// 创建带标题的 Block
+#[must_use] 
 pub fn create_block(title: String, border_color: Color, title_color: Color) -> Block<'static> {
     Block::new()
         .title(title)
@@ -14,6 +15,7 @@ pub fn create_block(title: String, border_color: Color, title_color: Color) -> B
 }
 
 /// 获取选中指示器
+#[must_use] 
 pub fn get_indicator(is_selected: bool, is_editing: bool) -> &'static str {
     if is_selected {
         if is_editing {
@@ -30,6 +32,7 @@ pub fn get_indicator(is_selected: bool, is_editing: bool) -> &'static str {
 pub struct PopupWidget;
 
 impl PopupWidget {
+    #[must_use] 
     pub fn new() -> Self {
         Self
     }

@@ -29,6 +29,7 @@ pub enum RotateAngle {
 
 impl RotateAngle {
     /// 根据角度值创建（0, 90, 180, 270）
+    #[must_use] 
     pub fn from_degrees(degrees: u32) -> Self {
         match degrees % 360 {
             90 => Self::Rotate90,
@@ -39,6 +40,7 @@ impl RotateAngle {
     }
 
     /// 是否需要交换宽高
+    #[must_use] 
     pub fn needs_swap(&self) -> bool {
         matches!(self, Self::Rotate90 | Self::Rotate270)
     }
@@ -63,6 +65,7 @@ fn copy_pixel(src: &[u8], x: u32, y: u32, width: u32, dst: &mut Vec<u8>) {
 
 /// 顺时针旋转 90 度
 /// 原始 width x height -> 旋转后 height x width
+#[must_use] 
 pub fn rotate_90_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
     (0..width)
@@ -72,6 +75,7 @@ pub fn rotate_90_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 }
 
 /// 顺时针旋转 180 度
+#[must_use] 
 pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity(bgr_data.len());
     (0..height)
@@ -83,6 +87,7 @@ pub fn rotate_180(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 
 /// 顺时针旋转 270 度（等同于逆时针 90 度）
 /// 原始 width x height -> 旋转后 height x width
+#[must_use] 
 pub fn rotate_270_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
     let mut rotated = Vec::with_capacity((width * height * 3) as usize);
     (0..width)
@@ -94,6 +99,7 @@ pub fn rotate_270_cw(bgr_data: &[u8], width: u32, height: u32) -> Vec<u8> {
 
 /// 根据旋转角度处理图像
 /// 优先使用 RGA 硬件加速，失败时回退到软件实现
+#[must_use] 
 pub fn rotate_by_angle(bgr_data: &[u8], width: u32, height: u32, angle: RotateAngle) -> Vec<u8> {
     // 尝试 RGA 硬件加速 (仅在 aarch64 Linux 上可用)
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]

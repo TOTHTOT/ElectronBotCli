@@ -7,24 +7,24 @@ use std::sync::atomic::Ordering;
 /// 处理 TTS 测试模式的输入
 pub fn handle(app: &mut App, code: KeyCode) {
     match code {
-        KeyCode::Char('m') | KeyCode::Char('M') => {
+        KeyCode::Char('m' | 'M') => {
             app.ai.tts_test_state.is_streaming = !app.ai.tts_test_state.is_streaming;
             let mode = if app.ai.tts_test_state.is_streaming {
                 "流式"
             } else {
                 "阻塞"
             };
-            app.ai.tts_test_state.output_text = format!("切换到 {} 模式", mode);
+            app.ai.tts_test_state.output_text = format!("切换到 {mode} 模式");
         }
-        KeyCode::Up | KeyCode::Char('+') | KeyCode::Char('=') => {
+        KeyCode::Up | KeyCode::Char('+' | '=') => {
             let new_speed = (app.ai.tts_test_state.speed + 0.1).min(2.0);
             app.ai.tts_test_state.speed = new_speed;
-            app.ai.tts_test_state.output_text = format!("速度: {:.1}", new_speed);
+            app.ai.tts_test_state.output_text = format!("速度: {new_speed:.1}");
         }
-        KeyCode::Down | KeyCode::Char('-') | KeyCode::Char('_') => {
+        KeyCode::Down | KeyCode::Char('-' | '_') => {
             let new_speed = (app.ai.tts_test_state.speed - 0.1).max(0.5);
             app.ai.tts_test_state.speed = new_speed;
-            app.ai.tts_test_state.output_text = format!("速度: {:.1}", new_speed);
+            app.ai.tts_test_state.output_text = format!("速度: {new_speed:.1}");
         }
         KeyCode::Backspace => {
             app.ai.tts_test_state.input_text.pop();

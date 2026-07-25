@@ -14,6 +14,7 @@ pub struct FaceDetectionResult {
 
 impl FaceDetectionResult {
     #[allow(dead_code)]
+    #[must_use] 
     pub fn get_center_coordinates(&self) -> (f32, f32) {
         (self.x + self.width * 2.0, self.y + self.height * 2.0)
     }
@@ -100,13 +101,14 @@ pub fn create_face_detector(model_path: PathBuf) -> anyhow::Result<Box<dyn FaceD
     }
     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     {
-        log::info!("Creating ONNX face detector: {:?}", model_path);
+        log::info!("Creating ONNX face detector: {model_path:?}");
         let detector = super::ort::OrtFaceDetector::new(model_path)?;
         Ok(Box::new(detector))
     }
 }
 
 /// NMS 去重
+#[must_use] 
 pub fn nms_filter(
     detections: Vec<FaceDetectionResult>,
     iou_threshold: f32,
@@ -140,7 +142,8 @@ pub fn nms_filter(
     keep
 }
 
-/// 计算 IoU
+/// 计算 `IoU`
+#[must_use] 
 pub fn calculate_iou(a: &FaceDetectionResult, b: &FaceDetectionResult) -> f32 {
     let a_x1 = a.x - a.width / 2.0;
     let a_y1 = a.y - a.height / 2.0;

@@ -28,6 +28,7 @@ pub struct SelectingField {
 
 impl SelectingField {
     /// 新建: 输入/输出, 起始 cursor=0 (即 `<系统默认>`), 列表非空时立刻就绪.
+    #[must_use] 
     pub fn new(kind: SelectingKind) -> Self {
         Self {
             kind,
@@ -81,6 +82,7 @@ impl EditField {
     /// 新建 `EditField`. 调用方传入 cursor 时 SHOULD 取
     /// `buffer.chars().count()` (末尾) 或 `0` (开头); 越界值会被方法
     /// 内部的 char/byte 转换兜底 clamp 到合法范围.
+    #[must_use] 
     pub fn new(index: usize, label: &'static str, buffer: String, cursor: usize) -> Self {
         let chars = buffer.chars().count();
         Self {
@@ -106,8 +108,7 @@ impl EditField {
             .buffer
             .char_indices()
             .nth(cursor)
-            .map(|(b, _)| b)
-            .unwrap_or(self.buffer.len());
+            .map_or(self.buffer.len(), |(b, _)| b);
         self.buffer.insert(byte_idx, c);
         self.cursor = cursor + 1;
     }
@@ -129,14 +130,13 @@ impl EditField {
             .buffer
             .char_indices()
             .nth(self.cursor)
-            .map(|(b, _)| b)
-            .unwrap_or(self.buffer.len());
+            .map_or(self.buffer.len(), |(b, _)| b);
         self.buffer.drain(start..end);
         self.cursor = prev;
         true
     }
 
-    /// 删 cursor 位置字符 (cursor < chars().count() 时有效). 返回是否删除.
+    /// 删 cursor 位置字符 (cursor < `chars().count()` 时有效). 返回是否删除.
     ///
     /// 与 `delete_back` 区别: Backspace 删前面的字符, Delete 删后面的字符;
     /// 删除后 `cursor` 不变 (删的是它"指着"的那个字符).
@@ -155,8 +155,7 @@ impl EditField {
             .buffer
             .char_indices()
             .nth(self.cursor + 1)
-            .map(|(b, _)| b)
-            .unwrap_or(self.buffer.len());
+            .map_or(self.buffer.len(), |(b, _)| b);
         self.buffer.drain(start..end);
         true
     }
@@ -183,11 +182,13 @@ impl EditField {
     }
 
     /// 取 cursor 之前的字符 (渲染 caret 前的部分)
+    #[must_use] 
     pub fn before_cursor(&self) -> String {
         self.buffer.chars().take(self.cursor).collect()
     }
 
     /// 取 cursor 之后的字符 (渲染 caret 后的部分)
+    #[must_use] 
     pub fn after_cursor(&self) -> String {
         self.buffer.chars().skip(self.cursor).collect()
     }
@@ -218,8 +219,9 @@ pub enum Route {
 }
 
 impl Route {
-    /// 把当前 Route 映射回侧边栏高亮用的 MenuItem。
+    /// 把当前 Route 映射回侧边栏高亮用的 `MenuItem`。
     /// `Nav` 使用 `last_entered`; 其它变体直接对应。
+    #[must_use] 
     pub fn menu_item(&self) -> MenuItem {
         match self {
             Route::Nav { last_entered } => *last_entered,
@@ -234,7 +236,7 @@ impl Route {
 
 impl From<MenuItem> for Route {
     /// 创建一个"初始进入"的 Route 实例。
-    /// DeviceControl 直接进入 Active, 用户按一次 Enter 就能调舵机;
+    /// `DeviceControl` 直接进入 Active, 用户按一次 Enter 就能调舵机;
     /// 再按一次 Enter 切到 Idle (侧边栏可重新选菜单项)。
     fn from(item: MenuItem) -> Self {
         match item {

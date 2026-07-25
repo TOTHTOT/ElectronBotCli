@@ -20,7 +20,7 @@ const PRE_ROLL_SAMPLES: usize = SAMPLE_RATE / 1000 * PRE_ROLL_MS;
 const SILENCE_THRESHOLD: usize = 120;
 const MIN_AUDIO_LEN: usize = SAMPLE_RATE / 2;
 
-/// Initialize SenseVoice recognizer using sherpa-onnx
+/// Initialize `SenseVoice` recognizer using sherpa-onnx
 fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<OfflineRecognizer> {
     let config = OfflineRecognizerConfig {
         model_config: OfflineModelConfig {
@@ -57,7 +57,7 @@ fn init_silero_vad(model_path: &Path) -> anyhow::Result<VoiceActivityDetector> {
         .ok_or_else(|| anyhow::anyhow!("Failed to create VAD"))
 }
 
-/// Speech recognition main loop: VAD detection + SenseVoice recognition
+/// Speech recognition main loop: VAD detection + `SenseVoice` recognition
 ///
 /// 用 `audio_rx.recv_timeout(50ms)` 替代阻塞 `recv`, 每轮检查
 /// `running` 标志: 一旦为 false, 立即返回. 这是 `rebuild_voice`
@@ -141,7 +141,7 @@ fn recognition_loop(
                     if let Some(result) = stream.get_result() {
                         let text = result.text.trim().to_string();
                         if !text.is_empty() {
-                            log::info!("ASR: 【{}】", text);
+                            log::info!("ASR: 【{text}】");
                             // 通过事件总线流向 LLM. publish 永不 panic, 无订阅者时静默丢弃.
                             bus.publish(crate::event_bus::BusEvent::AsrText(text));
                         }
@@ -207,7 +207,7 @@ fn process_audio_chunk(
 
     // 音频数据
     let mono: Vec<f32> = if channels == 2 {
-        data.chunks(2).map(|c| (c[0] + c[1]) / 2.0).collect()
+        data.chunks(2).map(|c| f32::midpoint(c[0], c[1])).collect()
     } else {
         data.to_vec()
     };
@@ -222,7 +222,7 @@ pub fn build_asr_stream(
     bus: crate::event_bus::EventBus,
 ) -> anyhow::Result<Stream> {
     let config = device.default_input_config()?;
-    log::info!("Audio device: {:?}", config);
+    log::info!("Audio device: {config:?}");
 
     let stream_config = cpal::StreamConfig {
         channels: config.channels(),

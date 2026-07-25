@@ -1,4 +1,4 @@
-//! ElectronBotCli 服务端入口
+//! `ElectronBotCli` 服务端入口
 //!
 //! 启动流程:
 //! 1. 解析命令行参数(端口、绑定地址)
@@ -58,10 +58,10 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    log::info!("starting ele_bot_server on {}", bind);
+    log::info!("starting ele_bot_server on {bind}");
 
     // 初始化硬件
-    let state = SharedState::new()?;
+    let state = SharedState::new().await?;
     log::info!("hardware initialized");
 
     // 启动 WebSocket 服务

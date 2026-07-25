@@ -1,6 +1,6 @@
-//! ElectronBotCli 客户端入口
+//! `ElectronBotCli` 客户端入口
 //!
-//! 默认连接 ws://127.0.0.1:7878/ws, 也可通过环境变量 SERVER_URL 自定义。
+//! 默认连接 <ws://127.0.0.1:7878/ws>, 也可通过环境变量 `SERVER_URL` 自定义。
 
 use std::env;
 use std::fs::File;
@@ -45,7 +45,7 @@ fn main() -> anyhow::Result<()> {
 
     let server_url =
         env::var("SERVER_URL").unwrap_or_else(|_| "ws://127.0.0.1:7878/ws".to_string());
-    log::info!("connecting to {}", server_url);
+    log::info!("connecting to {server_url}");
 
     let mut app = App::new(&server_url)?;
 

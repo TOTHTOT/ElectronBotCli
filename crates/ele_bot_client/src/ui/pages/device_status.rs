@@ -1,6 +1,6 @@
 use crate::app::App;
 use crate::ui_components::create_block;
-use ratatui::{prelude::*, widgets::*};
+use ratatui::{prelude::*, widgets::{Table, Row, Cell, Paragraph}};
 
 /// 音量条宽度 — 总共 20 个字符宽, 含两端的方括号
 const VOLUME_BAR_WIDTH: usize = 20;
@@ -84,7 +84,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
             Row::new(vec![
                 Cell::from(Span::styled("上位机电量", Style::new().fg(Color::Yellow))),
                 Cell::from(Span::styled(
-                    format!("{}%", battery),
+                    format!("{battery}%"),
                     Style::new().fg(status_color(battery > 50)),
                 )),
             ]),
@@ -99,7 +99,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
                 Cell::from(Span::styled("输入音量", Style::new().fg(Color::Yellow))),
                 // 音量条 + 数字 + 文字描述, 同一行紧凑展示
                 Cell::from(Span::styled(
-                    format!("{}  {} ({})", volume_bar, volume, volume_label),
+                    format!("{volume_bar}  {volume} ({volume_label})"),
                     Style::new().fg(Color::Cyan),
                 )),
             ]),

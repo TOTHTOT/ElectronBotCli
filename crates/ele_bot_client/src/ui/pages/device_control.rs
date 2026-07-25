@@ -5,7 +5,7 @@ use ratatui::{prelude::*, widgets::Paragraph};
 
 /// 解析 "min° ~ max°" 格式
 fn parse_range(s: &str) -> (i16, i16) {
-    let parts: Vec<&str> = s.split("~").collect();
+    let parts: Vec<&str> = s.split('~').collect();
     if parts.len() == 2 {
         let min = parts[0]
             .trim()
@@ -100,8 +100,8 @@ fn render_single_joint(frame: &mut Frame, area: Rect, vm: &DeviceControlViewMode
 
     // 计算进度条 - 从 range_str 解析 min/max
     let (min, max) = parse_range(range_str);
-    let total_range = (max - min) as f32;
-    let value_offset = (value - min) as f32;
+    let total_range = f32::from(max - min);
+    let value_offset = f32::from(value - min);
     let percent = if total_range > 0.0 {
         ((value_offset / total_range) * 100.0) as u16
     } else {

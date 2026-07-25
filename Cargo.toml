@@ -21,7 +21,7 @@ log = "0.4"
 thiserror = "2"
 async-trait = "0.1.91"
 futures = "0.3"
-bytes = "1"
+bytes = "1.12"
 toml = "1.0.1"
 
 # 服务端专用

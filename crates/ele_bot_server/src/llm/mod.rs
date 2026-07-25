@@ -72,7 +72,7 @@ impl LlmManager {
                     Box::new(online)
                 }
                 Err(e) => {
-                    log::warn!("Failed to create online LLM: {}, falling back to local", e);
+                    log::warn!("Failed to create online LLM: {e}, falling back to local");
                     Self::create_local_llm(model_path, tokenizer_path)?
                 }
             }

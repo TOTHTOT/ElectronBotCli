@@ -55,7 +55,7 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TtsTestState, border_color:
     } else {
         "阻塞"
     };
-    let control_text = format!("{}  |  模式: [{}]  (按 M 切换)", speed_text, mode_text);
+    let control_text = format!("{speed_text}  |  模式: [{mode_text}]  (按 M 切换)");
     let control_box = Paragraph::new(control_text.as_str())
         .block(Block::bordered().title("控制"))
         .alignment(Alignment::Left);

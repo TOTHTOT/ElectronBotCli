@@ -1,9 +1,9 @@
 //! 设置事件
 //!
-//! SettingsEvent 覆盖 Settings 列表页的按键语义(Up/Down/Enter/R)。
-//! - EditField overlay 是另一种输入模式, 由 handle_overlay 直接处理
-//!   (逐字符输入/Backspace/Enter 提交), 不走 SettingsEvent.
-//! - DevicePicker overlay 同样由 handle_overlay 直接处理
+//! `SettingsEvent` 覆盖 Settings 列表页的按键语义(Up/Down/Enter/R)。
+//! - `EditField` overlay 是另一种输入模式, 由 `handle_overlay` 直接处理
+//!   (逐字符输入/Backspace/Enter 提交), 不走 `SettingsEvent`.
+//! - `DevicePicker` overlay 同样由 `handle_overlay` 直接处理
 //!   (Up/Down/Enter/Esc/'r'), 这里只发"进入 picker"事件.
 
 use crate::app::route::SelectingKind;
@@ -17,13 +17,13 @@ pub enum SettingsEvent {
     Up,
     /// 下一个设置项
     Down,
-    /// 进入当前项的编辑 (仅对 Wifi/wifi_password/speech_name 生效, 扬声器走 EnterPicker)
+    /// 进入当前项的编辑 (仅对 `Wifi/wifi_password/speech_name` 生效, 扬声器走 `EnterPicker`)
     Enter,
     /// 进入当前项的设备选择器(麦克风/扬声器行)
     EnterPicker(SelectingKind),
     /// 列表模式按 R — 重新拉取设备列表
     RefreshList,
-    /// picker 内 ↑ (SettingsEvent 镜像, 也可由 handle_overlay 直接处理)
+    /// picker 内 ↑ (`SettingsEvent` 镜像, 也可由 `handle_overlay` 直接处理)
     PickerUp,
     /// picker 内 ↓
     PickerDown,
@@ -53,7 +53,7 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
     }
 }
 
-/// 进入设置项编辑: 写入 Route::Settings.editing 并弹出 overlay
+/// 进入设置项编辑: 写入 `Route::Settings.editing` 并弹出 overlay
 fn begin_edit(app: &mut App) {
     app.begin_settings_edit();
     if let crate::app::Route::Settings { editing, .. } = &app.ui.mode.route {

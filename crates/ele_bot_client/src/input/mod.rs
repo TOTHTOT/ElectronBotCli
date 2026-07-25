@@ -1,4 +1,4 @@
-//! 事件模块 - 按 AppMode 分发按键输入
+//! 事件模块 - 按 `AppMode` 分发按键输入
 //!
 //! 调度优先级:
 //! 1. 全局热键 (Esc 退到 Nav 或退出, Ctrl+C 退出)
@@ -72,9 +72,9 @@ impl From<SettingsEvent> for AppEvent {
 /// handler 里完成, 这里只做 dispatch —— 不读 route, 不读 overlay.
 ///
 /// 子系统 handler:
-/// - [`CommonEvent`] → 直接调 `App` 方法 (Quit / ConfirmQuit)
+/// - [`CommonEvent`] → 直接调 `App` 方法 (Quit / `ConfirmQuit`)
 /// - [`MenuEvent`]   → [`menu::handle`]   (Nav 列表导航 + 设备连接)
-/// - [`DeviceEvent`] → [`device::handle`] (DeviceControl::Active 舵机控制)
+/// - [`DeviceEvent`] → [`device::handle`] (`DeviceControl::Active` 舵机控制)
 /// - [`SettingsEvent`] → [`settings::handle`] (Settings 列表导航 + 进入编辑)
 ///
 /// # 何时调用
@@ -106,7 +106,7 @@ pub fn handle_event(app: &mut App, event: AppEvent) {
     }
 }
 
-/// 按 AppMode 分发按键输入
+/// 按 `AppMode` 分发按键输入
 pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     log::info!("ui state: {:?}handling event: {:?}", app.ui, code);
     // (0) 全局热键 (Esc / Ctrl+C 跨所有 mode)
@@ -171,7 +171,7 @@ fn handle_nav(app: &mut App, code: KeyCode) {
                 .selected()
                 .and_then(|i| MenuItem::all().get(i).copied())
                 .unwrap_or(last_entered);
-            log::info!("nav selected: {:?}", last);
+            log::info!("nav selected: {last:?}");
 
             // 设备状态页: Enter = 连接/断开, 不进入新 Route
             // (Route::from(DeviceStatus) 会映射回 Route::Nav, 形成死循环)
@@ -198,7 +198,7 @@ fn handle_nav(app: &mut App, code: KeyCode) {
     }
 }
 
-/// DeviceControl 页面
+/// `DeviceControl` 页面
 ///
 /// - Idle: Up/Down 切菜单项, Enter 切到 Active(进入舵机控制)
 /// - Active: 方向键调舵机, Esc/Enter 退到 Idle
@@ -226,9 +226,9 @@ fn handle_device_control(app: &mut App, code: KeyCode) {
         KeyCode::Down => Some(AppEvent::Device(DeviceEvent::Next)),
         KeyCode::Left => Some(AppEvent::Device(DeviceEvent::Decrease)),
         KeyCode::Right => Some(AppEvent::Device(DeviceEvent::Increase)),
-        KeyCode::Char('s') | KeyCode::Char('S') => Some(AppEvent::Device(DeviceEvent::Screenshot)),
+        KeyCode::Char('s' | 'S') => Some(AppEvent::Device(DeviceEvent::Screenshot)),
         // F/f = 人脸追踪开关, 暂无对应 DeviceEvent, 直接调用 app 方法
-        KeyCode::Char('f') | KeyCode::Char('F') => {
+        KeyCode::Char('f' | 'F') => {
             app.toggle_face_tracking();
             None
         }
@@ -243,8 +243,8 @@ fn handle_device_control(app: &mut App, code: KeyCode) {
 ///
 /// 列表模式: Up/Down 选, Enter 进入编辑(对 Wifi 两项) 或设备选择器
 /// (对麦克风/扬声器行), 'r' 刷新设备列表.
-/// picker 模式 (selecting.is_some): 把按键翻译为 Picker*, 这里不发,
-/// 由 handle_overlay 接管 DevicePicker 分支 (双路保险, 因为 overlay 已
+/// picker 模式 (`selecting.is_some)`: 把按键翻译为 Picker*, 这里不发,
+/// 由 `handle_overlay` 接管 `DevicePicker` 分支 (双路保险, 因为 overlay 已
 /// 优先).
 fn handle_settings(app: &mut App, code: KeyCode) {
     // picker 中 overlay 已优先处理, 这里理论上不会被命中,
@@ -262,7 +262,7 @@ fn handle_settings(app: &mut App, code: KeyCode) {
             KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::PickerDown)),
             KeyCode::Enter => Some(AppEvent::Settings(SettingsEvent::PickerConfirm)),
             KeyCode::Esc => Some(AppEvent::Settings(SettingsEvent::PickerCancel)),
-            KeyCode::Char('r') | KeyCode::Char('R') => {
+            KeyCode::Char('r' | 'R') => {
                 Some(AppEvent::Settings(SettingsEvent::PickerRefresh))
             }
             _ => None,
@@ -293,7 +293,7 @@ fn handle_settings(app: &mut App, code: KeyCode) {
                 Some(AppEvent::Settings(SettingsEvent::Enter))
             }
         }
-        KeyCode::Char('r') | KeyCode::Char('R') => {
+        KeyCode::Char('r' | 'R') => {
             Some(AppEvent::Settings(SettingsEvent::RefreshList))
         }
         _ => None,
@@ -317,7 +317,7 @@ fn handle_about(_app: &mut App, _code: KeyCode) {}
 ///
 /// 由 `handle_overlay` 的 `Overlay::EditField` 分支调用; **只**关心
 /// 怎么改 buffer/cursor, 不负责 commit/cancel (那两个走 Enter/Esc
-/// 在 handle_overlay 单独处理).
+/// 在 `handle_overlay` 单独处理).
 ///
 /// ## 设计理由
 ///
@@ -423,7 +423,7 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
                 KeyCode::Enter => {
                     app.confirm_device_picker();
                 }
-                KeyCode::Char('r') | KeyCode::Char('R') => {
+                KeyCode::Char('r' | 'R') => {
                     app.refresh_device_picker();
                 }
                 KeyCode::Up => {

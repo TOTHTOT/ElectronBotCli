@@ -1,6 +1,6 @@
 //! WebSocket 服务
 //!
-//! 接受客户端连接, 接收命令, 推送事件 (从 EventBus 订阅, 按 variant 过滤).
+//! 接受客户端连接, 接收命令, 推送事件 (从 `EventBus` 订阅, 按 variant 过滤).
 
 use crate::event_bus::BusEvent;
 use crate::robot::{self, CommState, DisplayMode, JointConfig};
@@ -26,7 +26,7 @@ pub async fn run(state: Arc<SharedState>, bind: &str) -> anyhow::Result<()> {
         .with_state(state);
 
     let listener = tokio::net::TcpListener::bind(bind).await?;
-    log::info!("WebSocket server listening on {}{}", bind, WS_PATH);
+    log::info!("WebSocket server listening on {bind}{WS_PATH}");
 
     axum::serve(listener, app).await?;
     Ok(())
@@ -122,7 +122,7 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
                                     message: e.to_string(),
                                 }){
                                     log::warn!("error sending error: {e}");
-                                };
+                                }
                             }
                         }
                     }

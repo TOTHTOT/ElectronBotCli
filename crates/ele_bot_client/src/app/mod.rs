@@ -62,7 +62,7 @@ impl Default for DeviceCache {
 /// tokio runtime, 用于在主循环中调用 .await
 pub type Runtime = tokio::runtime::Runtime;
 
-/// 设置项标签(供 EditField::label 使用)
+/// 设置项标签(供 `EditField::label` 使用)
 ///
 /// 顺序与下方的 `SETTINGS_IDX_*` 常量一一对应. 列表渲染
 /// (`viewmodel/settings.rs::from_app`) 也按这个顺序构 items.
@@ -95,11 +95,11 @@ pub const SETTINGS_IDX_OUTPUT: usize = 6;
 /// UI 状态
 #[derive(Debug)]
 pub struct UiState {
-    /// 侧边栏 ListState, 高亮当前选中项
+    /// 侧边栏 `ListState`, 高亮当前选中项
     pub menu_state: ListState,
     /// 主循环是否继续
     pub running: bool,
-    /// 路由 + 模态组合(取代旧的 5 个 mode bool + left_focused + popup)
+    /// 路由 + 模态组合(取代旧的 5 个 mode bool + `left_focused` + popup)
     pub mode: AppMode,
 }
 
@@ -253,7 +253,7 @@ impl App {
                 self.ai.is_processing.store(false, Ordering::Relaxed);
                 if matches!(self.ui.mode.route, Route::LlmTest) {
                     self.ai.llm_test_state.current_mood = Some(mood);
-                    self.ai.llm_test_state.output_text = format!("情感: {:?}", mood);
+                    self.ai.llm_test_state.output_text = format!("情感: {mood:?}");
                 }
             }
             ServerEvent::LlmProcessing { is_processing } => {
@@ -428,8 +428,8 @@ impl App {
     }
 
     /// 侧边栏上下选择。
-    /// - 若当前在 Nav: 直接更新 last_entered, 路由不变(已在 Nav)
-    /// - 若在某个页面: 切到 Nav 并把 last_entered 设为新选项
+    /// - 若当前在 Nav: 直接更新 `last_entered`, 路由不变(已在 Nav)
+    /// - 若在某个页面: 切到 Nav 并把 `last_entered` 设为新选项
     fn select_menu(&mut self, delta: isize) {
         let items = MenuItem::all();
         let len = items.len();
@@ -461,14 +461,14 @@ impl App {
         self.ui.mode.route = Route::Nav { last_entered: last };
     }
 
-    /// 把当前 DeviceControl 切到 Active(进入子模式)
+    /// 把当前 `DeviceControl` 切到 Active(进入子模式)
     pub fn enter_device_control_active(&mut self) {
         if let Route::DeviceControl { mode } = &mut self.ui.mode.route {
             *mode = DeviceControlMode::Active;
         }
     }
 
-    /// 把当前 DeviceControl 切到 Idle
+    /// 把当前 `DeviceControl` 切到 Idle
     pub fn enter_device_control_idle(&mut self) {
         if let Route::DeviceControl { mode } = &mut self.ui.mode.route {
             *mode = DeviceControlMode::Idle;
@@ -526,7 +526,7 @@ impl App {
         }
     }
 
-    /// 提交编辑(Enter on EditField overlay)
+    /// 提交编辑(Enter on `EditField` overlay)
     ///
     /// 把 EditField.buffer 写回 self.config 对应字段, 然后走现有
     /// `set_config` 路径 — 与"setting-list 顺序变更"无关注, 只是新增
@@ -554,7 +554,7 @@ impl App {
         self.set_config(self.config.clone());
     }
 
-    /// 取消编辑(Esc on EditField overlay)
+    /// 取消编辑(Esc on `EditField` overlay)
     pub fn cancel_settings_edit(&mut self) {
         if let Route::Settings {
             editing,

@@ -1,6 +1,6 @@
-//! AppMode - 路由 + 模态的组合
+//! `AppMode` - 路由 + 模态的组合
 //!
-//! 把原来散落在 UiState 上的 5 个 mode bool + left_focused + popup
+//! 把原来散落在 `UiState` 上的 5 个 mode bool + `left_focused` + popup
 //! 合并成二层结构, 由编译器保证互斥。
 
 use super::menu::MenuItem;
@@ -15,6 +15,7 @@ pub struct AppMode {
 }
 
 impl AppMode {
+    #[must_use] 
     pub fn new() -> Self {
         Self {
             route: Route::Nav {
@@ -28,6 +29,7 @@ impl AppMode {
     /// 推导规则(取代旧 `left_focused: bool`):
     /// - `Nav` / `About` / `DeviceControl::Idle`: 侧边栏高亮
     /// - 其它 Route 或有 overlay: 右面板高亮
+    #[must_use] 
     pub fn sidebar_focused(&self) -> bool {
         if self.overlay.is_some() {
             return false;

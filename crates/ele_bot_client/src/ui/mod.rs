@@ -56,10 +56,10 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             );
         }
         Route::DeviceControl { .. } => {
-            pages::device_control::render(frame, chunks[1], &control_vm, right_border_color)
+            pages::device_control::render(frame, chunks[1], &control_vm, right_border_color);
         }
         Route::Settings { .. } => {
-            pages::settings::render(frame, chunks[1], &settings_vm, right_border_color)
+            pages::settings::render(frame, chunks[1], &settings_vm, right_border_color);
         }
         Route::LlmTest => pages::llm_test::render(
             frame,
@@ -71,7 +71,7 @@ pub fn render(frame: &mut Frame, app: &mut App) {
             right_border_color,
         ),
         Route::TtsTest => {
-            pages::tts_test::render(frame, chunks[1], &app.ai.tts_test_state, right_border_color)
+            pages::tts_test::render(frame, chunks[1], &app.ai.tts_test_state, right_border_color);
         }
         Route::About => pages::about::render(frame, chunks[1], right_border_color),
     }
@@ -101,7 +101,7 @@ fn render_menu_item_page(
     match item {
         MenuItem::DeviceStatus => pages::device_status::render(frame, area, app, border_color),
         MenuItem::DeviceControl => {
-            pages::device_control::render(frame, area, control_vm, border_color)
+            pages::device_control::render(frame, area, control_vm, border_color);
         }
         MenuItem::LlmTest => pages::llm_test::render(
             frame,
@@ -113,7 +113,7 @@ fn render_menu_item_page(
             border_color,
         ),
         MenuItem::TtsTest => {
-            pages::tts_test::render(frame, area, &app.ai.tts_test_state, border_color)
+            pages::tts_test::render(frame, area, &app.ai.tts_test_state, border_color);
         }
         MenuItem::Settings => pages::settings::render(frame, area, settings_vm, border_color),
         MenuItem::About => pages::about::render(frame, area, border_color),

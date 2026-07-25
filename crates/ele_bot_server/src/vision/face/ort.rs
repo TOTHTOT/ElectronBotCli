@@ -101,15 +101,16 @@ pub fn preprocess_image(
         let x = (i as u32) % input_width;
         let y = (i as u32) / input_width;
         let idx = (y * input_width + x) as usize;
-        input[idx] = pixel.0[0] as f32;
-        input[idx + area] = pixel.0[1] as f32;
-        input[idx + 2 * area] = pixel.0[2] as f32;
+        input[idx] = f32::from(pixel.0[0]);
+        input[idx + area] = f32::from(pixel.0[1]);
+        input[idx + 2 * area] = f32::from(pixel.0[2]);
     }
 
     Ok(input)
 }
 
 /// 后处理 - 将模型输出转换为检测结果
+#[must_use] 
 pub fn postprocess_output(
     output_slice: &[f32],
     scale: f32,

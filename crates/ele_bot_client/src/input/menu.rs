@@ -12,7 +12,7 @@ pub enum MenuEvent {
     EnterSettingMode,
 }
 
-/// 处理菜单事件(由 input::handle_by_mode 路由, 已是 Nav 模式)
+/// 处理菜单事件(由 `input::handle_by_mode` 路由, 已是 Nav 模式)
 pub fn handle(app: &mut App, event: MenuEvent) {
     match event {
         MenuEvent::Up => app.prev_menu(),

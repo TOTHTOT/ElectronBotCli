@@ -3,14 +3,14 @@
 //! 集中持有所有硬件资源句柄, 以及向所有客户端广播事件的通道。
 //! ws.rs 中的 WebSocket 处理器从此处读取/写入。
 
-use crate::event_bus::EventBus;
+use crate::event_bus::{BusEvent, EventBus};
 use crate::face_tracker::{calculate_body_adjustment, smooth_adjustment, BODY_SERVO_INDEX};
 use crate::llm::{LlmManager, LlmResponse};
-use crate::media::video::types::{FrameCache, FrameInfo};
 use crate::media::video::VideoCapture;
 use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{CommState, Joint, JointConfig, Lcd};
+use crate::web::WebPreview;
 use boteyes::Mood;
 use ele_bot_proto::{
     AppConfig, FacePosition, JointState, LlmResponse as ProtoLlmResponse, Mood as ProtoMood,
@@ -38,8 +38,8 @@ pub struct SharedState {
     /// LLM 管理
     pub llm: tokio::sync::Mutex<LlmManager>,
     /// 摄像头帧广播 (供 ws/web preview 订阅)
-    pub frame_tx: FrameCache,
-    /// 事件总线 - 替代原 `event_tx` (broadcast ServerEvent) + `llm_text_tx` (mpsc String)
+    // pub frame_tx: FrameCache,
+    /// 事件总线 - 替代原 `event_tx` (broadcast `ServerEvent`) + `llm_text_tx` (mpsc String)
     /// + `voice.asr_text_rx` 三处手工 channel. 新订阅者调 `bus_tx.subscribe()` 即可.
     pub bus_tx: EventBus,
     /// 发送给 USB 通信线程的通道
@@ -58,12 +58,16 @@ pub struct SharedState {
     pub face_tracking_enabled: AtomicBool,
     /// 人脸追踪平滑状态(累计调整值, 度)
     face_tracking_adjustment: AtomicI32,
+    // _web: WebPreview,
 }
 
 impl SharedState {
     /// 初始化所有硬件和后台资源
-    pub fn new() -> anyhow::Result<Arc<Self>> {
+    pub async fn new() -> anyhow::Result<Arc<Self>> {
         let config = AppConfig::load_or_default();
+
+        // 容量 1024 跟原 broadcast 一致.
+        let bus_tx = EventBus::new(1024);
 
         // LCD
         let lcd = Lcd::new();
@@ -79,22 +83,24 @@ impl SharedState {
                 nokhwa::utils::CameraIndex::String(config.camera_index.clone())
             };
 
-        let (frame_tx, _frame_rx) = broadcast::channel::<FrameInfo>(100);
         let mut video_capture = VideoCapture::new(
             camera_index,
-            frame_tx.clone(),
+            bus_tx.clone(),
             rotate_proto_to_local(config.rotation),
         );
+        let web = WebPreview::new(7777, bus_tx.subscribe(), video_capture.resolution_arc());
+        tokio::spawn(async move {
+            web.run().await;
+            loop {
+                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+            }
+        });
         video_capture.start_capture_frames_thread();
 
         // 摄像头分辨率缓存
         let camera_resolution = video_capture.resolution_arc();
-
         // LCD 帧缓存
         let lcd_frame_cache = Arc::new(Mutex::new(None));
-
-        // 容量 1024 跟原 broadcast 一致.
-        let bus_tx = EventBus::new(1024);
 
         // 语音
         log::debug!("start init voice");
@@ -117,8 +123,8 @@ impl SharedState {
             video: Mutex::new(video_capture),
             voice: Mutex::new(voice),
             llm: tokio::sync::Mutex::new(llm),
-            frame_tx: frame_tx.clone(),
-            bus_tx,
+            // frame_tx: frame_tx.clone(),
+            bus_tx: bus_tx.clone(),
             bot_tx: Mutex::new(None),
             comm_state: Mutex::new(None),
             robot_connected: AtomicBool::new(false),
@@ -127,6 +133,7 @@ impl SharedState {
             camera_resolution,
             face_tracking_enabled: AtomicBool::new(false),
             face_tracking_adjustment: AtomicI32::new(0),
+            // _web: web,
         });
 
         // 启动 LLM 处理 tokio task (订阅 EventBus::AsrText)
@@ -134,7 +141,7 @@ impl SharedState {
         // 启动 TTS trigger tokio task (订阅 EventBus::LlmReply)
         state.spawn_tts_trigger_thread();
         // 启动人脸追踪后台任务
-        state.spawn_face_tracking_task(frame_tx);
+        state.spawn_face_tracking_task().await;
 
         Ok(state)
     }
@@ -194,15 +201,15 @@ impl SharedState {
     /// ASR 是"长跑线程" (一直跑直到 running=false), 所以需要 cancel 信号.
     /// TTS 路径 (`VoiceManager::speak` / `speak_streaming`) 是阻塞调用,
     /// 跑在 `tokio::task::spawn_blocking` 里, 没人持有它的情况下用户发新
-    /// SetConfig 会触发本函数; 旧 TTS 调用仍在跑, 旧 `VoiceManager` 还
-    /// 被那个 spawn_blocking 闭包持有, 不会被 drop — 旧 device 句柄要等
+    /// `SetConfig` 会触发本函数; 旧 TTS 调用仍在跑, 旧 `VoiceManager` 还
+    /// 被那个 `spawn_blocking` 闭包持有, 不会被 drop — 旧 device 句柄要等
     /// TTS 自然结束才释放. 这是已知设计取舍 ("切设备立即打断 TTS" 留
     /// 给未来 change). 见 `docs/voice-hot-swap.md`.
     ///
     /// # 失败语义
     ///
     /// 当 `init_voice` 返回 Err (例如新设备被独占占用) 时, 旧
-    /// `VoiceManager` 已经因 take() 被移出但被外层 Arc 持有, 在函数
+    /// `VoiceManager` 已经因 `take()` 被移出但被外层 Arc 持有, 在函数
     /// 末尾 Drop — 旧 Stream 自然释放. 错误向上抛, 调用方 (ws.rs)
     /// 负责把错误通过 `ServerEvent::Error` 广播给客户端.
     ///
@@ -286,29 +293,27 @@ impl SharedState {
         }
     }
 
-    /// 启动 LLM 处理任务 (tokio task, 订阅 EventBus::AsrText).
+    /// 启动 LLM 处理任务 (tokio task, 订阅 `EventBus::AsrText`).
     ///
-    /// 流程: AsrText → chat (生成回复) + analyze_mood (情感+动作) → 发布
-    /// ServerEvent::LlmResponse + BusEvent::LlmReply (供 TTS trigger 消费).
+    /// 流程: `AsrText` → chat (生成回复) + `analyze_mood` (情感+动作) → 发布
+    /// `ServerEvent::LlmResponse` + `BusEvent::LlmReply` (供 TTS trigger 消费).
     fn spawn_llm_thread(self: &Arc<Self>) {
         let state = self.clone();
         let mut rx = state.bus_tx.subscribe();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(crate::event_bus::BusEvent::AsrText(text)) => {
+                    Ok(BusEvent::AsrText(text)) => {
                         if text.is_empty() {
                             continue;
                         }
-                        log::debug!("LLM task received: {}", text);
+                        log::debug!("LLM task received: {text}");
                         state.llm_processing.store(true, Ordering::Relaxed);
                         state
                             .bus_tx
-                            .publish(crate::event_bus::BusEvent::ServerEvent(
-                                ServerEvent::LlmProcessing {
-                                    is_processing: true,
-                                },
-                            ));
+                            .publish(BusEvent::ServerEvent(ServerEvent::LlmProcessing {
+                                is_processing: true,
+                            }));
 
                         // 阶段 1: chat — 生成对话文本.
                         // state.llm 是 tokio::sync::Mutex, lock() 返 future.
@@ -324,7 +329,7 @@ impl SharedState {
                                     log::warn!("chat failed: {e:?}");
                                     format!("[LLM 错误: {e}]")
                                 });
-                        log::info!("LLM reply: {}", reply_text);
+                        log::info!("LLM reply: {reply_text}");
 
                         // 阶段 2: analyze_mood — 情感 + 舵机动作. analyze_mood 也是 async.
                         let response = state
@@ -341,11 +346,9 @@ impl SharedState {
                         state.llm_processing.store(false, Ordering::Relaxed);
                         state
                             .bus_tx
-                            .publish(crate::event_bus::BusEvent::ServerEvent(
-                                ServerEvent::LlmProcessing {
-                                    is_processing: false,
-                                },
-                            ));
+                            .publish(BusEvent::ServerEvent(ServerEvent::LlmProcessing {
+                                is_processing: false,
+                            }));
 
                         let proto_response = ProtoLlmResponse {
                             mood: mood_to_proto(response.mood),
@@ -358,11 +361,9 @@ impl SharedState {
                         };
                         state
                             .bus_tx
-                            .publish(crate::event_bus::BusEvent::ServerEvent(
-                                ServerEvent::LlmResponse {
-                                    response: proto_response,
-                                },
-                            ));
+                            .publish(BusEvent::ServerEvent(ServerEvent::LlmResponse {
+                                response: proto_response,
+                            }));
 
                         if let Ok(mut lcd) = state.lcd.lock() {
                             lcd.set_eyes_mood(response.mood);
@@ -370,9 +371,7 @@ impl SharedState {
 
                         // 发布 LlmReply, 触发 TTS trigger 任务播报.
                         if !reply_text.is_empty() {
-                            state
-                                .bus_tx
-                                .publish(crate::event_bus::BusEvent::LlmReply(reply_text));
+                            state.bus_tx.publish(BusEvent::LlmReply(reply_text));
                         }
                     }
                     Ok(_) => continue,
@@ -388,22 +387,22 @@ impl SharedState {
         });
     }
 
-    /// 启动 TTS 触发任务 (tokio task, 订阅 EventBus::LlmReply).
+    /// 启动 TTS 触发任务 (tokio task, 订阅 `EventBus::LlmReply`).
     ///
-    /// LLM 任务发布 BusEvent::LlmReply 后, 这里收到就调 `voice.speak`
+    /// LLM 任务发布 `BusEvent::LlmReply` 后, 这里收到就调 `voice.speak`
     /// 触发 TTS 播报. 用 `spawn_blocking` 异步不阻塞 bus 消费循环.
-    /// VoiceManager 不可用 (热重建中) 时 log warn 跳过.
+    /// `VoiceManager` 不可用 (热重建中) 时 log warn 跳过.
     fn spawn_tts_trigger_thread(self: &Arc<Self>) {
         let state = self.clone();
         let mut rx = state.bus_tx.subscribe();
         tokio::spawn(async move {
             loop {
                 match rx.recv().await {
-                    Ok(crate::event_bus::BusEvent::LlmReply(text)) => {
+                    Ok(BusEvent::LlmReply(text)) => {
                         if text.is_empty() {
                             continue;
                         }
-                        log::info!("TTS trigger: {}", text);
+                        log::info!("TTS trigger: {text}");
                         let voice_opt = state.voice.lock().unwrap().clone();
                         match voice_opt {
                             Some(voice) => {
@@ -431,54 +430,61 @@ impl SharedState {
 
     /// 启动人脸追踪后台任务
     ///
-    /// 订阅 `frame_tx` 广播, 收到带人脸检测结果的帧时:
-    /// - 若 `face_tracking_enabled`, 计算身体舵机调整量并直接 set_angle
-    /// - 始终广播 `ServerEvent::Face` 给所有 WS 客户端(用于 UI 显示)
-    fn spawn_face_tracking_task(self: &Arc<Self>, frame_tx: FrameCache) {
-        let mut frame_rx = frame_tx.subscribe();
+    /// # Arguments
+    ///
+    ///
+    /// returns: ()
+    ///
+    /// # Examples
+    ///
+    /// ```
+    ///
+    /// ```
+    async fn spawn_face_tracking_task(self: &Arc<Self>) {
         let state = self.clone();
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             loop {
-                match frame_rx.blocking_recv() {
+                match state.bus_tx.subscribe().recv().await {
                     Ok(frame_info) => {
-                        let position = FacePosition {
-                            x: frame_info.face_info.x,
-                            has_face: frame_info.face_info.has_face,
-                        };
+                        if let BusEvent::CameraVideo(video) = frame_info {
+                            let position = FacePosition {
+                                x: video.face_info.x,
+                                has_face: video.face_info.has_face,
+                            };
 
-                        // 始终广播给客户端(可选 UI 显示)
-                        state
-                            .bus_tx
-                            .publish(crate::event_bus::BusEvent::ServerEvent(ServerEvent::Face {
-                                position,
-                            }));
-
-                        // 仅在追踪开启时调整舵机
-                        if state.face_tracking_enabled.load(Ordering::Relaxed) && position.has_face
-                        {
-                            let target = calculate_body_adjustment(position.x);
-                            let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
-                            let smoothed = smooth_adjustment(prev, target, 0.3);
+                            // 始终广播给客户端(可选 UI 显示)
                             state
-                                .face_tracking_adjustment
-                                .store(smoothed, Ordering::Relaxed);
+                                .bus_tx
+                                .publish(BusEvent::ServerEvent(ServerEvent::Face { position }));
 
-                            let current_angle = state.joint.values()[BODY_SERVO_INDEX];
-                            let new_angle =
-                                (current_angle as f32 + smoothed as f32).clamp(-90.0, 90.0);
-                            state.joint.set_angle(BODY_SERVO_INDEX, new_angle);
-                        } else if !position.has_face
-                            && state.face_tracking_enabled.load(Ordering::Relaxed)
-                        {
-                            // 无人脸时, 平滑回 0
-                            let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
-                            let smoothed = smooth_adjustment(prev, 0, 0.1);
-                            state
-                                .face_tracking_adjustment
-                                .store(smoothed, Ordering::Relaxed);
-                            if smoothed == 0 && prev != 0 {
-                                // 已归零, 复位身体舵机
-                                state.joint.set_angle(BODY_SERVO_INDEX, 0.0);
+                            // 仅在追踪开启时调整舵机
+                            if state.face_tracking_enabled.load(Ordering::Relaxed)
+                                && position.has_face
+                            {
+                                let target = calculate_body_adjustment(position.x);
+                                let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
+                                let smoothed = smooth_adjustment(prev, target, 0.3);
+                                state
+                                    .face_tracking_adjustment
+                                    .store(smoothed, Ordering::Relaxed);
+
+                                let current_angle = state.joint.values()[BODY_SERVO_INDEX];
+                                let new_angle =
+                                    (f32::from(current_angle) + smoothed as f32).clamp(-90.0, 90.0);
+                                state.joint.set_angle(BODY_SERVO_INDEX, new_angle);
+                            } else if !position.has_face
+                                && state.face_tracking_enabled.load(Ordering::Relaxed)
+                            {
+                                // 无人脸时, 平滑回 0
+                                let prev = state.face_tracking_adjustment.load(Ordering::Relaxed);
+                                let smoothed = smooth_adjustment(prev, 0, 0.1);
+                                state
+                                    .face_tracking_adjustment
+                                    .store(smoothed, Ordering::Relaxed);
+                                if smoothed == 0 && prev != 0 {
+                                    // 已归零, 复位身体舵机
+                                    state.joint.set_angle(BODY_SERVO_INDEX, 0.0);
+                                }
                             }
                         }
                     }
@@ -526,9 +532,10 @@ impl SharedState {
     /// 通知连接状态变化
     pub fn notify_connection(&self, is_connected: bool) {
         self.robot_connected.store(is_connected, Ordering::Relaxed);
-        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
-            ServerEvent::Connection { is_connected },
-        ));
+        self.bus_tx
+            .publish(BusEvent::ServerEvent(ServerEvent::Connection {
+                is_connected,
+            }));
     }
 
     /// 停止机器人通信线程
@@ -560,18 +567,16 @@ impl SharedState {
             values: self.joint.values(),
             selected: self.joint.selected(),
         };
-        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
-            ServerEvent::JointState { state },
-        ));
+        self.bus_tx
+            .publish(BusEvent::ServerEvent(ServerEvent::JointState { state }));
     }
 
     /// 广播当前 JointConfig(用于预览/调试)
     pub fn broadcast_joint_config(&self) {
-        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
-            ServerEvent::JointConfig {
+        self.bus_tx
+            .publish(BusEvent::ServerEvent(ServerEvent::JointConfig {
                 config: joint_config_to_proto(&self.joint.config()),
-            },
-        ));
+            }));
     }
 
     /// 获取当前 config
@@ -590,24 +595,23 @@ impl SharedState {
         let audio_changed = cfg.speech_name != old_mic || cfg.output_device != old_spk;
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
-        self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
-            ServerEvent::Config { config: cfg },
-        ));
+        self.bus_tx
+            .publish(BusEvent::ServerEvent(ServerEvent::Config { config: cfg }));
         if audio_changed {
             if let Err(e) = self.rebuild_voice() {
                 log::warn!("rebuild_voice failed: {e:?}");
-                self.bus_tx.publish(crate::event_bus::BusEvent::ServerEvent(
-                    ServerEvent::Error {
+                self.bus_tx
+                    .publish(BusEvent::ServerEvent(ServerEvent::Error {
                         message: format!("voice rebuild failed: {e}"),
-                    },
-                ));
+                    }));
             }
         }
         Ok(())
     }
 }
 
-/// proto::Mood -> boteyes::Mood
+/// `proto::Mood` -> `boteyes::Mood`
+#[must_use]
 pub fn mood_from_proto(m: ProtoMood) -> Mood {
     match m {
         ProtoMood::Default => Mood::Default,
@@ -620,7 +624,8 @@ pub fn mood_from_proto(m: ProtoMood) -> Mood {
     }
 }
 
-/// boteyes::Mood -> proto::Mood
+/// `boteyes::Mood` -> `proto::Mood`
+#[must_use]
 pub fn mood_to_proto(m: Mood) -> ProtoMood {
     match m {
         Mood::Default => ProtoMood::Default,
@@ -633,7 +638,8 @@ pub fn mood_to_proto(m: Mood) -> ProtoMood {
     }
 }
 
-/// proto::RotateAngle -> 内部 video::process::RotateAngle
+/// `proto::RotateAngle` -> 内部 `video::process::RotateAngle`
+#[must_use]
 pub fn rotate_proto_to_local(
     r: ele_bot_proto::RotateAngle,
 ) -> crate::media::video::process::RotateAngle {
@@ -646,7 +652,8 @@ pub fn rotate_proto_to_local(
     }
 }
 
-/// 内部 Action -> proto::Action
+/// 内部 Action -> `proto::Action`
+#[must_use]
 pub fn action_to_proto(a: &crate::llm::response::Action) -> ele_bot_proto::Action {
     ele_bot_proto::Action {
         servo_index: a.servo_index,
@@ -655,7 +662,8 @@ pub fn action_to_proto(a: &crate::llm::response::Action) -> ele_bot_proto::Actio
     }
 }
 
-/// 内部 JointConfig -> proto::JointConfig
+/// 内部 `JointConfig` -> `proto::JointConfig`
+#[must_use]
 pub fn joint_config_to_proto(c: &JointConfig) -> ele_bot_proto::JointConfig {
     ele_bot_proto::JointConfig {
         enable: c.enable,

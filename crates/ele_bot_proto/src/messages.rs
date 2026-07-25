@@ -3,7 +3,7 @@
 //! 定义客户端→服务端(ClientMessage)和服务端→客户端(ServerEvent)的消息。
 //! 协议基于 JSON, 消息体序列化为单一字符串。
 
-use crate::types::*;
+use crate::types::{AppConfig, SERVO_COUNT, Mood, DisplayMode, JointState, JointConfig, LlmResponse, FacePosition, DeviceInfoDto};
 use serde::{Deserialize, Serialize};
 
 /// 客户端发送的命令

@@ -1,6 +1,6 @@
-//! Robot 模块 - ElectronBot 机器人抽象
+//! Robot 模块 - `ElectronBot` 机器人抽象
 //!
-//! 使用 [electron_bot](electron_bot/index.html) 库实现 USB 通信
+//! 使用 [`electron_bot`](electron_bot/index.html) 库实现 USB 通信
 
 pub mod joint;
 pub mod lcd;
@@ -114,6 +114,7 @@ pub fn stop_comm_thread(state: &CommState) {
 
 #[allow(dead_code)]
 /// 扫描 USB 设备
+#[must_use] 
 pub fn scan_devices() -> Vec<(u16, u16, String)> {
     ElectronBot::scan_devices()
         .into_iter()
@@ -123,6 +124,7 @@ pub fn scan_devices() -> Vec<(u16, u16, String)> {
 
 #[allow(dead_code)]
 /// 检查设备是否已连接
+#[must_use] 
 pub fn is_device_present() -> bool {
     ElectronBot::is_device_present()
 }
