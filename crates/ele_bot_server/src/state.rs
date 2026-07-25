@@ -93,7 +93,6 @@ impl SharedState {
         // LCD 帧缓存
         let lcd_frame_cache = Arc::new(Mutex::new(None));
 
-        // 事件总线: 替代原 event_tx (broadcast ServerEvent) + llm_text_tx (mpsc String).
         // 容量 1024 跟原 broadcast 一致.
         let bus_tx = EventBus::new(1024);
 

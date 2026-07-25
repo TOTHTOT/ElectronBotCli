@@ -63,13 +63,13 @@ fn init_silero_vad(model_path: &Path) -> anyhow::Result<VoiceActivityDetector> {
 /// `running` 标志: 一旦为 false, 立即返回. 这是 `rebuild_voice`
 /// 软替换旧实例的退出通道, 不依赖 cpal backend 及时停回调.
 ///
-/// 识别结果通过 `bus: &EventBus` publish (`BusEvent::AsrText`) 流向 LLM,
+/// 识别结果通过 `bus: EventBus` publish (`BusEvent::AsrText`) 流向 LLM,
 /// 不再用专用 channel (commit event-bus-refactor 改动).
 fn recognition_loop(
     recognizer: &mut OfflineRecognizer,
     vad: &mut VoiceActivityDetector,
     audio_rx: Receiver<Vec<f32>>,
-    bus: &crate::event_bus::EventBus,
+    bus: crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut buffer: Vec<f32> = Vec::new();
@@ -251,7 +251,7 @@ pub fn recognition_thread(
     silero_vad_model_path: PathBuf,
     tokens_path: PathBuf,
     audio_rx: Receiver<Vec<f32>>,
-    bus: &crate::event_bus::EventBus,
+    bus: crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
     let mut recognizer = init_sense_voice(&sense_voice_model_path, &tokens_path)?;
@@ -417,7 +417,7 @@ mod tests {
         let bus = crate::event_bus::EventBus::new(64);
         let mut bus_rx = bus.subscribe();
         let running = Arc::new(AtomicBool::new(true));
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, &bus, running);
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running);
 
         handle.join().expect("thread panicked");
 
@@ -473,7 +473,7 @@ mod tests {
         let bus = crate::event_bus::EventBus::new(64);
         let mut bus_rx = bus.subscribe();
         let running = Arc::new(AtomicBool::new(true));
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, &bus, running);
+        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running);
         handle.join().expect("thread panicked");
 
         let mut results: Vec<String> = Vec::new();

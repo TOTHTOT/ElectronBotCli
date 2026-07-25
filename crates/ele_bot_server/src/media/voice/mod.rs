@@ -142,7 +142,7 @@ impl VoiceManager {
                 asr_paths.silero_vad,
                 asr_paths.tokens,
                 audio_rx,
-                &bus,
+                bus,
                 running_for_thread,
             ) {
                 log::error!("recognition_thread failed: {e:?}");
