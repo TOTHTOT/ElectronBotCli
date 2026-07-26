@@ -67,7 +67,7 @@ pub struct SharedState {
 impl SharedState {
     /// 初始化所有硬件和后台资源
     pub async fn new() -> anyhow::Result<Arc<Self>> {
-        let config = AppConfig::load_or_default();
+        let mut config = AppConfig::load_or_default();
 
         // 容量 1024 跟原 broadcast 一致.
         let bus_tx = EventBus::new(1024);
@@ -78,27 +78,88 @@ impl SharedState {
         // 关节
         let joint = Arc::new(Joint::new());
 
-        // 摄像头
-        let camera_index = parse_camera_index(&config.camera_index);
+        // 摄像头 — 启动时先尝试用户配置的 camera_index, 失败时 fallback 到
+        // Index(0) 再试一次. **两次都失败时不 bail** — 服务照常起来, 仅视频流
+        // 为 None; 用户能从 picker 后续切设备, 或修 config 后重启. 这样保证
+        // "摄像头硬件暂时坏了" 不会把 ws / 音频 / 舵机 / 屏幕 / LLM / ASR 全部
+        // 拖死. log 给清晰报错让用户能定位.
+        //
+        // Fallback 成功后, 顺手把 config.camera_index 改写为实际跑成功的那个
+        // ("0"), save() 落地. 这样下次启动直接生效, 不需要再 fallback.
+        let configured_index = parse_camera_index(&config.camera_index);
+        let mut video_capture_opt: Option<VideoCapture> = None;
+        let mut camera_resolution = Arc::new(Mutex::new((0u32, 0u32)));
 
-        let mut video_capture = VideoCapture::new(
-            camera_index,
+        // 第一次尝试: 配置的 camera_index
+        let mut primary = VideoCapture::new(
+            configured_index.clone(),
             bus_tx.clone(),
             rotate_proto_to_local(config.rotation),
         );
-        let web = WebPreview::new(7777, bus_tx.subscribe(), video_capture.resolution_arc());
-        tokio::spawn(async move {
-            web.run().await;
-            loop {
-                tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        match primary.try_start_capture_frames_thread() {
+            Ok(()) => {
+                camera_resolution = primary.resolution_arc();
+                video_capture_opt = Some(primary);
             }
-        });
-        video_capture.start_capture_frames_thread();
+            Err(e) => {
+                log::warn!(
+                    "configured camera_index {configured_index:?} failed to open: {e:?}; falling back to Index(0)"
+                );
+                // drop 失败实例以释放任何已分配资源 (probe 可能已 open)
+                // primary 还没成功 start, 它的 Drop 是 no-op.
+                drop(primary);
+                // 第二次尝试: Index(0) fallback
+                let mut fallback_capture = VideoCapture::new(
+                    nokhwa::utils::CameraIndex::Index(0),
+                    bus_tx.clone(),
+                    rotate_proto_to_local(config.rotation),
+                );
+                match fallback_capture.try_start_capture_frames_thread() {
+                    Ok(()) => {
+                        camera_resolution = fallback_capture.resolution_arc();
+                        video_capture_opt = Some(fallback_capture);
+                        // 改写 config: 实际跑的是 Index(0). 直接 mutate 这
+                        // 里的 `config` (owned mutable). 后面把它 move 进
+                        // `Self { config: RwLock::new(config), .. }`.
+                        if config.camera_index != "0" {
+                            log::info!(
+                                "rewriting config.camera_index from {:?} to \"0\" (fallback succeeded)",
+                                config.camera_index
+                            );
+                            config.camera_index = "0".to_string();
+                            if let Err(save_err) = config.save() {
+                                log::warn!("failed to persist fallback camera_index: {save_err:?}");
+                            }
+                        }
+                    }
+                    Err(e2) => {
+                        // 双失败 — 服务照常起来, video 字段 None, 推一个
+                        // log warn 让用户定位. 不 bail! 这样 ws / audio / llm
+                        // 还能跑, 后续 picker 切摄像头时有 set_config 再尝试.
+                        log::error!(
+                            "camera rebuild failed: configured {configured_index:?} failed ({e}); fallback Index(0) also failed: {e2}. 服务将以 video=None 起来, 请修 config.toml 的 camera_index 或确保至少一台摄像头可用后重启"
+                        );
+                        drop(fallback_capture);
+                    }
+                }
+            }
+        }
 
-        // 摄像头分辨率缓存 - 直接持有 Arc<Mutex<(w, h)>> 让分辨率跨实例共享
-        // (旧实例 Drop 不影响新实例写分辨率, 反之亦然)
-        let camera_resolution = video_capture.resolution_arc();
-        // LCD 帧缓存
+        // web preview 仅在 video 实例可用时启动. 否则 web preview 没 frame 推.
+        if let Some(cap) = video_capture_opt.as_ref() {
+            let web = WebPreview::new(7777, bus_tx.subscribe(), cap.resolution_arc());
+            tokio::spawn(async move {
+                web.run().await;
+                loop {
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                }
+            });
+        } else {
+            log::warn!("skipping web preview server: video capture is None");
+        }
+
+        // LCD 帧缓存 - 即便摄像头不可用也建空缓存, 让 web preview fallback
+        // 路径或未来重连时不报 nil ref.
         let lcd_frame_cache = Arc::new(Mutex::new(None));
 
         // 语音
@@ -119,7 +180,9 @@ impl SharedState {
             config: RwLock::new(config),
             joint,
             lcd: Mutex::new(lcd),
-            video: Mutex::new(Some(Arc::new(video_capture))),
+            // video None 表示摄像头子系统不可用 (所有 fallback 都失败),
+            // 此时服务照常起来, ws / audio / llm / asr / tts 都还能用.
+            video: Mutex::new(video_capture_opt.map(Arc::new)),
             voice: Mutex::new(voice),
             llm: tokio::sync::Mutex::new(llm),
             // frame_tx: frame_tx.clone(),
@@ -330,14 +393,31 @@ impl SharedState {
             guard.take()
         };
 
-        // 2. 构造新实例. 即使中途失败, "旧实例已 take + 新实例尚未替换"
-        // 这个中间态会在 Err 返回时被调用方 (set_config fallback) 接手.
+        // 2. 构造新实例 + 同步打开 (try_start 内部). 失败时 **不替换
+        //    self.video**, 把旧实例还回去. 这是关键 — 之前版本就算打开失败
+        //    也把 "坏" 实例放进去, 现象是"切了摄像头, 服务推不出帧, 用户
+        //    也没法再切回" (video_changed=false, 永不触发 rebuild).
         let mut new_capture = VideoCapture::new(new_index, self.bus_tx.clone(), rotation);
-        new_capture.start_capture_frames_thread();
-        *self.video.lock().unwrap() = Some(Arc::new(new_capture));
+        if let Err(e) = new_capture.try_start_capture_frames_thread() {
+            // 打开失败, 把旧实例塞回去, 抛 Err 走 fallback (用旧 index
+            // 重试一次, 保证视频流不断 — 或者两次都失败就推 Error).
+            *self.video.lock().unwrap() = old;
+            return Err(e);
+        }
 
-        // 3. 替换成功后 Drop 旧实例 — Drop impl 会 join capture thread,
-        // 等当前帧抓完自然退出.
+        // 3. **同步等旧 capture frame 线程退出**, 让旧 nokhwa Camera 句柄彻底
+        //    让出 USB 独占权. 这是 audio 端的 `sleep(60ms)` 对应操作 — audio
+        //    等 cpal Stream 让出, video 等 nokhwa Camera 让出. 没这一步, 紧接着
+        //    drop(old) 之后的"将来 fallback / 切换"会撞 MSMF 独占产生
+        //    `Failed to fulfill requested format`. 80ms 是经验值, 大于 capture
+        //    frame 一帧 + nokhwa Drop 关闭 MSMF session 的时间.
+        if old.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
+
+        // 4. 替换成功 + 旧实例 Drop (Drop impl 仍会再次 join — 80ms 内大多数
+        //    情况已退出, 二次 join 立即返回).
+        *self.video.lock().unwrap() = Some(Arc::new(new_capture));
         drop(old);
         Ok(())
     }
@@ -679,58 +759,109 @@ impl SharedState {
         let old_cam = self.current_video_config();
         let audio_changed = cfg.speech_name != old_mic || cfg.output_device != old_spk;
         let video_changed = cfg.camera_index != old_cam;
+
+        // 顺序 (与旧版本不同, 摄像头**不能容忍失败的中间态**):
+        // 1. 先试跑 rebuild, 不落盘 cfg
+        // 2. 都 OK 后才 cfg.save() + 写 self.config + 推 Config
+        // 3. 任一失败 → 推 Error, 不持久化新 cfg
+
+        // audio rebuild — 失败仍继续走 video, 把 Err 攒到 audio_err
+        let audio_err = if audio_changed {
+            if let Err(e) = self.rebuild_voice() {
+                log::warn!("rebuild_voice failed: {e:?}");
+                Some(e)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // video rebuild — 失败时整个 set_config 失败 (bail), 不持久化 cfg
+        if video_changed {
+            if let Err(e) = self.rebuild_video() {
+                log::warn!("rebuild_video failed: {e:?}");
+                // fallback: 用内存里"用户提交前的旧 index" 再重建一次, 视频流不断
+                if !old_cam.is_empty() && old_cam != cfg.camera_index {
+                    match self.rebuild_with_override(&old_cam) {
+                        Ok(()) => {
+                            // fallback 成功: 视频流跑旧 index. 仍落盘新 cfg + 推
+                            // Config (用户意图已表达), 但**同时**推 Error 说明
+                            // 实际跑的是旧 index, 让客户端 overlay 提示.
+                            if let Some(ref e_audio) = audio_err {
+                                self.bus_tx
+                                    .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                        message: format!("voice rebuild failed: {e_audio}"),
+                                    }));
+                            }
+                            self.bus_tx
+                                .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                    message: format!(
+                                        "camera rebuild failed: {e}; switched back to '{old_cam}'"
+                                    ),
+                                }));
+                            cfg.save()?;
+                            *self.config.write().unwrap() = cfg.clone();
+                            self.bus_tx
+                                .publish(BusEvent::ServerEvent(ServerEvent::Config {
+                                    config: cfg.clone(),
+                                }));
+                            return Ok(());
+                        }
+                        Err(e2) => {
+                            log::error!("camera rebuild fallback also failed: {e2:?}");
+                            if let Some(ref e_audio) = audio_err {
+                                self.bus_tx
+                                    .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                        message: format!("voice rebuild failed: {e_audio}"),
+                                    }));
+                            }
+                            self.bus_tx
+                                .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                                    message: format!(
+                                        "camera rebuild failed: {e}; fallback also failed: {e2}"
+                                    ),
+                                }));
+                            // 不落盘 cfg, 抛 Err 上面 (set_config 调用方 ws.rs) 处理
+                            anyhow::bail!("camera rebuild failed and fallback failed: {e2}");
+                        }
+                    }
+                }
+                // 无旧 index 可回退 (首次启动): 推 Error, 不落盘
+                if let Some(ref e_audio) = audio_err {
+                    self.bus_tx
+                        .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                            message: format!("voice rebuild failed: {e_audio}"),
+                        }));
+                }
+                self.bus_tx
+                    .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                        message: format!("camera rebuild failed: {e}"),
+                    }));
+                anyhow::bail!("camera rebuild failed: {e}");
+            }
+        }
+
+        // 走到这里 audio + video rebuild 全部成功 → 落盘 + 推 Config
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
         self.bus_tx
             .publish(BusEvent::ServerEvent(ServerEvent::Config {
                 config: cfg.clone(),
             }));
-        if audio_changed {
-            if let Err(e) = self.rebuild_voice() {
-                log::warn!("rebuild_voice failed: {e:?}");
-                self.bus_tx
-                    .publish(BusEvent::ServerEvent(ServerEvent::Error {
-                        message: format!("voice rebuild failed: {e}"),
-                    }));
-            }
+        if let Some(ref e_audio) = audio_err {
+            self.bus_tx
+                .publish(BusEvent::ServerEvent(ServerEvent::Error {
+                    message: format!("voice rebuild failed: {e_audio}"),
+                }));
         }
         if video_changed {
-            if let Err(e) = self.rebuild_video() {
-                log::warn!("rebuild_video failed: {e:?}");
-                // fallback: 用内存里"用户提交前的旧 index"重建一次, 让视频流不断.
-                // 失败也要再尝试 — 第一次失败可能是新设备独占占用, 再 fallback 也可能再失败.
-                if !old_cam.is_empty() && old_cam != cfg.camera_index {
-                    if let Err(e2) = self.rebuild_with_override(&old_cam) {
-                        log::error!("camera rebuild fallback also failed: {e2:?}");
-                        self.bus_tx
-                            .publish(BusEvent::ServerEvent(ServerEvent::Error {
-                                message: format!(
-                                    "camera rebuild failed: {e}; fallback also failed: {e2}"
-                                ),
-                            }));
-                    } else {
-                        self.bus_tx
-                            .publish(BusEvent::ServerEvent(ServerEvent::Error {
-                                message: format!(
-                                    "camera rebuild failed: {e}; switched back to '{old_cam}'"
-                                ),
-                            }));
-                    }
-                } else {
-                    self.bus_tx
-                        .publish(BusEvent::ServerEvent(ServerEvent::Error {
-                            message: format!("camera rebuild failed: {e}"),
-                        }));
-                }
-            } else {
-                // 成功: 把新分辨率推给客户端.
-                let (w, h) = self.video().map(|v| v.resolution()).unwrap_or((0, 0));
-                self.bus_tx
-                    .publish(BusEvent::ServerEvent(ServerEvent::CameraResolution {
-                        width: w,
-                        height: h,
-                    }));
-            }
+            let (w, h) = self.video().map(|v| v.resolution()).unwrap_or((0, 0));
+            self.bus_tx
+                .publish(BusEvent::ServerEvent(ServerEvent::CameraResolution {
+                    width: w,
+                    height: h,
+                }));
         }
         Ok(())
     }
@@ -739,6 +870,7 @@ impl SharedState {
 impl SharedState {
     /// 用临时 index 重建一次 `VideoCapture`, 不动 `self.config`.
     /// `set_config` 的 fallback 路径专用 — 用旧 index 重建一次, 让视频流不断.
+    /// 失败时也把 self.video 还原 (move semantic), Err 上抛.
     fn rebuild_with_override(&self, cam_index: &str) -> anyhow::Result<()> {
         let new_index = parse_camera_index(cam_index);
         let rotation = rotate_proto_to_local(self.config.read().unwrap().rotation);
@@ -748,7 +880,14 @@ impl SharedState {
             guard.take()
         };
         let mut new_capture = VideoCapture::new(new_index, self.bus_tx.clone(), rotation);
-        new_capture.start_capture_frames_thread();
+        if let Err(e) = new_capture.try_start_capture_frames_thread() {
+            *self.video.lock().unwrap() = old;
+            return Err(e);
+        }
+        // 同样给旧 capture 线程 80ms 让出 USB 独占 — 见 rebuild_video 注释.
+        if old.is_some() {
+            std::thread::sleep(std::time::Duration::from_millis(80));
+        }
         *self.video.lock().unwrap() = Some(Arc::new(new_capture));
         drop(old);
         Ok(())

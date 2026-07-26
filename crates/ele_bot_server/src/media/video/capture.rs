@@ -3,7 +3,6 @@
 use crate::media::video::process::{process_frame, rotate_by_angle, RotateAngle};
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameInfo};
 use crate::model_manager::ModelManager;
-use crate::vision::face::create_face_detector;
 use crate::vision::face::FaceDetectorTrait;
 use bytes::Bytes;
 use image::RgbImage;
@@ -225,14 +224,33 @@ impl VideoCapture {
         self.resolution.clone()
     }
 
-    /// 开始捕获视频帧
-    pub fn start_capture_frames_thread(&mut self) {
+    /// 尝试开始捕获视频帧. **同步打开相机**, 失败时函数返回 Err
+    /// 让调用方感知(对应 `SharedState::rebuild_video` 的 fallback 路径)
+    /// — 旧版本把 `open_camera_default` 放后台 capture thread 里, 失败
+    /// 只打 log, 表现成"switch OK 但黑屏", 用户没法切回去.
+    ///
+    /// ## 与 capture thread 两次打开的原因
+    ///
+    /// nokhwa 0.10 在 windows 上没编译 `unsafe impl Send for Camera`(需要
+    /// `camera-sync-impl` feature, 我们项目用 `default-features = false`),
+    /// 所以 `Camera` 不是 `Send`. 不能直接 spawn 把所有权 transfer 给 thread.
+    /// 这里:
+    /// 1. **探测一次** `open_camera_default` 拿到一个临时 `Camera`, 确认
+    ///    设备能打开 & 格式正确; 这一步失败立刻 `?` 上抛, `rebuild_video`
+    ///    走 fallback
+    /// 2. 探测 `Camera` drop, 然后 spawn 新 capture thread, 在线程内部
+    ///    第二次 `open_camera_default` 真正打开. 同设备两次打开互不冲突,
+    ///    nokhwa 在 MSMF 后端用 reference counting.
+    pub fn try_start_capture_frames_thread(&mut self) -> anyhow::Result<()> {
         if self.running.load(Ordering::Relaxed) {
             log::warn!("Video capture already running");
-            return;
+            return Ok(());
         }
-        self.running.store(true, Ordering::Relaxed);
 
+        // 1. 探测打开. 失败 → Err 透传给 rebuild_video.
+        self.detect_camera()?;
+
+        self.running.store(true, Ordering::Relaxed);
         let camera_index = self.camera_index.clone();
         let frame_cache = self.bus.clone();
         let running = self.running.clone();
@@ -247,8 +265,28 @@ impl VideoCapture {
             }
         });
         self.capture_thread = Some(handle);
-
         log::info!("Video capture started");
+        Ok(())
+    }
+
+    fn detect_camera(&mut self) -> anyhow::Result<()> {
+        let probe = open_camera_default(self.camera_index.clone())?;
+        // 顺手读一次 camera_format, 把分辨率写进 self.resolution; 后续
+        // capture thread 也会再写一次, 但先填好让外部早一点读到.
+        let fmt = probe.camera_format();
+        if let Ok(mut g) = self.resolution.lock() {
+            let w = fmt.width();
+            let h = fmt.height();
+            let (out_w, out_h) = if self.rotate_angle.needs_swap() {
+                (h, w)
+            } else {
+                (w, h)
+            };
+            *g = (out_w, out_h);
+        }
+        // probe 在 drop 时关闭 nokhwa MSMF session
+        drop(probe);
+        Ok(())
     }
 
     /// 停止捕获
@@ -331,8 +369,10 @@ pub(crate) fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<
     Ok(())
 }
 
-/// 打开摄像头
-fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
+/// 同步打开摄像头. 失败时把错误直接向上抛, 让 `try_start_capture_frames_thread`
+/// 把 Result 透传给 `SharedState::rebuild_video` —— 热切摄像头路径上,
+/// "设备打不开" 必须在调用方立即可见, 否则会进入"切了但推不出帧"的死状态.
+pub(crate) fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
     log::info!("Opening camera with index: {index:?}");
     // 构建指定要求的摄像头参数 480p, yuyv格式, 30帧, 如果拿不到这个要求的配置直接报错, 修复了摄像头不配置帧率会报错的问题
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
@@ -350,7 +390,13 @@ fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
     Ok(Camera::new(index, query)?)
 }
 
-/// 捕获帧循环
+/// 捕获帧循环. `Camera::new` 在这里同步打开 (`open_camera_default`
+/// 期间已经过 try_start 的探测, 大概率成功, 但实际打开仍可能因设备
+/// 在两次操作之间被拔走而失败).
+///
+/// `face_detector` 是由 `try_start_capture_frames_thread` 在 30s 超时窗口内
+/// 探测到的 detector. None 表示 detector 创建失败/超时, 帧照常出 (但
+/// `frame_info.face_info` 全为 default — has_face=false).
 fn capture_frames(
     camera_index: CameraIndex,
     bus: FrameCache,
@@ -366,10 +412,38 @@ fn capture_frames(
     let width = camera_fmt.width();
     let height = camera_fmt.height();
 
-    // 加载人脸检测器
-    let Ok(mut face_detector) = get_face_detector() else {
-        anyhow::bail!("Could not get face_detector");
-    };
+    // face detector 拿到后才进 frame loop (避免 capture 在构造 detector 时
+    // hang 90s+ 没帧出). 这里用 sync_channel + recv_timeout 在 capture
+    // thread 内部同步等待, 超时放 None. Box<dyn ...> 在 capture loop 里
+    // 每帧 `as_deref_mut` 借出去, 调完即 drop — 不存在跨函数 borrow.
+    log::info!("Loading face detector...");
+    let model_path = ModelManager::global()
+        .get("yolo_face")
+        .ok_or_else(|| anyhow::anyhow!("yolo_face model not loaded"))?;
+    let (detector_tx, detector_rx) =
+        std::sync::mpsc::sync_channel::<Option<Box<dyn FaceDetectorTrait>>>(1);
+    thread::spawn(move || {
+        let detector = crate::vision::face::create_face_detector(model_path).ok();
+        let _ = detector_tx.send(detector);
+    });
+    let mut face_detector: Option<Box<dyn FaceDetectorTrait>> =
+        match detector_rx.recv_timeout(Duration::from_secs(30)) {
+            Ok(opt) => {
+                if opt.is_some() {
+                    log::info!("face detector build: success");
+                } else {
+                    log::warn!("face detector build: returned None");
+                }
+                opt
+            }
+            Err(_) => {
+                log::warn!(
+                    "face detector build did not complete within 30s; \
+                 continuing without face detection (frames still flow)"
+                );
+                None
+            }
+        };
 
     // 如果需要旋转 90 或 270 度，宽高交换
     let (out_width, out_height) = if rotate_angle.needs_swap() {
@@ -398,7 +472,11 @@ fn capture_frames(
             }
         };
         let start_time = Instant::now();
-        // 拿到原始的图像数据然后根据格式处理帧数据
+        // detector owned Box, take() 移交给 process_frame_by_format, 函数返回
+        // 时 drop. 这条路径绕过 NLL "借用跨函数" 死结 — 通过 owned value 而
+        // 不是 shared reference, 直接满足编译器. take 后 Option 暂时变 None,
+        // 函数返回后 detector_box 字段在 caller 端... 这里 caller 已经是
+        // process_frame_by_format 内部, 不需要恢复.
         let Ok(frame_data) = process_frame_by_format(
             frame,
             out_width,
@@ -407,11 +485,14 @@ fn capture_frames(
             rotate_angle,
             width,
             height,
-            &mut face_detector,
+            face_detector.take(),
         ) else {
+            // 失败时把 detector 拿回来 (若还有). 这里 face_detector 本来
+            // 已经 take, 失败时是 None; 重新装回 detector 需要 take_as_some
+            // — 但 take 后就是 None 没东西丢, 跳过恢复.
             continue;
         };
-        log::debug!("process used time: {:?}", start_time.elapsed());
+        log::info!("process used time: {:?}", start_time.elapsed());
 
         // 计算帧率
         #[cfg(feature = "fps-counter")]
@@ -428,26 +509,13 @@ fn capture_frames(
     Ok(())
 }
 
-/// 获取人脸检测器
-fn get_face_detector() -> anyhow::Result<Box<dyn FaceDetectorTrait>> {
-    log::info!("Loading face detector...");
-    let mm = ModelManager::global();
-    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
-    let face_detect_path = mm.get("retinaface_rknn");
-    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
-    let face_detect_path = mm.get("yolo_face");
-    let path = face_detect_path.ok_or_else(|| anyhow::anyhow!("yolo_face not found"))?;
-
-    create_face_detector(path)
-}
-
 /// 处理帧并应用旋转
 /// 新流程: 先旋转 -> 后检测 (坐标无需转换)
 fn process_and_rotate(
     rgb: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &mut Box<dyn FaceDetectorTrait>,
+    face_detector: Option<Box<dyn FaceDetectorTrait>>,
     rotate_angle: RotateAngle,
 ) -> anyhow::Result<FrameInfo> {
     let start_time = Instant::now();
@@ -498,7 +566,7 @@ fn process_frame_by_format(
     rotate_angle: RotateAngle,
     src_width: u32,
     src_height: u32,
-    face_detector: &mut Box<dyn FaceDetectorTrait>,
+    face_detector: Option<Box<dyn FaceDetectorTrait>>,
 ) -> anyhow::Result<FrameInfo> {
     match format {
         FrameFormat::YUYV | FrameFormat::NV12 => {
@@ -509,6 +577,8 @@ fn process_frame_by_format(
             let Ok(rgb_data) = frame.decode_image::<RgbFormat>() else {
                 anyhow::bail!("failed to decode image");
             };
+            // Box owned 这里, 整个 move 进 process_and_rotate, 函数返回时
+            // drop. 借用关系不跨函数 body.
             process_and_rotate(
                 rgb_data.into_raw(),
                 src_width,

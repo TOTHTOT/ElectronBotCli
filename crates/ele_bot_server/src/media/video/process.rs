@@ -1,6 +1,6 @@
 //! 视频模块 - 图像处理
 
-use crate::vision::face::{draw_hollow_rect_static, FaceDetectorTrait};
+use crate::vision::face::{draw_hollow_rect_static, FaceDetectionResult, FaceDetectorTrait};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 
@@ -157,14 +157,27 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 }
 
 /// 处理视频帧, 添加人脸检测和框
+///
+/// `face_detector` 为 `None` 时跳过检测 (face_info 为 `FaceDetectionResult::default()`,
+/// `has_face=false`). 这是 ort 2.0 RC 创建 session hang 的 fallback —
+/// detector 创建超时时 camera thread 不等它, 让帧照常出.
+///
+/// owned `Option<Box<dyn Trait>>` 而非 `Option<&mut dyn Trait>`: capture loop
+/// `take()` 把所有权 move 给本函数, 内部 `as_deref_mut()` 借出短引用, 函数
+/// 返回后 Box drop, 借用回到 caller 之前已经释放. 这条路径绕过 NLL "借用
+/// 跨函数" 反复出现的死结.
 pub fn process_frame(
     mut rgb_data: Vec<u8>,
     width: u32,
     height: u32,
-    face_detector: &mut Box<dyn FaceDetectorTrait>,
+    mut face_detector: Option<Box<dyn FaceDetectorTrait>>,
 ) -> anyhow::Result<FrameInfo> {
     // 尝试检测人脸
-    let result = face_detector.detect(rgb_data.clone(), width, height)?;
+    let result = if let Some(detector) = face_detector.as_deref_mut() {
+        detector.detect(rgb_data.clone(), width, height)?
+    } else {
+        FaceDetectionResult::default()
+    };
     if result.has_face {
         // 绘制人脸框
         draw_face_box(

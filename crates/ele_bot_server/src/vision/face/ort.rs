@@ -17,14 +17,30 @@ impl OrtFaceDetector {
         if cfg!(target_os = "macos") {
             PathBuf::from("/opt/homebrew/opt/onnxruntime/lib/libonnxruntime.dylib")
         } else if cfg!(target_os = "windows") {
+            // 优先 exe 同目录, 再回退到 PATH 里的 onnxruntime.dll (System32 等).
+            // LoadLibraryW 默认搜索顺序: exe dir > cwd > System32 > PATH.
+            // 我们把 dll 拷到 release/ 之后这条路径命中; 若用户在 PATH 里配了
+            // 系统 onnxruntime.dll, 直接用 System32 路径也可.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let cand = dir.join("onnxruntime.dll");
+                    if cand.exists() {
+                        return cand;
+                    }
+                }
+            }
             PathBuf::from("onnxruntime.dll")
         } else {
             PathBuf::from("/usr/lib/libonnxruntime.so")
         }
     }
     pub fn new(model_path: PathBuf) -> anyhow::Result<Self> {
-        log::info!("start build session");
+        log::info!(
+            "init ONNX runtime from {:?}",
+            Self::get_onnx_running_time_path()
+        );
         ort::init_from(Self::get_onnx_running_time_path())?;
+        log::info!("start build session");
         let session = ort::session::Session::builder()?.commit_from_file(model_path)?;
         log::info!("build session finished");
         Ok(Self {
