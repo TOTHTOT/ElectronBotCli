@@ -270,6 +270,7 @@ impl VideoCapture {
     }
 
     fn detect_camera(&mut self) -> anyhow::Result<()> {
+        log::info!("Detecting camera, with index: {:?}", self.camera_index);
         let probe = open_camera_default(self.camera_index.clone())?;
         // 顺手读一次 camera_format, 把分辨率写进 self.resolution; 后续
         // capture thread 也会再写一次, 但先填好让外部早一点读到.
@@ -373,7 +374,7 @@ pub(crate) fn ensure_camera_ready(device_index: &CameraIndex) -> anyhow::Result<
 /// 把 Result 透传给 `SharedState::rebuild_video` —— 热切摄像头路径上,
 /// "设备打不开" 必须在调用方立即可见, 否则会进入"切了但推不出帧"的死状态.
 pub(crate) fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> {
-    log::info!("Opening camera with index: {index:?}");
+    log::debug!("Opening camera with index: {index:?}");
     // 构建指定要求的摄像头参数 480p, yuyv格式, 30帧, 如果拿不到这个要求的配置直接报错, 修复了摄像头不配置帧率会报错的问题
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     ensure_camera_ready(&index)?;
@@ -385,7 +386,7 @@ pub(crate) fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> 
         FrameFormat::YUYV,
         30,
     ));
-    log::info!("Supported cameras: {:?}", VideoCapture::list_cameras());
+    log::debug!("Supported cameras: {:?}", VideoCapture::list_cameras());
     let query = RequestedFormat::new::<RgbFormat>(format_type);
     Ok(Camera::new(index, query)?)
 }
@@ -404,6 +405,7 @@ fn capture_frames(
     resolution: Arc<Mutex<(u32, u32)>>,
     rotate_angle: RotateAngle,
 ) -> anyhow::Result<()> {
+    log::info!("Starting capture thread");
     let mut camera = open_camera_default(camera_index)?;
 
     // 获取摄像头的信息
@@ -427,7 +429,7 @@ fn capture_frames(
         let _ = detector_tx.send(detector);
     });
     let mut face_detector: Option<Box<dyn FaceDetectorTrait>> =
-        match detector_rx.recv_timeout(Duration::from_secs(30)) {
+        match detector_rx.recv_timeout(Duration::from_secs(5)) {
             Ok(opt) => {
                 if opt.is_some() {
                     log::info!("face detector build: success");
@@ -438,7 +440,7 @@ fn capture_frames(
             }
             Err(_) => {
                 log::warn!(
-                    "face detector build did not complete within 30s; \
+                    "face detector build did not complete within 5s; \
                  continuing without face detection (frames still flow)"
                 );
                 None
@@ -492,7 +494,7 @@ fn capture_frames(
             // — 但 take 后就是 None 没东西丢, 跳过恢复.
             continue;
         };
-        log::info!("process used time: {:?}", start_time.elapsed());
+        log::debug!("process used time: {:?}", start_time.elapsed());
 
         // 计算帧率
         #[cfg(feature = "fps-counter")]

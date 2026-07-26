@@ -12,11 +12,13 @@ use crate::media::voice::VoiceManager;
 use crate::model_manager::ModelManager;
 use crate::robot::{CommState, Joint, JointConfig, Lcd};
 use crate::web::WebPreview;
+use anyhow::Error;
 use boteyes::Mood;
 use ele_bot_proto::{
     AppConfig, FacePosition, JointState, LlmResponse as ProtoLlmResponse, Mood as ProtoMood,
     ServerEvent,
 };
+use nokhwa::utils::CameraIndex;
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio::sync::broadcast;
@@ -107,41 +109,15 @@ impl SharedState {
                 );
                 // drop 失败实例以释放任何已分配资源 (probe 可能已 open)
                 // primary 还没成功 start, 它的 Drop 是 no-op.
-                drop(primary);
-                // 第二次尝试: Index(0) fallback
-                let mut fallback_capture = VideoCapture::new(
-                    nokhwa::utils::CameraIndex::Index(0),
-                    bus_tx.clone(),
-                    rotate_proto_to_local(config.rotation),
+                Self::try_start_capture_frames_thread_error_handle(
+                    &mut config,
+                    &bus_tx,
+                    configured_index,
+                    &mut video_capture_opt,
+                    &mut camera_resolution,
+                    primary,
+                    e,
                 );
-                match fallback_capture.try_start_capture_frames_thread() {
-                    Ok(()) => {
-                        camera_resolution = fallback_capture.resolution_arc();
-                        video_capture_opt = Some(fallback_capture);
-                        // 改写 config: 实际跑的是 Index(0). 直接 mutate 这
-                        // 里的 `config` (owned mutable). 后面把它 move 进
-                        // `Self { config: RwLock::new(config), .. }`.
-                        if config.camera_index != "0" {
-                            log::info!(
-                                "rewriting config.camera_index from {:?} to \"0\" (fallback succeeded)",
-                                config.camera_index
-                            );
-                            config.camera_index = "0".to_string();
-                            if let Err(save_err) = config.save() {
-                                log::warn!("failed to persist fallback camera_index: {save_err:?}");
-                            }
-                        }
-                    }
-                    Err(e2) => {
-                        // 双失败 — 服务照常起来, video 字段 None, 推一个
-                        // log warn 让用户定位. 不 bail! 这样 ws / audio / llm
-                        // 还能跑, 后续 picker 切摄像头时有 set_config 再尝试.
-                        log::error!(
-                            "camera rebuild failed: configured {configured_index:?} failed ({e}); fallback Index(0) also failed: {e2}. 服务将以 video=None 起来, 请修 config.toml 的 camera_index 或确保至少一台摄像头可用后重启"
-                        );
-                        drop(fallback_capture);
-                    }
-                }
             }
         }
 
@@ -206,6 +182,52 @@ impl SharedState {
         state.spawn_face_tracking_task().await;
 
         Ok(state)
+    }
+
+    fn try_start_capture_frames_thread_error_handle(
+        config: &mut AppConfig,
+        bus_tx: &EventBus,
+        configured_index: CameraIndex,
+        video_capture_opt: &mut Option<VideoCapture>,
+        camera_resolution: &mut Arc<Mutex<(u32, u32)>>,
+        primary: VideoCapture,
+        e: Error,
+    ) {
+        drop(primary);
+        // 第二次尝试: Index(0) fallback
+        let mut fallback_capture = VideoCapture::new(
+            CameraIndex::Index(0),
+            bus_tx.clone(),
+            rotate_proto_to_local(config.rotation),
+        );
+        match fallback_capture.try_start_capture_frames_thread() {
+            Ok(()) => {
+                *camera_resolution = fallback_capture.resolution_arc();
+                *video_capture_opt = Some(fallback_capture);
+                // 改写 config: 实际跑的是 Index(0). 直接 mutate 这
+                // 里的 `config` (owned mutable). 后面把它 move 进
+                // `Self { config: RwLock::new(config), .. }`.
+                if config.camera_index != "0" {
+                    log::info!(
+                        "rewriting config.camera_index from {:?} to \"0\" (fallback succeeded)",
+                        config.camera_index
+                    );
+                    config.camera_index = "0".to_string();
+                    if let Err(save_err) = config.save() {
+                        log::warn!("failed to persist fallback camera_index: {save_err:?}");
+                    }
+                }
+            }
+            Err(e2) => {
+                // 双失败 — 服务照常起来, video 字段 None, 推一个
+                // log warn 让用户定位. 不 bail! 这样 ws / audio / llm
+                // 还能跑, 后续 picker 切摄像头时有 set_config 再尝试.
+                log::error!(
+                            "camera rebuild failed: configured {configured_index:?} failed ({e}); fallback Index(0) also failed: {e2}. 服务将以 video=None 起来, 请修 config.toml 的 camera_index 或确保至少一台摄像头可用后重启"
+                        );
+                drop(fallback_capture);
+            }
+        }
     }
 
     fn init_llm(config: &AppConfig) -> anyhow::Result<LlmManager> {
@@ -382,10 +404,10 @@ impl SharedState {
     ///     }));
     /// }
     /// ```
-    pub fn rebuild_video(&self) -> anyhow::Result<()> {
-        let config = self.config.read().unwrap().clone();
+    pub fn rebuild_video(&self, config: &AppConfig) -> anyhow::Result<()> {
         let new_index = parse_camera_index(&config.camera_index);
         let rotation = rotate_proto_to_local(config.rotation);
+        log::debug!("rebuild video, read config: {config:?}, new_index: {new_index:?}, rotation: {rotation:?}");
 
         // 1. 移出旧实例. 旧 Arc 仍在本函数栈, 所以 capture thread 还在跑.
         let old = {
@@ -779,7 +801,7 @@ impl SharedState {
 
         // video rebuild — 失败时整个 set_config 失败 (bail), 不持久化 cfg
         if video_changed {
-            if let Err(e) = self.rebuild_video() {
+            if let Err(e) = self.rebuild_video(&cfg) {
                 log::warn!("rebuild_video failed: {e:?}");
                 // fallback: 用内存里"用户提交前的旧 index" 再重建一次, 视频流不断
                 if !old_cam.is_empty() && old_cam != cfg.camera_index {
