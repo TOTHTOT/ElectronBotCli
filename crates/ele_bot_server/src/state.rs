@@ -626,9 +626,14 @@ impl SharedState {
     /// ```
     async fn spawn_face_tracking_task(self: &Arc<Self>) {
         let state = self.clone();
+        // subscribe **必须**在循环外. 在循环内订阅会让 broadcast channel
+        // 内部 receiver-count 反复 +1/-1, 在高频 CameraVideo 流下长期 leak
+        // ~0.1 MB/s. 把 subscribe 提到 loop 外一次, 让 tokio::broadcast 内部
+        // count 保持长生命周期计数, 没有 per-frame 计数 churn.
+        let mut rx = state.bus_tx.subscribe();
         tokio::spawn(async move {
             loop {
-                match state.bus_tx.subscribe().recv().await {
+                match rx.recv().await {
                     Ok(frame_info) => {
                         if let BusEvent::CameraVideo(video) = frame_info {
                             let position = FacePosition {
