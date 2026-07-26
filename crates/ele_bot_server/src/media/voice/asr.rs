@@ -203,7 +203,27 @@ fn process_audio_chunk(
     volume.store(new_value, Ordering::Relaxed);
 
     // 音量通过 EventBus 广播给 WS 客户端. publish 永不 panic, 无订阅者静默.
-    bus.publish(crate::event_bus::BusEvent::Volume(new_value));
+    //
+    // ⚠ 节流: cpal 16kHz/512 buffer ≈ 每秒 30 个 chunk, 每个 chunk 都 publish
+    // 会让 broadcast channel 内部 ring buffer 写 / Lagged / 覆写高频循环. 之前
+    // 测试 0.1 MB/s 内存增长跟这条 correlate 很强 — 把 publish 限频到 ~10 Hz,
+    // UI 视觉上音量条仍平滑 (frame 之间 0.95 指数衰减, 视觉连续).
+    //
+    // 抑制规则: 衰减尾巴 (new_value = 0) 不发; 峰值 > 当前值立即发; 余下
+    // 至少间隔 100ms 一次. 这是 audio-level 事件的常见采样.
+    static LAST_PUBLISH_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let last_ms = LAST_PUBLISH_MS.load(Ordering::Relaxed);
+    let should_publish = new_value > 0                            // 衰减到底不发
+        && (now_ms.saturating_sub(last_ms) >= 100                  // 节流 100ms
+            || new_value > current);                                 // 或者新峰值上升
+    if should_publish {
+        bus.publish(crate::event_bus::BusEvent::Volume(new_value));
+        LAST_PUBLISH_MS.store(now_ms, Ordering::Relaxed);
+    }
 
     // 音频数据
     let mono: Vec<f32> = if channels == 2 {
