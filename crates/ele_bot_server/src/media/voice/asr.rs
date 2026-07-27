@@ -1,3 +1,24 @@
+//! ASR 模块 - 麦克风输入流 + VAD + SenseVoice 离线识别
+//!
+//! 数据流:
+//! ```text
+//! cpal stream ──► process_audio_chunk() ──► audio_tx ──► recognition_loop()
+//!                              │                                │
+//!                              ▼                                ▼
+//!                      bus.publish(Volume)        bus.publish(AsrText)
+//!                              │                                │
+//!                              ▼                                ▼
+//!                  WS / WebPreview 客户端             LLM tokio task
+//! ```
+//!
+//! `process_audio_chunk` 由 cpal callback 线程调用 (~30 Hz, 每 32 ms 一帧).
+//! `recognition_loop` 在 std thread 跑, 通过 `audio_rx.recv_timeout(50ms)` 拉
+//! 数据 + 检测 VAD, 触发时给 `OfflineRecognizer` 喂 buffer 解码, 命中后
+//! `bus.publish(AsrText)` 让 LLM task 收到.
+//!
+//! `running` 标志是 `rebuild_voice` 的退出通道 — `VoiceManager` Drop 时
+//! `store(false)`, 本 loop 在下次 `recv_timeout` 唤醒时立刻 return Ok, 不
+//! 阻塞 cpal backend 停回调的 race.
 #![allow(dead_code)]
 
 use crate::media::voice::VAD_WINDOW_SIZE;
@@ -9,16 +30,39 @@ use sherpa_onnx::{
 };
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-const SAMPLE_RATE: usize = 16000;
+// ── 采样 / 缓冲 / VAD 常量 ────────────────────────────────────────────────
+const SAMPLE_RATE: usize = 16_000;
+/// 说话触发前的静音缓冲, 用作识别 buffer 的 pre-context.
 const PRE_ROLL_MS: usize = 500;
 const PRE_ROLL_SAMPLES: usize = SAMPLE_RATE / 1000 * PRE_ROLL_MS;
+/// 累计 ~120 帧静音 (~4 秒) 才把一截语音当成 "end of speech" 提交给 recognizer.
 const SILENCE_THRESHOLD: usize = 120;
+/// 语音 buffer 小于这个 (0.5s) 不提交, 防止噪音抖动误触发.
 const MIN_AUDIO_LEN: usize = SAMPLE_RATE / 2;
+/// 说话时 buffer 上限 (30s), 防止过长录音占用 recognizer 内存.
+const MAX_SPEECH_SECONDS: usize = 30;
+const MAX_SPEECH_SAMPLES: usize = SAMPLE_RATE * MAX_SPEECH_SECONDS;
+/// 静音时 buffer 保留窗口 (1.5s), 给下一段说话一个 pre-context.
+const BUFFER_WINDOW_MS: usize = 1_500;
+const BUFFER_WINDOW_SAMPLES: usize = SAMPLE_RATE / 1000 * BUFFER_WINDOW_MS;
+
+// ── 音量 publish 节流 ──────────────────────────────────────────────────────
+/// `process_audio_chunk` 每次 cpal callback (~30 Hz) 都想 publish `Volume`,
+/// 限频到 ~10 Hz 让 broadcast channel 内部 ring buffer / receiver-count 不
+/// 在高频 churn. 100ms 是 UI 感知阈值的下限.
+const VOLUME_PUBLISH_MIN_INTERVAL_MS: u64 = 100;
+
+/// 共享节流状态. cpal 进程全局只有一个 input stream, 单一 callback 线程,
+/// 单一 `LAST_VOLUME_PUBLISH_MS` 足够; 多 stream 同时存在的扩展场景下会
+/// 竞争写入 (relaxed 顺序), 但都把限频拉向保守侧, 不会更糟.
+static LAST_VOLUME_PUBLISH_MS: AtomicU64 = AtomicU64::new(0);
+
+// ── 模型初始化 ──────────────────────────────────────────────────────────────
 
 /// Initialize `SenseVoice` recognizer using sherpa-onnx
 fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<OfflineRecognizer> {
@@ -72,94 +116,98 @@ fn recognition_loop(
     bus: crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
-    let mut buffer: Vec<f32> = Vec::new();
+    let mut buffer: VecDeque<f32> = VecDeque::with_capacity(BUFFER_WINDOW_SAMPLES);
     let mut speaking = false;
     let mut silence_count = 0;
-    let mut pre_roll: VecDeque<f32> = VecDeque::with_capacity(PRE_ROLL_SAMPLES);
 
     loop {
         let samples = match audio_rx.recv_timeout(Duration::from_millis(50)) {
             Ok(s) => s,
             Err(RecvTimeoutError::Timeout) => {
-                // 50ms 没数据, 检查取消信号. cpal Stream 已经 Drop
-                // 时 audio_rx 也会 Disconnected, 走下面分支.
                 if !running.load(Ordering::Relaxed) {
                     log::info!("ASR receive exit flag");
                     return Ok(());
                 }
                 continue;
             }
-            Err(RecvTimeoutError::Disconnected) => {
-                // audio_tx 所有克隆都已 drop (旧 cpal Stream 被替换).
-                return Ok(());
-            }
+            Err(RecvTimeoutError::Disconnected) => return Ok(()),
         };
 
-        // Sliding window: keep latest 500ms. 用 `len + samples.len() > target`
-        // 一次性 pop 到位, 避免 while >= + extend 后超容量 (旧逻辑让 pre_roll
-        // 涨到 9599, 比 8000 容量上限多留 1599 样本 ≈ 100ms).
-        while pre_roll.len() + samples.len() > PRE_ROLL_SAMPLES {
-            pre_roll.pop_front();
-        }
-        pre_roll.extend(&samples);
-
-        // VAD detection: 喂当轮新收的 samples (而非 pre_roll 滑动子集),
-        // 让 VAD 内部状态跟 cpal 推送的 chunk 对齐.
-        // 注: cpal 配置 channels=2, process_audio_chunk 里立体声 downmix 到单声道
-        // (每 2 样本 → 1), 所以 samples.len() 通常 = 256 (32ms). 不能用
-        // samples.len() >= 512 守卫, 否则 VAD 永远不会被喂数据.
-        let feed_n = samples.len().min(VAD_WINDOW_SIZE as usize);
-        vad.accept_waveform(&samples[..feed_n]);
+        vad.accept_waveform(&samples);
         let is_speech = vad.detected();
+
+        let max_len = if speaking {
+            MAX_SPEECH_SAMPLES
+        } else {
+            BUFFER_WINDOW_SAMPLES
+        };
+        while buffer.len() + samples.len() > max_len {
+            buffer.pop_front();
+        }
+        buffer.extend(samples.iter().copied());
 
         if is_speech {
             if !speaking {
                 log::info!(">>> Speech start");
                 speaking = true;
-                // buffer 已在 speaking=false 期间持续装 samples, 这里不再
-                // extend(&pre_roll), 否则 wav 末尾 100ms 会被装两遍, SenseVoice
-                // 把"体验"识别为"体验体验".
             }
-            buffer.extend(&samples);
             silence_count = 0;
         } else if speaking {
             silence_count += 1;
-            buffer.extend(&samples);
-
             if silence_count > SILENCE_THRESHOLD {
-                log::info!(
-                    "<<< Speech end, {:?}s",
-                    buffer.len() as f32 / SAMPLE_RATE as f32
+                finalize_speech(
+                    &mut buffer,
+                    &mut speaking,
+                    &mut silence_count,
+                    vad,
+                    recognizer,
+                    &bus,
                 );
-
-                if buffer.len() > MIN_AUDIO_LEN {
-                    // Use sherpa-onnx recognizer - create stream and feed audio
-                    let stream = recognizer.create_stream();
-                    stream.accept_waveform(SAMPLE_RATE as i32, &buffer);
-                    recognizer.decode(&stream);
-
-                    if let Some(result) = stream.get_result() {
-                        let text = result.text.trim().to_string();
-                        if !text.is_empty() {
-                            log::info!("ASR: 【{text}】");
-                            // 通过事件总线流向 LLM. publish 永不 panic, 无订阅者时静默丢弃.
-                            bus.publish(crate::event_bus::BusEvent::AsrText(text));
-                        }
-                    }
-                }
-
-                buffer.clear();
-                speaking = false;
-                silence_count = 0;
-                vad.clear();
             }
-        } else {
-            // speaking=false 且 is_speech=false (静音段): 仍 extend samples,
-            // 让 buffer 累积 wav 头静音段. speech_start 时 buffer 已包含 wav
-            // 起点, SenseVoice 看到完整时间线.
-            buffer.extend(&samples);
         }
     }
+}
+
+/// 一段语音识别结束: 把 buffer 给 recognizer, 命中结果 publish, 然后
+/// 截短 buffer 到 BUFFER_WINDOW_SAMPLES (作为下一次说话的 pre-context),
+/// 重置 speaking / silence_count / vad.clear. 解耦出独立函数让主 loop
+/// 扁平, 调试也方便.
+fn finalize_speech(
+    buffer: &mut VecDeque<f32>,
+    speaking: &mut bool,
+    silence_count: &mut usize,
+    vad: &mut VoiceActivityDetector,
+    recognizer: &mut OfflineRecognizer,
+    bus: &crate::event_bus::EventBus,
+) {
+    log::info!(
+        "<<< Speech end, {:.2}s",
+        buffer.len() as f32 / SAMPLE_RATE as f32
+    );
+
+    if buffer.len() > MIN_AUDIO_LEN {
+        let audio: Vec<f32> = buffer.iter().copied().collect();
+        let stream = recognizer.create_stream();
+        stream.accept_waveform(SAMPLE_RATE as i32, &audio);
+        recognizer.decode(&stream);
+
+        if let Some(result) = stream.get_result() {
+            let text = result.text.trim().to_string();
+            if !text.is_empty() {
+                log::info!("ASR: 【{text}】");
+                bus.publish(crate::event_bus::BusEvent::AsrText(text));
+            }
+        }
+    }
+
+    // 保留最近 BUFFER_WINDOW_SAMPLES 个采样作为下一次说话的 pre-context.
+    while buffer.len() > BUFFER_WINDOW_SAMPLES {
+        buffer.pop_front();
+    }
+
+    *speaking = false;
+    *silence_count = 0;
+    vad.clear();
 }
 
 /// 把 cpal f32 峰值样本 (0.0..=1.0) 映射成 0..=100 的归一化音量.
@@ -178,8 +226,8 @@ fn peak_to_volume(peak: f32) -> i32 {
 /// 计算一帧音频的峰值音量并推进音量条 (attack/decay), 然后 downmix
 /// 到单声道推给识别线程.
 ///
-/// 音量条更新: 新峰值立即拉升, 否则按 0.95/帧 指数衰减
-/// (半衰期约 0.4s). 多声道按左右声道算术均值降混; 单声道直通.
+/// 音量条更新: 新峰值立即拉升, 否则按 0.95/帧 指数衰减 (半衰期约 0.4s).
+/// 多声道按左右声道算术均值降混; 单声道直通.
 /// 函数不获取 `volume` / `audio_tx` 的所有权, 由调用方持有 (通常是
 /// cpal 输入流闭包, 闭包负责把变量 move 进来).
 fn process_audio_chunk(
@@ -192,7 +240,6 @@ fn process_audio_chunk(
     let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
     let peak_value = peak_to_volume(peak);
     let current = volume.load(Ordering::Relaxed);
-    // 实时音量大小
     let new_value = if peak_value > current {
         peak_value
     } else if current > 0 {
@@ -202,27 +249,15 @@ fn process_audio_chunk(
     };
     volume.store(new_value, Ordering::Relaxed);
 
-    // 音量通过 EventBus 广播给 WS 客户端. publish 永不 panic, 无订阅者静默.
-    //
-    // ⚠ 节流: cpal 16kHz/512 buffer ≈ 每秒 30 个 chunk, 每个 chunk 都 publish
-    // 会让 broadcast channel 内部 ring buffer 写 / Lagged / 覆写高频循环. 之前
-    // 测试 0.1 MB/s 内存增长跟这条 correlate 很强 — 把 publish 限频到 ~10 Hz,
-    // UI 视觉上音量条仍平滑 (frame 之间 0.95 指数衰减, 视觉连续).
-    //
-    // 抑制规则: 衰减尾巴 (new_value = 0) 不发; 峰值 > 当前值立即发; 余下
-    // 至少间隔 100ms 一次. 这是 audio-level 事件的常见采样.
-    static LAST_PUBLISH_MS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
+    // 音量通过 EventBus 广播给 WS 客户端. 节流见模块顶部常量 + helper.
+    let now_ms = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0);
-    let last_ms = LAST_PUBLISH_MS.load(Ordering::Relaxed);
-    let should_publish = new_value > 0                            // 衰减到底不发
-        && (now_ms.saturating_sub(last_ms) >= 100                  // 节流 100ms
-            || new_value > current);                                 // 或者新峰值上升
-    if should_publish {
+    let last_ms = LAST_VOLUME_PUBLISH_MS.load(Ordering::Relaxed);
+    if should_publish_volume(current, new_value, last_ms, now_ms) {
         bus.publish(crate::event_bus::BusEvent::Volume(new_value));
-        LAST_PUBLISH_MS.store(now_ms, Ordering::Relaxed);
+        LAST_VOLUME_PUBLISH_MS.store(now_ms, Ordering::Relaxed);
     }
 
     // 音频数据
@@ -232,6 +267,24 @@ fn process_audio_chunk(
         data.to_vec()
     };
     let _ = audio_tx.send(mono);
+}
+
+/// 音量 publish 节流决策. 抽出函数后单测可以直接覆盖各种边角.
+///
+/// 抑制规则:
+/// - `new_value == 0` 不发 (衰减到底, 没新信息)
+/// - `new_value > current` 立即发 (峰值上升要立刻反馈)
+/// - 余下路径间隔 ≥ [`VOLUME_PUBLISH_MIN_INTERVAL_MS`] ms
+///
+/// `last_ms` 是上次 publish 的 unix epoch 毫秒; 第一次调用传 0.
+fn should_publish_volume(current: i32, new_value: i32, last_ms: u64, now_ms: u64) -> bool {
+    if new_value <= 0 {
+        return false;
+    }
+    if new_value > current {
+        return true;
+    }
+    now_ms.saturating_sub(last_ms) >= VOLUME_PUBLISH_MIN_INTERVAL_MS
 }
 
 /// Build audio input stream for ASR
@@ -392,6 +445,20 @@ mod tests {
         assert_eq!(peak_to_volume(1.0), 100);
         // 超过 1.0 (理论上不会, 但保险) -> clamp 到 100
         assert_eq!(peak_to_volume(2.0), 100);
+    }
+
+    #[test]
+    fn should_publish_volume_throttling() {
+        // 衰减到底: 不发
+        assert!(!should_publish_volume(50, 0, 0, 1000));
+        // 峰值上升: 即使刚刚发过也立即发
+        assert!(should_publish_volume(50, 80, 900, 950));
+        // 平路 + 时间间隔够 100ms: 发
+        assert!(should_publish_volume(50, 50, 0, 150));
+        // 平路 + 间隔不够 100ms: 不发
+        assert!(!should_publish_volume(50, 50, 0, 50));
+        // 首次调用 (last_ms=0) + now_ms 任意大: 发 (saturating_sub 大于阈值)
+        assert!(should_publish_volume(0, 10, 0, 1_000_000));
     }
 
     #[test]
