@@ -113,17 +113,74 @@ docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/cross-rs/aarch64-unkn
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     ```
-2. 部署到到rk3566
-```shell
-# 推荐: 一键交叉编译+部署
-./scripts/deploy_rk3566.sh
 
-# 手动 (不推荐, 容易踩到库依赖问题)
-cross build --target aarch64-unknown-linux-gnu --release -p ele_bot_server --bin ele_bot_server
-scp target/aarch64-unknown-linux-gnu/release/ele_bot_server radxa@192.168.2.159:~/ElectronBotCli/
-scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarch64-unknown-linux-gnu/release/libonnxruntime.so radxa@192.168.2.159:~/
-scp assets/tools/convert_all_models.py  radxa@192.168.2.159:~/ElectronBotCli
-```
+2. 部署到 RK3566
+
+    一键编译+部署 (推荐):
+    ```shell
+    # 推荐先做一次 ssh 密钥免密
+    ssh-copy-id radxa@192.168.2.159
+
+    # 编译并部署 ele_bot_server (release)
+    ./scripts/deploy_rk3566.sh
+
+    # 编译并部署 test_bd1 (BD1 声音测试 binary)
+    ./scripts/deploy_rk3566.sh test_bd1
+
+    # 分步: 先编译, 看日志, 再部署
+    ./scripts/deploy_rk3566.sh build
+    ./scripts/deploy_rk3566.sh deploy
+
+    # 看完整用法
+    ./scripts/deploy_rk3566.sh --help
+    ```
+
+    切换设备 / 代理 / profile:
+    ```shell
+    # 换一台 RK3566
+    RK_DEVICE=radxa@192.168.2.202 ./scripts/deploy_rk3566.sh
+
+    # 换代理 (公司内网 / 家里)
+    HTTP_PROXY=http://proxy.corp:7890 ./scripts/deploy_rk3566.sh
+
+    # debug profile (注意 gemm-f16 警告)
+    ./scripts/deploy_rk3566.sh --debug
+
+    # 自定义 profile
+    PROFILE=release-with-debug ./scripts/deploy_rk3566.sh
+    ```
+
+    设备端运行:
+    ```shell
+    # ssh 进设备
+    ssh radxa@192.168.2.159
+
+    # 第一次跑: 自动下载模型, 然后程序退出
+    ~/ElectronBotCli/ele_bot_server
+
+    # 用 convert_all_models.py 转模型
+    cd ~/ElectronBotCli
+    python3 convert_all_models.py
+
+    # 之后正常启动
+    ./ele_bot_server
+
+    # 测试人脸检测 (用 RKNN 加速)
+    TEST_RKNN=1 ./ele_bot_server
+
+    # 测试指定模型
+    TEST_RKNN=1 RKNN_MODEL=./model/deepghs/yolo-face/yolo_face.rknn ./ele_bot_server
+
+    # 测试指定图片
+    TEST_RKNN=1 TEST_IMAGE=./assets/images/test.png ./ele_bot_server
+    ```
+
+    手动 (不推荐, 仅当脚本有问题时参考):
+    ```shell
+    cross build --release --target aarch64-unknown-linux-gnu -p ele_bot_server --bin ele_bot_server
+    scp target/aarch64-unknown-linux-gnu/release/ele_bot_server radxa@192.168.2.159:~/ElectronBotCli/
+    scp assets/tools/convert_all_models.py  radxa@192.168.2.159:~/ElectronBotCli
+    ```
 
 ### 待优化
 
