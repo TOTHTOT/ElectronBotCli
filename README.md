@@ -19,7 +19,7 @@
    - 目前离线模型推理很慢, 离线时只做简单表情处理, 在线模型才支持肢体动作
    - 接入llm后支持常见对话
    - 暴露给llm的功能: 肢体控制, 发声, 支持一些定时任务(比如: 日程, 代办, 备忘录)
- 
+
 ## 长期计划
 - 在添加完基本功能后希望机器人能够自主移动, 通过识别aruco码来让机器人回到充电桩.
 
@@ -27,15 +27,64 @@
 - 拿到对应的ele_bot程序后直接运行会在`hugging face`的默认目录下载模型, 然后程序退出手动调用`convert_all_models.py`进行模型转换再次启动程序即可.
 
 ### 编译
+
+#### 本地编译 (macOS / Linux / Windows)
 - ~~当运行在pc平台是, 使用的推理框架是`onnx`, 这时需要手动安装运行时.~~
    ```shell
    brew install onnxruntime # mac
    sudo apt install libonnxruntime-dev # ubuntu
    winget install Microsoft.OnnxRuntime # Windows
    ```
-- 在安装了`docker`的情况下使用`./scripts/deploy_rk3566.sh`就能编译出rk3566的程序
+- 常规直接`cargo run --release`即可
 
-- 常规直接`cargo run release`即可
+#### 交叉编译到 RK3566 (推荐)
+
+依赖: Docker Desktop / docker daemon, [cross-rs](https://github.com/cross-rs/cross) (`cargo install cross --git https://github.com/cross-rs/cross`).
+
+```shell
+# 编译并部署主程序 (默认)
+./scripts/deploy_rk3566.sh
+
+# 单独编译 / 单独部署
+./scripts/deploy_rk3566.sh build
+./scripts/deploy_rk3566.sh deploy
+
+# 编译并部署 test_bd1 (BD1 声音测试 binary)
+./scripts/deploy_rk3566.sh test_bd1
+```
+
+环境变量 (覆盖默认值):
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `RK_DEVICE` | `radxa@192.168.2.159` | 目标 SSH 地址 |
+| `RK_REMOTE_DIR` | `~/ElectronBotCli` | 目标路径 |
+| `RK_PASSWORD` | `radxa` | sshpass 密码, **仅在 SSH 密钥失败时使用** |
+| `HTTP_PROXY` / `HTTPS_PROXY` | `http://192.168.2.147:7890` | apt/cargo 走代理时设置 |
+
+示例:
+```shell
+# 换设备 + 换代理
+RK_DEVICE=radxa@192.168.2.202 \
+HTTP_PROXY=http://other-proxy:7890 \
+./scripts/deploy_rk3566.sh
+
+# 推荐先用 ssh 密钥免密码登录
+ssh-copy-id radxa@192.168.2.159
+./scripts/deploy_rk3566.sh deploy  # 之后自动走密钥
+```
+
+脚本内置:
+- docker daemon / cross 二进制 / 磁盘空间 (≥8GB) 三项前置检查
+- scp 后 sha256 校验, 传输截断直接报错
+- Cargo 缓存挂载进容器, 增量编译命中 (实测 4 分 → 51 秒)
+
+升级 cross-rs base image:
+```shell
+docker pull --platform linux/amd64 ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+# 把输出的 digest 替换 Dockerfile.cross 里的 FROM 行
+```
 
 ### 运行
 1. ~~配置usb的udev规则~~
@@ -43,20 +92,21 @@
     sudo vim /etc/udev/rules.d/99-electronbot.rules
     # 文件内输入
     SUBSYSTEM=="usb", ATTR{idVendor}=="xxxx", ATTR{idProduct}=="yyyy", MODE="0666"
-    
+
     #保存后重新加载规则
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     ```
 2. 部署到到rk3566
 ```shell
-# cross+docker 编译程序, cross 配置参考 Cross.toml
-cross build --target aarch64-unknown-linux-gnu --release
-# 发送编译好的程序
-scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.202:~/ElectronBotCli
-# 同步资源文件
-scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarch64-unknown-linux-gnu/release/libonnxruntime.so radxa@192.168.2.202:~/
-scp assets/tools/convert_all_models.py  radxa@192.168.2.202:~/ElectronBotCli
+# 推荐: 一键交叉编译+部署
+./scripts/deploy_rk3566.sh
+
+# 手动 (不推荐, 容易踩到库依赖问题)
+cross build --target aarch64-unknown-linux-gnu --release -p ele_bot_server --bin ele_bot_server
+scp target/aarch64-unknown-linux-gnu/release/ele_bot_server radxa@192.168.2.159:~/ElectronBotCli/
+scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarch64-unknown-linux-gnu/release/libonnxruntime.so radxa@192.168.2.159:~/
+scp assets/tools/convert_all_models.py  radxa@192.168.2.159:~/ElectronBotCli
 ```
 
 ### 待优化
