@@ -41,6 +41,8 @@
 
 依赖: Docker Desktop / docker daemon, [cross-rs](https://github.com/cross-rs/cross) (`cargo install cross --git https://github.com/cross-rs/cross`).
 
+完整帮助: `./scripts/deploy_rk3566.sh --help`
+
 ```shell
 # 编译并部署主程序 (默认 release)
 ./scripts/deploy_rk3566.sh
@@ -59,6 +61,10 @@
 # 任意位置参数都能加 --debug, 同时支持 PROFILE 环境变量:
 PROFILE=release-with-debug ./scripts/deploy_rk3566.sh
 ```
+
+**模式**: `build` (只编译) / `deploy` (只部署) / `all` (默认, 都做). 也可直接传 binary 名等同 `all <binary>`.
+
+**选项**: `--debug` / `-d` / `--dev` 切 dev profile, `--help` / `-h` 显示完整帮助. 未知选项会输出错误+帮助到 stderr 并退出 1.
 
 > **dev profile 警告**: RK3566 跨编译 `gemm-f16` 在无优化时汇编失败. debug 编译目前走不通, 但 release 正常. 调试建议用 release 包 + remote gdb.
 
