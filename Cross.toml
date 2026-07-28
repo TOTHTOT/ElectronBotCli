@@ -6,6 +6,13 @@
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
 dockerfile = "Dockerfile.cross"
 
+# 挂载主机 cargo 缓存进容器, 避免每次全量下载 sherpa-onnx 等大依赖
+# 增量编译也能受益 (虽然 cross-rs 不持久 target/, 但 cargo 自身缓存能复用)
+# 注意: 路径用的是当前开发机的 cargo 目录, 若你的 home 目录不同, 请改成对应路径.
+[target.aarch64-unknown-linux-gnu.volumes]
+"/Users/yangyihui/.cargo/git" = { path = "/cargo/git", read-only = true }
+"/Users/yangyihui/.cargo/registry" = { path = "/cargo/registry", read-only = true }
+
 [target.aarch64-unknown-linux-gnu.env]
 # cross-rs pkg-config 在 cross compile 时默认拒绝跨架构 lib, 这里显式允许.
 PKG_CONFIG_ALLOW_CROSS = "1"

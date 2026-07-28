@@ -20,56 +20,6 @@
    - 接入llm后支持常见对话
    - 暴露给llm的功能: 肢体控制, 发声, 支持一些定时任务(比如: 日程, 代办, 备忘录)
 
-## 桌面宠物 (桌宠) 功能
-
-定位: 把 ElectronBotCli 跑在桌面/嵌入设备上, 作为一个有语音、有表情、能主动说话
-的小机器人陪伴. 已有 ASR/TTS/LLM/舵机/摄像头 的"四件套", 下面按类别列出桌宠
-常见功能, 标注现状.
-
-### 核心交互 (已基本具备)
-
-- [x] 语音对话: 麦克风 → ASR → LLM → TTS 全链路, 见 `crates/ele_bot_server/src/media/voice/`
-- [x] 表情/动作响应: 人脸跟踪转头, 见 `crates/ele_bot_server/src/face_tracker.rs`
-- [x] 舵机控制: 屏幕/身体关节可远程动作, 见 `crates/ele_bot_server/src/media/video/`
-- [x] TUI 控制台: ratatui 远程遥控 + 状态查看, 见 `crates/ele_bot_client/`
-
-### 养成 / 状态 (待加)
-
-- [ ] 养成系统: 喂食/玩耍/清洁影响饱食度/心情/清洁度, 随时间衰减
-- [ ] 情绪曲线: 开心/无聊/困倦/饥饿, 独立于对话, 影响主动行为
-- [ ] 状态持久化: 状态存 `~/.electronbot/state.json`, 跨重启保留
-
-### 主动性 (待加)
-
-- [ ] 主动提醒: 日程/喝水/久坐提醒, 走现有 ASR/TTS 链路播报
-- [ ] 主动打招呼: 久未听到用户时主动开口
-- [ ] 作息感知: 夜间降低音量/亮度, 白天活跃
-- [ ] 天气/纪念日播报: 早上主动说今日天气, 纪念日触发彩蛋
-
-### 工具 / LLM 扩展 (待加)
-
-- [ ] 工具调用: 日程/待办/备忘录/天气/翻译/搜索, 暴露给 LLM 当 function call
-- [ ] 长期记忆: 跨会话记住用户习惯/偏好/历史对话, RAG + 向量存储
-- [ ] 多用户识别: 摄像头区分不同人, 不同性格/不同称呼
-
-### 视觉 / GUI (待加, 需要脱离 TUI)
-
-- [ ] 桌面悬浮窗: 鼠标穿透/右键菜单, 替代 TUI 作为主交互
-- [ ] 待机动画: 闲置时随机小动作 (眨眼/伸懒腰/翻身)
-- [ ] 自定义外观: 换装/换皮/夜间模式
-- [ ] 桌面行为: 爬到屏幕边缘/任务栏/特定窗口上
-
-### 小游戏 / 互动 (待加)
-
-- [ ] 小游戏: 猜数字/成语接龙/反应力测试, 桌宠当裁判
-- [ ] 番茄钟 + 学习陪伴: 学习计时 + 25 分钟休息提醒
-- [ ] 通知代理: 系统通知 (邮件/IM) 由桌宠代为播报
-
-### 长期
-
-- [ ] 自主移动 + 回充: 通过识别 aruco 码回到充电桩 (见下面"长期计划")
-- [ ] 多语言: 自动识别中/英/日
- 
 ## 长期计划
 - 在添加完基本功能后希望机器人能够自主移动, 通过识别aruco码来让机器人回到充电桩.
 
@@ -77,15 +27,80 @@
 - 拿到对应的ele_bot程序后直接运行会在`hugging face`的默认目录下载模型, 然后程序退出手动调用`convert_all_models.py`进行模型转换再次启动程序即可.
 
 ### 编译
+
+#### 本地编译 (macOS / Linux / Windows)
 - ~~当运行在pc平台是, 使用的推理框架是`onnx`, 这时需要手动安装运行时.~~
    ```shell
    brew install onnxruntime # mac
    sudo apt install libonnxruntime-dev # ubuntu
    winget install Microsoft.OnnxRuntime # Windows
    ```
-- 在安装了`docker`的情况下使用`./scripts/deploy_rk3566.sh`就能编译出rk3566的程序
+- 常规直接`cargo run --release`即可
 
-- 常规直接`cargo run release`即可
+#### 交叉编译到 RK3566 (推荐)
+
+依赖: Docker Desktop / docker daemon, [cross-rs](https://github.com/cross-rs/cross) (`cargo install cross --git https://github.com/cross-rs/cross`).
+
+完整帮助: `./scripts/deploy_rk3566.sh --help`
+
+```shell
+# 编译并部署主程序 (默认 release)
+./scripts/deploy_rk3566.sh
+
+# 单独编译 / 单独部署
+./scripts/deploy_rk3566.sh build
+./scripts/deploy_rk3566.sh deploy
+
+# 编译并部署 test_bd1 (BD1 声音测试 binary)
+./scripts/deploy_rk3566.sh test_bd1
+
+# debug 编译 (dev profile, 含调试符号)
+./scripts/deploy_rk3566.sh --debug
+./scripts/deploy_rk3566.sh build --debug
+
+# 任意位置参数都能加 --debug, 同时支持 PROFILE 环境变量:
+PROFILE=release-with-debug ./scripts/deploy_rk3566.sh
+```
+
+**模式**: `build` (只编译) / `deploy` (只部署) / `all` (默认, 都做). 也可直接传 binary 名等同 `all <binary>`.
+
+**选项**: `--debug` / `-d` / `--dev` 切 dev profile, `--help` / `-h` 显示完整帮助. 未知选项会输出错误+帮助到 stderr 并退出 1.
+
+> **dev profile 警告**: RK3566 跨编译 `gemm-f16` 在无优化时汇编失败. debug 编译目前走不通, 但 release 正常. 调试建议用 release 包 + remote gdb.
+
+环境变量 (覆盖默认值):
+
+| 变量 | 默认值 | 说明 |
+|---|---|---|
+| `RK_DEVICE` | `radxa@192.168.2.159` | 目标 SSH 地址 |
+| `RK_REMOTE_DIR` | `~/ElectronBotCli` | 目标路径 |
+| `RK_PASSWORD` | `radxa` | sshpass 密码, **仅在 SSH 密钥失败时使用** |
+| `HTTP_PROXY` / `HTTPS_PROXY` | `http://192.168.2.147:7890` | apt/cargo 走代理时设置 |
+| `PROFILE` | `release` | `dev` / `release` / `release-with-debug`, 也可用 `--debug` 标志 |
+
+示例:
+```shell
+# 换设备 + 换代理
+RK_DEVICE=radxa@192.168.2.202 \
+HTTP_PROXY=http://other-proxy:7890 \
+./scripts/deploy_rk3566.sh
+
+# 推荐先用 ssh 密钥免密码登录
+ssh-copy-id radxa@192.168.2.159
+./scripts/deploy_rk3566.sh deploy  # 之后自动走密钥
+```
+
+脚本内置:
+- docker daemon / cross 二进制 / 磁盘空间 (≥8GB) 三项前置检查
+- scp 后 sha256 校验, 传输截断直接报错
+- Cargo 缓存挂载进容器, 增量编译命中 (实测 4 分 → 51 秒)
+
+升级 cross-rs base image:
+```shell
+docker pull --platform linux/amd64 ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+# 把输出的 digest 替换 Dockerfile.cross 里的 FROM 行
+```
 
 ### 运行
 1. ~~配置usb的udev规则~~
@@ -93,21 +108,79 @@
     sudo vim /etc/udev/rules.d/99-electronbot.rules
     # 文件内输入
     SUBSYSTEM=="usb", ATTR{idVendor}=="xxxx", ATTR{idProduct}=="yyyy", MODE="0666"
-    
+
     #保存后重新加载规则
     sudo udevadm control --reload-rules
     sudo udevadm trigger
     ```
-2. 部署到到rk3566
-```shell
-# cross+docker 编译程序, cross 配置参考 Cross.toml
-cross build --target aarch64-unknown-linux-gnu --release
-# 发送编译好的程序
-scp target/aarch64-unknown-linux-gnu/release/ele_bot  radxa@192.168.2.202:~/ElectronBotCli
-# 同步资源文件
-scp target/aarch64-unknown-linux-gnu/release/libsherpa-onnx-c-api.so target/aarch64-unknown-linux-gnu/release/libonnxruntime.so radxa@192.168.2.202:~/
-scp assets/tools/convert_all_models.py  radxa@192.168.2.202:~/ElectronBotCli
-```
+
+2. 部署到 RK3566
+
+    一键编译+部署 (推荐):
+    ```shell
+    # 推荐先做一次 ssh 密钥免密
+    ssh-copy-id radxa@192.168.2.159
+
+    # 编译并部署 ele_bot_server (release)
+    ./scripts/deploy_rk3566.sh
+
+    # 编译并部署 test_bd1 (BD1 声音测试 binary)
+    ./scripts/deploy_rk3566.sh test_bd1
+
+    # 分步: 先编译, 看日志, 再部署
+    ./scripts/deploy_rk3566.sh build
+    ./scripts/deploy_rk3566.sh deploy
+
+    # 看完整用法
+    ./scripts/deploy_rk3566.sh --help
+    ```
+
+    切换设备 / 代理 / profile:
+    ```shell
+    # 换一台 RK3566
+    RK_DEVICE=radxa@192.168.2.202 ./scripts/deploy_rk3566.sh
+
+    # 换代理 (公司内网 / 家里)
+    HTTP_PROXY=http://proxy.corp:7890 ./scripts/deploy_rk3566.sh
+
+    # debug profile (注意 gemm-f16 警告)
+    ./scripts/deploy_rk3566.sh --debug
+
+    # 自定义 profile
+    PROFILE=release-with-debug ./scripts/deploy_rk3566.sh
+    ```
+
+    设备端运行:
+    ```shell
+    # ssh 进设备
+    ssh radxa@192.168.2.159
+
+    # 第一次跑: 自动下载模型, 然后程序退出
+    ~/ElectronBotCli/ele_bot_server
+
+    # 用 convert_all_models.py 转模型
+    cd ~/ElectronBotCli
+    python3 convert_all_models.py
+
+    # 之后正常启动
+    ./ele_bot_server
+
+    # 测试人脸检测 (用 RKNN 加速)
+    TEST_RKNN=1 ./ele_bot_server
+
+    # 测试指定模型
+    TEST_RKNN=1 RKNN_MODEL=./model/deepghs/yolo-face/yolo_face.rknn ./ele_bot_server
+
+    # 测试指定图片
+    TEST_RKNN=1 TEST_IMAGE=./assets/images/test.png ./ele_bot_server
+    ```
+
+    手动 (不推荐, 仅当脚本有问题时参考):
+    ```shell
+    cross build --release --target aarch64-unknown-linux-gnu -p ele_bot_server --bin ele_bot_server
+    scp target/aarch64-unknown-linux-gnu/release/ele_bot_server radxa@192.168.2.159:~/ElectronBotCli/
+    scp assets/tools/convert_all_models.py  radxa@192.168.2.159:~/ElectronBotCli
+    ```
 
 ### 待优化
 
