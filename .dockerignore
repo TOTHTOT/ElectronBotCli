@@ -1,0 +1,15 @@
+target/
+**/target/
+.git/
+.idea/
+.vscode/
+.DS_Store
+**/.DS_Store
+*.log
+node_modules/
+openspec/
+graphify-out/
+sounds/
+docs/
+log/
+src/  # 老单 crate 的空目录
