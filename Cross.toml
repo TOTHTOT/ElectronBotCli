@@ -1,18 +1,25 @@
 [target.aarch64-unknown-linux-gnu]
+# cross-rs 不支持 digest 当 tag, 这里用 :edge. 真正的版本锁定在 Dockerfile.cross 的 FROM digest 里
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
 dockerfile = "Dockerfile.cross"
+
+# 挂载主机 cargo 缓存进容器, 避免每次全量下载 sherpa-onnx 等大依赖
+# 增量编译也能受益 (虽然 cross-rs 不持久 target/, 但 cargo 自身缓存能复用)
+[target.aarch64-unknown-linux-gnu.volumes]
+"/Users/yangyihui/.cargo/git" = { path = "/cargo/git", read-only = true }
+"/Users/yangyihui/.cargo/registry" = { path = "/cargo/registry", read-only = true }
+
 [target.aarch64-unknown-linux-gnu.env]
 PKG_CONFIG_ALLOW_CROSS = "1"
 PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig"
-pre-build = [
-    "dpkg --add-architecture arm64",
-    "apt-get update",
-    "apt-get install -y libasound2-dev:arm64 libssl-dev:arm64 pkg-config"
-]
+# pre-build 跟 Dockerfile.cross 的 RUN 重复, cross 用 Dockerfile 时会忽略这里, 留空防误用
+# 真正安装逻辑全部在 Dockerfile.cross 里
+pre-build = []
 env.passthrough = [
     "http_proxy",
     "https_proxy",
     "all_proxy"
 ]
+
 [package.metadata.cross.target.aarch64-unknown-linux-gnu]
 rustflags = ["-L", "/project/assets/lib"]

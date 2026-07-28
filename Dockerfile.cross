@@ -1,4 +1,8 @@
-FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+# 锁版本到具体 digest, 避免 :edge 自动升级破坏构建
+# 升级步骤: docker pull ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
+#          docker inspect --format='{{index .RepoDigests 0}}' <image>
+#          把新 digest 替换下面两处
+FROM ghcr.io/cross-rs/aarch64-unknown-linux-gnu@sha256:ac7d615ba6b6705cd71a74c3f26cdf6d2584265eeb10f619725e3f11bcf703a6
 RUN dpkg --add-architecture arm64 && \
     apt-get update && \
     apt-get install -y libasound2-dev:arm64 libssl-dev:arm64 pkg-config
