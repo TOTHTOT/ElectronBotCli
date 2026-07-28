@@ -42,7 +42,7 @@
 依赖: Docker Desktop / docker daemon, [cross-rs](https://github.com/cross-rs/cross) (`cargo install cross --git https://github.com/cross-rs/cross`).
 
 ```shell
-# 编译并部署主程序 (默认)
+# 编译并部署主程序 (默认 release)
 ./scripts/deploy_rk3566.sh
 
 # 单独编译 / 单独部署
@@ -51,7 +51,16 @@
 
 # 编译并部署 test_bd1 (BD1 声音测试 binary)
 ./scripts/deploy_rk3566.sh test_bd1
+
+# debug 编译 (dev profile, 含调试符号)
+./scripts/deploy_rk3566.sh --debug
+./scripts/deploy_rk3566.sh build --debug
+
+# 任意位置参数都能加 --debug, 同时支持 PROFILE 环境变量:
+PROFILE=release-with-debug ./scripts/deploy_rk3566.sh
 ```
+
+> **dev profile 警告**: RK3566 跨编译 `gemm-f16` 在无优化时汇编失败. debug 编译目前走不通, 但 release 正常. 调试建议用 release 包 + remote gdb.
 
 环境变量 (覆盖默认值):
 
@@ -61,6 +70,7 @@
 | `RK_REMOTE_DIR` | `~/ElectronBotCli` | 目标路径 |
 | `RK_PASSWORD` | `radxa` | sshpass 密码, **仅在 SSH 密钥失败时使用** |
 | `HTTP_PROXY` / `HTTPS_PROXY` | `http://192.168.2.147:7890` | apt/cargo 走代理时设置 |
+| `PROFILE` | `release` | `dev` / `release` / `release-with-debug`, 也可用 `--debug` 标志 |
 
 示例:
 ```shell

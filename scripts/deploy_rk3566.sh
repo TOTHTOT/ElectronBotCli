@@ -1,12 +1,13 @@
 #!/bin/bash
 # 编译并部署到 RK3566 设备
 # 用法:
-#   ./deploy_rk3566.sh                              - 编译并传输 ele_bot_server（默认）
-#   ./deploy_rk3566.sh build                        - 只编译
+#   ./deploy_rk3566.sh                              - 编译并传输 ele_bot_server (release, 默认)
+#   ./deploy_rk3566.sh --debug                      - 编译 dev profile (含调试符号, 未优化)
+#   ./deploy_rk3566.sh build                        - 只编译 (release)
+#   ./deploy_rk3566.sh build --debug                - 只编译 (dev)
 #   ./deploy_rk3566.sh deploy                        - 只传输
 #   ./deploy_rk3566.sh test_bd1                      - 编译并传输 test_bd1
-#   ./deploy_rk3566.sh build test_bd1                - 只编译 test_bd1
-#   ./deploy_rk3566.sh deploy test_bd1               - 只传输 test_bd1
+#   ./deploy_rk3566.sh test_bd1 --debug              - 编译并传输 test_bd1 (dev)
 #
 # 可通过环境变量覆盖默认值:
 #   RK_DEVICE     目标设备 (默认 radxa@192.168.2.159)
@@ -14,6 +15,7 @@
 #   RK_PASSWORD   sshpass 密码 (优先用 ssh 密钥, 仅当密钥失败时回退)
 #   HTTP_PROXY    HTTP 代理 (默认 http://192.168.2.147:7890)
 #   HTTPS_PROXY   HTTPS 代理 (默认同上)
+#   PROFILE       编译 profile, dev / release / release-with-debug (默认 release)
 
 set -euo pipefail
 
@@ -25,18 +27,59 @@ HTTPS_PROXY="${HTTPS_PROXY:-$HTTP_PROXY}"
 # 最低可用磁盘空间 (字节), Docker image 缓存 + target/ 至少需要 8GB
 MIN_DISK_BYTES=$((8 * 1024 * 1024 * 1024))
 
-# 默认 binary
-BINARY="${2:-ele_bot_server}"
+# 解析参数: 提取 --debug 标志, 其他位置参数
+PROFILE_FLAG=""
+POSITIONAL=()
+for arg in "$@"; do
+    case "$arg" in
+        --debug|--dev|-d)
+            PROFILE_FLAG="--debug"
+            ;;
+        *)
+            POSITIONAL+=("$arg")
+            ;;
+    esac
+done
 
-# 解析参数
-MODE="${1:-all}"
+# 默认 binary 和 mode
+BINARY="${POSITIONAL[1]:-ele_bot_server}"
+MODE="${POSITIONAL[0]:-all}"
 # 处理单一参数情况 (e.g. ./deploy_rk3566.sh test_bd1)
 if [[ "$MODE" != "build" && "$MODE" != "deploy" && "$MODE" != "all" ]]; then
     BINARY="$MODE"
     MODE="all"
 fi
 
-BINARY_TARGET="target/$TARGET/release/$BINARY"
+# 解析 profile: 优先 --debug 标志, 再 PROFILE 环境变量
+if [[ -n "$PROFILE_FLAG" ]]; then
+    PROFILE="dev"
+elif [[ -n "${PROFILE:-}" ]]; then
+    PROFILE="$PROFILE"
+else
+    PROFILE="release"
+fi
+
+# 路径段: dev -> debug, 其余用 profile 原名 (release / release-with-debug)
+case "$PROFILE" in
+    dev|debug) PROFILE_DIR="debug" ;;
+    *)         PROFILE_DIR="$PROFILE" ;;
+esac
+
+BINARY_TARGET="target/$TARGET/$PROFILE_DIR/$BINARY"
+
+# 传给 cross 的 flag: dev -> 无 --release, release -> --release, 其他 -> --profile <name>
+# 先初始化, 配合 set -u 避免空数组解引用
+CROSS_PROFILE_FLAG=""
+case "$PROFILE" in
+    dev|debug)
+        ;;
+    release)
+        CROSS_PROFILE_FLAG="--release"
+        ;;
+    *)
+        CROSS_PROFILE_FLAG="--profile $PROFILE"
+        ;;
+esac
 
 # ---------- 前置检查 ----------
 
@@ -132,12 +175,12 @@ deploy_binary() {
 # ---------- build / deploy ----------
 
 build_binary() {
-    echo "=== 编译 $BINARY ==="
+    echo "=== 编译 $BINARY (profile: $PROFILE) ==="
     check_docker
     check_cross
     check_disk
     if ! HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" \
-         cross build --release --target "$TARGET" -p ele_bot_server --bin "$BINARY"; then
+         cross build $CROSS_PROFILE_FLAG --target "$TARGET" -p ele_bot_server --bin "$BINARY"; then
         echo "编译失败！"
         exit 1
     fi
