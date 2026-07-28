@@ -589,14 +589,32 @@ fn process_frame_by_format(
                 rotate_angle,
             )
         }
+        FrameFormat::MJPEG => {
+            // nokhwa 的 decode_image::<RgbFormat>() 不会解 MJPEG 压缩流;
+            // MJPEG 摄像头 (常见 USB 高分辨率设备) 给的是完整 JPEG 字节流,
+            // 走 image crate 的 JPEG decoder. PC 上 640x480 单帧解码 < 5ms,
+            // 不需要切硬件; RK3566 上若帧率顶不住再考虑 RGA / hardware jpeg.
+            log::debug!(
+                "Frame: {out_width}x{out_height}, len: {}, MJPEG, decoding...",
+                frame.buffer().len()
+            );
+            let Some(rgb_data) = decode_jpeg_to_rgb(frame.buffer()) else {
+                anyhow::bail!("failed to decode MJPG");
+            };
+            process_and_rotate(rgb_data, src_width, src_height, face_detector, rotate_angle)
+        }
         _ => {
             anyhow::bail!("Unsupported frame format {format:?}");
         }
     }
 }
 
-/// 解码 JPEG 为 RGB 数据
-#[allow(dead_code)]
+/// 解码 JPEG / MJPEG 字节流为 RGB 原始数据.
+///
+/// 给摄像头送 MJPG 帧时, nokhwa 的 `frame.decode_image::<RgbFormat>()` 不会
+/// 解压缩, 缓冲区里是完整 JPEG 字节流. 这里用 `image` crate 走软件 JPEG
+/// 解码, 转成 `RGB8` 后丢给 `process_and_rotate` 后续旋转 / 推流.
+/// 当前在 `process_frame_by_format` 的 `FrameFormat::MJPEG` 分支调用.
 fn decode_jpeg_to_rgb(jpeg_data: &[u8]) -> Option<Vec<u8>> {
     use std::io::Cursor;
 
