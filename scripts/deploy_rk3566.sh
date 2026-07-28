@@ -27,13 +27,76 @@ HTTPS_PROXY="${HTTPS_PROXY:-$HTTP_PROXY}"
 # 最低可用磁盘空间 (字节), Docker image 缓存 + target/ 至少需要 8GB
 MIN_DISK_BYTES=$((8 * 1024 * 1024 * 1024))
 
+# ---------- 工具函数 (前置, 供参数解析使用) ----------
+
+print_help() {
+    cat <<'EOF'
+deploy_rk3566.sh - 编译并部署到 RK3566 设备
+
+用法:
+  ./deploy_rk3566.sh [选项] [模式] [binary]
+
+模式 (可省略, 默认 all = 编译并部署):
+  build           只编译
+  deploy          只部署
+  all             编译并部署 (默认)
+  <binary>        直接部署/编译该 binary (等同 all <binary>)
+
+binary (可省略, 默认 ele_bot_server):
+  ele_bot_server  主程序
+  test_bd1        BD1 声音测试程序
+  其它任意 [[bin]] 名
+
+选项:
+  --debug, -d, --dev   使用 dev profile (调试, 含符号未优化)
+  --help, -h           显示本帮助并退出
+
+profile (--debug 优先, 否则读 PROFILE 环境变量, 否则 release):
+  dev / debug
+  release
+  release-with-debug   含调试符号的 release
+
+环境变量:
+  RK_DEVICE         目标 SSH 地址         (默认 radxa@192.168.2.159)
+  RK_REMOTE_DIR     远程部署目录          (默认 ~/ElectronBotCli)
+  RK_PASSWORD       sshpass 密码          (默认 radxa, 优先用 SSH 密钥)
+  HTTP_PROXY        HTTP 代理             (默认 http://192.168.2.147:7890)
+  HTTPS_PROXY       HTTPS 代理            (默认同上)
+  PROFILE           cargo profile 名      (默认 release)
+
+示例:
+  ./deploy_rk3566.sh                                    # 编译并部署 ele_bot_server (release)
+  ./deploy_rk3566.sh build                              # 只编译
+  ./deploy_rk3566.sh deploy                             # 只部署已编译产物
+  ./deploy_rk3566.sh --debug                            # debug 编译
+  ./deploy_rk3566.sh test_bd1                           # 编译并部署 test_bd1
+  PROFILE=release-with-debug ./deploy_rk3566.sh         # 自定义 profile
+  RK_DEVICE=radxa@192.168.2.202 ./deploy_rk3566.sh      # 换目标设备
+  ssh-copy-id radxa@192.168.2.159                       # 推荐: 先做密钥免密
+
+内置检查:
+  docker daemon / cross 二进制 / 磁盘 ≥8GB
+  scp 后 sha256 校验 (传输截断自动报错)
+  cargo 缓存挂载进 cross 容器 (增量编译命中)
+EOF
+}
+
 # 解析参数: 提取 --debug 标志, 其他位置参数
 PROFILE_FLAG=""
 POSITIONAL=()
 for arg in "$@"; do
     case "$arg" in
+        --help|-h)
+            print_help
+            exit 0
+            ;;
         --debug|--dev|-d)
             PROFILE_FLAG="--debug"
+            ;;
+        -*)
+            echo "未知选项: $arg" >&2
+            print_help >&2
+            exit 1
             ;;
         *)
             POSITIONAL+=("$arg")
@@ -206,8 +269,8 @@ case "$MODE" in
         deploy_step
         ;;
     *)
-        echo "未知参数: $MODE"
-        echo "用法: $0 [build|deploy|all] [binary_name]"
+        echo "未知模式: $MODE" >&2
+        print_help >&2
         exit 1
         ;;
 esac
