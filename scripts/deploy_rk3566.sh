@@ -222,8 +222,16 @@ deploy_binary() {
     # 设备端校验
     echo "设备端校验 sha256..."
     local remote_hash
-    remote_hash=$(ssh -o StrictHostKeyChecking=accept-new "$DEVICE" \
-        "sha256sum '$remote_path' 2>/dev/null | awk '{print \$1}'")
+    remote_hash=$(run_remote_cmd "sha256sum $remote_path 2>/dev/null | awk '{print \$1}'") || {
+        echo "错误: 无法连接设备执行校验, 请检查 SSH 认证或 RK_PASSWORD"
+        exit 1
+    }
+
+    if [[ -z "$remote_hash" ]]; then
+        echo "错误: 设备端未找到文件或 sha256sum 返回为空"
+        echo "  远程路径: $remote_path"
+        exit 1
+    fi
 
     if [[ "$remote_hash" != "$local_hash" ]]; then
         echo "错误: sha256 不一致!"
@@ -233,6 +241,29 @@ deploy_binary() {
         exit 1
     fi
     echo "sha256 校验通过"
+}
+
+# 执行远程命令, 复用与 deploy_binary 相同的认证回退逻辑.
+# 优先使用 SSH 密钥 (BatchMode); 密钥失败时回退到 sshpass.
+run_remote_cmd() {
+    local cmd="$1"
+    # 先尝试 SSH 密钥
+    if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
+        "$DEVICE" "$cmd" 2>/dev/null; then
+        return 0
+    fi
+    # 密钥失败, 回退 sshpass
+    if ! command -v sshpass >/dev/null 2>&1; then
+        echo "错误: SSH 密钥登录失败, 且未安装 sshpass" >&2
+        echo "      选项: 1) ssh-copy-id $DEVICE  2) brew install sshpass  3) 设置 RK_PASSWORD" >&2
+        return 1
+    fi
+    local pass="${RK_PASSWORD:-radxa}"
+    if ! sshpass -p "$pass" ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 \
+        "$DEVICE" "$cmd"; then
+        echo "错误: 通过 sshpass 执行远程命令失败" >&2
+        return 1
+    fi
 }
 
 # ---------- build / deploy ----------
