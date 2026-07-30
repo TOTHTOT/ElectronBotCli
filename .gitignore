@@ -21,3 +21,8 @@ nul
 /.vscode/
 /sounds
 /.kimi-code
+/.specify/scripts/
+/.specify/init-options.json
+/.specify/integration.json
+/.specify/integrations/kimi.manifest.json
+/.specify/integrations/speckit.manifest.json
