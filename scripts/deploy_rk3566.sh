@@ -1,11 +1,13 @@
 #!/bin/bash
 # 编译并部署到 RK3566 设备
 # 用法:
-#   ./deploy_rk3566.sh                              - 编译并传输 ele_bot_server (release, 默认)
+#   ./deploy_rk3566.sh                              - 编译并传输 ele_bot_server + ele_bot_client (release, 默认)
 #   ./deploy_rk3566.sh --debug                      - 编译 dev profile (含调试符号, 未优化)
-#   ./deploy_rk3566.sh build                        - 只编译 (release)
+#   ./deploy_rk3566.sh build                        - 只编译两个 (release)
 #   ./deploy_rk3566.sh build --debug                - 只编译 (dev)
 #   ./deploy_rk3566.sh deploy                        - 只传输
+#   ./deploy_rk3566.sh ele_bot_server                - 只编译并传输 ele_bot_server
+#   ./deploy_rk3566.sh ele_bot_client                - 只编译并传输 ele_bot_client
 #   ./deploy_rk3566.sh test_bd1                      - 编译并传输 test_bd1
 #   ./deploy_rk3566.sh test_bd1 --debug              - 编译并传输 test_bd1 (dev)
 #
@@ -42,10 +44,11 @@ deploy_rk3566.sh - 编译并部署到 RK3566 设备
   all             编译并部署 (默认)
   <binary>        直接部署/编译该 binary (等同 all <binary>)
 
-binary (可省略, 默认 ele_bot_server):
-  ele_bot_server  主程序
+binary (可省略, 默认 ele_bot_server + ele_bot_client 两个都处理):
+  ele_bot_server  主程序 (包 ele_bot_server, 部署时带共享库)
+  ele_bot_client  客户端程序 (包 ele_bot_client)
   test_bd1        BD1 声音测试程序
-  其它任意 [[bin]] 名
+  其它任意 [[bin]] 名 (默认归属 ele_bot_server 包)
 
 选项:
   --debug, -d, --dev   使用 dev profile (调试, 含符号未优化)
@@ -104,14 +107,33 @@ for arg in "$@"; do
     esac
 done
 
-# 默认 binary 和 mode
-BINARY="${POSITIONAL[1]:-ele_bot_server}"
+# 解析 mode 和 binary: 未指定 binary 时默认两个主程序都处理
 MODE="${POSITIONAL[0]:-all}"
-# 处理单一参数情况 (e.g. ./deploy_rk3566.sh test_bd1)
-if [[ "$MODE" != "build" && "$MODE" != "deploy" && "$MODE" != "all" ]]; then
-    BINARY="$MODE"
-    MODE="all"
+case "$MODE" in
+    build|deploy|all)
+        BINARY="${POSITIONAL[1]:-}"
+        ;;
+    *)
+        # 单参数直接是 binary 名 (e.g. ./deploy_rk3566.sh test_bd1)
+        BINARY="$MODE"
+        MODE="all"
+        ;;
+esac
+
+if [[ -n "$BINARY" ]]; then
+    BINARIES=("$BINARY")
+else
+    BINARIES=("ele_bot_server" "ele_bot_client")
 fi
+
+# binary 所属 crate: ele_bot_client 独立成包, 其余都属 ele_bot_server
+package_of() {
+    if [[ "$1" == "ele_bot_client" ]]; then
+        echo "ele_bot_client"
+    else
+        echo "ele_bot_server"
+    fi
+}
 
 # 解析 profile: 优先 --debug 标志, 再 PROFILE 环境变量
 if [[ -n "$PROFILE_FLAG" ]]; then
@@ -128,7 +150,9 @@ case "$PROFILE" in
     *)         PROFILE_DIR="$PROFILE" ;;
 esac
 
-BINARY_TARGET="target/$TARGET/$PROFILE_DIR/$BINARY"
+binary_path() {
+    echo "target/$TARGET/$PROFILE_DIR/$1"
+}
 
 # 传给 cross 的 flag: dev -> 无 --release, release -> --release, 其他 -> --profile <name>
 # 先初始化, 配合 set -u 避免空数组解引用
@@ -181,8 +205,8 @@ check_cross() {
 }
 
 check_binary_exists() {
-    if [[ ! -x "$BINARY_TARGET" ]]; then
-        echo "错误: $BINARY_TARGET 不存在或不可执行, 请先 build"
+    if [[ ! -x "$1" ]]; then
+        echo "错误: $1 不存在或不可执行, 请先 build"
         exit 1
     fi
 }
@@ -269,22 +293,39 @@ run_remote_cmd() {
 # ---------- build / deploy ----------
 
 build_binary() {
-    echo "=== 编译 $BINARY (profile: $PROFILE) ==="
     check_docker
     check_cross
     check_disk
-    if ! HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" \
-         cross build $CROSS_PROFILE_FLAG --target "$TARGET" -p ele_bot_server --bin "$BINARY"; then
-        echo "编译失败！"
-        exit 1
-    fi
+    local bin pkg
+    for bin in "${BINARIES[@]}"; do
+        pkg=$(package_of "$bin")
+        echo "=== 编译 $bin (包 $pkg, profile: $PROFILE) ==="
+        if ! HTTP_PROXY="$HTTP_PROXY" HTTPS_PROXY="$HTTPS_PROXY" \
+             cross build $CROSS_PROFILE_FLAG --target "$TARGET" -p "$pkg" --bin "$bin"; then
+            echo "编译失败！"
+            exit 1
+        fi
+    done
     echo "=== 编译完成 ==="
 }
 
 deploy_step() {
     echo "=== 传输到设备 ==="
-    check_binary_exists
-    deploy_binary "$BINARY_TARGET" "$REMOTE_DIR/$BINARY"
+    local bin pkg so
+    for bin in "${BINARIES[@]}"; do
+        pkg=$(package_of "$bin")
+        check_binary_exists "$(binary_path "$bin")"
+        deploy_binary "$(binary_path "$bin")" "$REMOTE_DIR/$bin"
+        # sherpa-onnx-sys 会把依赖的共享库拷到产物旁 (libonnxruntime /
+        # libsherpa-onnx-c-api / libsherpa-onnx-cxx-api), 二进制靠 $ORIGIN
+        # rpath 在同目录找它们, 必须一起上传 (仅 server 包需要)
+        if [[ "$pkg" == "ele_bot_server" ]]; then
+            for so in "target/$TARGET/$PROFILE_DIR"/*.so; do
+                [[ -e "$so" ]] || continue
+                deploy_binary "$so" "$REMOTE_DIR/$(basename "$so")"
+            done
+        fi
+    done
     echo "=== 传输完成 ==="
 }
 
@@ -308,7 +349,11 @@ esac
 
 echo ""
 echo "在设备上运行："
-echo "  普通模式: ./$BINARY"
-echo "  测试人脸检测: TEST_RKNN=1 ./$BINARY"
-echo "  测试指定模型: TEST_RKNN=1 RKNN_MODEL=./model/deepghs/yolo-face/yolo_face.rknn ./$BINARY"
-echo "  测试指定图片: TEST_RKNN=1 TEST_IMAGE=./assets/images/test.png ./$BINARY"
+for bin in "${BINARIES[@]}"; do
+    echo "  ./$bin"
+done
+if [[ " ${BINARIES[*]} " == *" ele_bot_server "* ]]; then
+    echo "  测试人脸检测: TEST_RKNN=1 ./ele_bot_server"
+    echo "  测试指定模型: TEST_RKNN=1 RKNN_MODEL=./model/deepghs/yolo-face/yolo_face.rknn ./ele_bot_server"
+    echo "  测试指定图片: TEST_RKNN=1 TEST_IMAGE=./assets/images/test.png ./ele_bot_server"
+fi
