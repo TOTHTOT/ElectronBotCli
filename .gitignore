@@ -26,3 +26,4 @@ nul
 /.specify/integration.json
 /.specify/integrations/kimi.manifest.json
 /.specify/integrations/speckit.manifest.json
+/assets/lib/sherpa-onnx-rknn/

@@ -36,7 +36,6 @@ hf-hub = { workspace = true }
 # 硬件与 AI
 electron-bot = { workspace = true }
 BotEyes = { workspace = true }
-sherpa-onnx = { workspace = true }
 cpal = { workspace = true }
 candle-core = { workspace = true }
 candle-transformers = { workspace = true }
@@ -59,7 +58,12 @@ nokhwa = { workspace = true, features = ["input-avfoundation"] }
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
 rknn-rs = { workspace = true }
 librga = { workspace = true }
+# aarch64 链接官方 RKNN 版预编译 shared 库 (provider="rknn" 走 NPU);
+# 库目录由交叉镜像 ENV SHERPA_ONNX_LIB_DIR 注入, sys crate 自动拷 .so + 加 $ORIGIN rpath
+sherpa-onnx = { workspace = true, default-features = false, features = ["shared"] }
 
 # PC 平台
 [target.'cfg(not(all(target_os = "linux", target_arch = "aarch64")))'.dependencies]
 ort = { workspace = true }
+# PC 保持 static 链接, 行为不变
+sherpa-onnx = { workspace = true, features = ["static"] }

@@ -95,8 +95,16 @@ ssh-copy-id radxa@192.168.2.159
 - scp 后 sha256 校验, 传输截断直接报错
 - Cargo 缓存挂载进容器, 增量编译命中 (实测 4 分 → 51 秒)
 
+编译环境完全定义在 `Cross.toml` + `Dockerfile.cross`: 基座固定为 Ubuntu 20.04
+(focal, glibc 2.31) 的 cross 镜像 digest, 与设备 (Debian bullseye, glibc 2.31) 对齐;
+`libasound2-dev:arm64` / `libssl-dev:arm64` 等依赖在镜像构建时一次性装好
+(arm64 包走 ubuntu-ports 源, 这是 focal 的正确仓库).
+
 升级 cross-rs base image:
 ```shell
+# ⚠️ 只能用 focal (glibc 2.31) 的镜像 digest — :main 已升到 Ubuntu 24.04
+# (glibc 2.39), 产物在设备上会报 GLIBC_2.32+ not found. 升级前先验证:
+docker run --rm <新镜像> ldd --version   # 必须 ≤ 2.31
 docker pull --platform linux/amd64 ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
 docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge
 # 把输出的 digest 替换 Dockerfile.cross 里的 FROM 行

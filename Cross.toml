@@ -1,47 +1,9 @@
 [target.aarch64-unknown-linux-gnu]
-# cross-rs 用 Dockerfile.cross 现 build 镜像 (apt 装 arm64 依赖 + 拷 rknnrt),
-# 不走 cross-rs 官方 prebuilt 镜像. `image` 字段虽然写了 edge, 但因
-# `dockerfile` 同时存在, cross 会走 Dockerfile 路径, image 仅作为
-# Dockerfile 的 FROM base. Dockerfile 里的 RUN 才是真 apt 来源.
-image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:edge"
 dockerfile = "Dockerfile.cross"
 
-# 挂载主机 cargo 缓存进容器, 避免每次全量下载 sherpa-onnx 等大依赖
-# 增量编译也能受益 (虽然 cross-rs 不持久 target/, 但 cargo 自身缓存能复用)
-# 注意: 路径用的是当前开发机的 cargo 目录, 若你的 home 目录不同, 请改成对应路径.
-[target.aarch64-unknown-linux-gnu.volumes]
-"/Users/yangyihui/.cargo/git" = { path = "/cargo/git", read-only = true }
-"/Users/yangyihui/.cargo/registry" = { path = "/cargo/registry", read-only = true }
-
 [target.aarch64-unknown-linux-gnu.env]
-# cross-rs pkg-config 在 cross compile 时默认拒绝跨架构 lib, 这里显式允许.
-PKG_CONFIG_ALLOW_CROSS = "1"
-# arm64 的 .pc 文件由 base 镜像 / apt 提供, 路径告诉 pkg-config 去哪里找.
-PKG_CONFIG_PATH = "/usr/lib/aarch64-linux-gnu/pkgconfig"
-
-# 透传 host 代理 (公司 / 学校网络常需要) 给容器里的 cargo / reqwest.
-env.passthrough = [
+passthrough = [
     "http_proxy",
     "https_proxy",
     "all_proxy",
 ]
-
-[package.metadata.cross.target.aarch64-unknown-linux-gnu]
-# 链接 RKNN runtime (assets/lib 里的 .so). cross 容器把工作区挂在 /project.
-rustflags = ["-L", "/project/assets/lib"]
-
-
-# ── 跟 Dockerfile.cross 的分工 ───────────────────────────────────────────────
-# Cross.toml         → cross-rs 读, 决定容器源 + 注入 env + 透传代理 + rustflags
-# Dockerfile.cross   → Docker 读, 在 cross-rs base 镜像之上装 apt 包 + 拷本地 .so
-#
-# 注意: 此处 pre-build 数组已注释, 跟 Dockerfile.cross 的 RUN 内容重复.
-# 留给 cross-rs 标准 prebuilt 镜像路径 (image 单独生效) 使用. 当 dockerfile
-# 字段生效时, cross-rs 跳过 pre-build, 只跑 Dockerfile, 单源装包不会重复.
-#
-# 如需回退到只用 cross prebuilt 镜像路径 (不依赖 Dockerfile), 取消以下注释:
-#pre-build = [
-#    "dpkg --add-architecture arm64",
-#    "apt-get update",
-#    "apt-get install -y libasound2-dev:arm64 libssl-dev:arm64 pkg-config",
-#]

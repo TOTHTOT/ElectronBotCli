@@ -28,8 +28,8 @@ toml = "1.0.1"
 electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git", version = "0.1.0" }
 BotEyes = { git = "https://github.com/TOTHTOT/BotEyes", version = "0.1.2" }
 cpal = "0.17.1"
-# 音频的asr推理框架
-sherpa-onnx = "1.12.39"
+# 音频的asr推理框架 (default-features 关掉, 各平台显式选 static/shared)
+sherpa-onnx = { version = "1.12.39", default-features = false }
 # 离线llm推理框架
 candle-core = "0.9"
 candle-transformers = "0.9"
