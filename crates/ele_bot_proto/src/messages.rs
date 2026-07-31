@@ -5,7 +5,7 @@
 
 use crate::types::{
     AppConfig, CameraInfoDto, DeviceInfoDto, DisplayMode, FacePosition, JointConfig, JointState,
-    LlmResponse, Mood, SERVO_COUNT,
+    LlmResponse, Mood, SystemStatsDto, SERVO_COUNT,
 };
 use serde::{Deserialize, Serialize};
 
@@ -109,6 +109,8 @@ pub enum ServerEvent {
     /// 服务端枚举到的所有摄像头 (响应 `ListCameras`).
     /// 列表为空时表示当前没有任何可用摄像头, 不代表错误.
     Cameras { cameras: Vec<CameraInfoDto> },
+    /// 系统状态 (SoC 温度 / CPU / 内存), 服务端定时推送
+    SystemStats { stats: SystemStatsDto },
 }
 
 impl ServerEvent {
@@ -223,6 +225,40 @@ mod tests {
         assert!(json.contains("\"type\":\"output_devices\""));
         let parsed = ServerEvent::from_json(&json).unwrap();
         assert!(matches!(parsed, ServerEvent::OutputDevices { .. }));
+    }
+
+    #[test]
+    fn system_stats_roundtrip() {
+        let evt = ServerEvent::SystemStats {
+            stats: SystemStatsDto {
+                soc_temp_c: Some(52.3),
+                cpu_usage: 17.5,
+                mem_used_mb: 812,
+                mem_total_mb: 2048,
+            },
+        };
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"system_stats\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        match parsed {
+            ServerEvent::SystemStats { stats } => {
+                assert_eq!(stats.soc_temp_c, Some(52.3));
+                assert_eq!(stats.mem_total_mb, 2048);
+            }
+            _ => panic!("expected SystemStats event"),
+        }
+        // 温度缺失的平台 (非 Linux) 也应正常往返
+        let evt = ServerEvent::SystemStats {
+            stats: SystemStatsDto {
+                soc_temp_c: None,
+                ..Default::default()
+            },
+        };
+        let json = evt.to_json().unwrap();
+        assert!(matches!(
+            ServerEvent::from_json(&json).unwrap(),
+            ServerEvent::SystemStats { .. }
+        ));
     }
 
     #[test]

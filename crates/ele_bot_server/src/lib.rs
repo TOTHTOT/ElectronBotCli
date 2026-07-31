@@ -11,6 +11,7 @@ pub mod media;
 pub mod model_manager;
 pub mod robot;
 pub mod state;
+pub mod sysmon;
 pub mod test_mode;
 pub mod vision;
 pub mod web;

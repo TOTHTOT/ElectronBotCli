@@ -22,7 +22,12 @@ fn status_color(ok: bool) -> Color {
 /// - 用 `│` 作"游标", 标识当前音量位置 (即便 0 也保留 1 个 `│` 在最左)
 /// - 字符用 `█` (满) + `─` (空), 满部分 Cyan, 游标 Yellow
 fn render_volume_bar(volume: i32) -> String {
-    let v = volume.clamp(0, 100) as usize;
+    render_bar(volume)
+}
+
+/// 通用百分比条, 与音量条同形态 (0..=100 截断)
+fn render_bar(pct: i32) -> String {
+    let v = pct.clamp(0, 100) as usize;
     // 内宽 = 总宽 - 2 (左右括号)
     let inner = VOLUME_BAR_WIDTH - 2;
     // 满格数, 至少 1 个 `█` (音量 > 0) 或 0 个 (音量 = 0)
@@ -46,7 +51,7 @@ fn render_volume_bar(volume: i32) -> String {
 
 pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
     // 抓服务端镜像快照, 锁立刻释放, 避免 render 期间持锁
-    let (is_connected, network_label, volume) = {
+    let (is_connected, network_label, volume, sys_stats) = {
         let server = app.server.lock().unwrap();
         (
             server.robot_connected,
@@ -56,6 +61,7 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
                 "未连接"
             },
             server.volume,
+            server.sys_stats,
         )
     };
     let battery: u32 = 85; // TODO: 后续获取真实电量
@@ -68,6 +74,31 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
         1..=30 => "小声",
         31..=60 => "中等",
         _ => "大声",
+    };
+
+    // 系统状态三行: 未收到推送时统一显示 "--"
+    let (temp_text, temp_ok, cpu_text, mem_text) = match sys_stats {
+        Some(s) => {
+            let temp = s
+                .soc_temp_c
+                .map(|t| format!("{t:.1}°C"))
+                .unwrap_or_else(|| "--".into());
+            let temp_ok = s.soc_temp_c.is_none_or(|t| t < 80.0);
+            let cpu_bar = render_bar(s.cpu_usage as i32);
+            let mem_pct = if s.mem_total_mb > 0 {
+                (s.mem_used_mb * 100 / s.mem_total_mb) as i32
+            } else {
+                0
+            };
+            let mem_bar = render_bar(mem_pct);
+            (
+                temp,
+                temp_ok,
+                format!("{cpu_bar}  {:.1}%", s.cpu_usage),
+                format!("{mem_bar}  {} / {} MiB", s.mem_used_mb, s.mem_total_mb),
+            )
+        }
+        None => ("--".into(), true, "--".into(), "--".into()),
     };
 
     // 使用 Table 实现网格布局
@@ -105,6 +136,21 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
                     format!("{volume_bar}  {volume} ({volume_label})"),
                     Style::new().fg(Color::Cyan),
                 )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("SoC 温度", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(
+                    temp_text,
+                    Style::new().fg(status_color(temp_ok)),
+                )),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("CPU 占用", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(cpu_text, Style::new().fg(Color::Cyan))),
+            ]),
+            Row::new(vec![
+                Cell::from(Span::styled("内存", Style::new().fg(Color::Yellow))),
+                Cell::from(Span::styled(mem_text, Style::new().fg(Color::Cyan))),
             ]),
         ],
         &[Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)],

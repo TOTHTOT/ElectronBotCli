@@ -127,6 +127,8 @@ pub struct ServerStateMirror {
     pub net_connected: bool,
     /// 最近一次服务端检测到的人脸位置(用于 UI 可选显示)
     pub last_face: Option<ele_bot_proto::FacePosition>,
+    /// 服务端系统状态 (SoC 温度/CPU/内存), `None` = 尚未收到推送
+    pub sys_stats: Option<ele_bot_proto::SystemStatsDto>,
 }
 
 /// 主应用
@@ -184,6 +186,7 @@ impl App {
                 last_error: None,
                 net_connected: true,
                 last_face: None,
+                sys_stats: None,
             }),
             config: AppConfig::default(),
             face_tracking_enabled: false,
@@ -315,6 +318,9 @@ impl App {
             }
             ServerEvent::Volume { value } => {
                 server.volume = value;
+            }
+            ServerEvent::SystemStats { stats } => {
+                server.sys_stats = Some(stats);
             }
             // InputDevices / OutputDevices / Cameras 已在 apply_event 入口短路处理
             ServerEvent::InputDevices { .. }

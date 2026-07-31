@@ -229,6 +229,22 @@ pub struct CameraInfoDto {
     pub display: String,
 }
 
+/// 服务端系统状态 (定时推送, 见 `ServerEvent::SystemStats`)
+///
+/// CPU/内存跨平台采集 (sysinfo); SoC 温度目前仅 Linux thermal zone
+/// (RK3566 的 `soc-thermal`), 其它平台为 `None`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct SystemStatsDto {
+    /// SoC 温度 (摄氏度), 平台不支持时为 `None`
+    pub soc_temp_c: Option<f32>,
+    /// CPU 总占用率 [0, 100]
+    pub cpu_usage: f32,
+    /// 已用内存 (MiB)
+    pub mem_used_mb: u64,
+    /// 总内存 (MiB)
+    pub mem_total_mb: u64,
+}
+
 impl AppConfig {
     pub const CONFIG_PATH: &'static str = "config.toml";
 

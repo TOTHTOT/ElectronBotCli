@@ -32,6 +32,7 @@ async-stream = { workspace = true }
 base64 = { workspace = true }
 image = { workspace = true }
 hf-hub = { workspace = true }
+sysinfo = { workspace = true }
 
 # 硬件与 AI
 electron-bot = { workspace = true }

@@ -64,6 +64,9 @@ async fn main() -> anyhow::Result<()> {
     let state = SharedState::new().await?;
     log::info!("hardware initialized");
 
+    // 系统状态采集 (SoC 温度 / CPU / 内存), 周期性广播给 WS 客户端
+    ele_bot_server::sysmon::spawn(state.bus_tx.clone());
+
     // 启动 WebSocket 服务
     ele_bot_server::ws::run(state, &bind).await?;
 
