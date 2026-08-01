@@ -498,12 +498,10 @@ mod tests {
         assert!(should_publish_volume(0, 10, 0, 1_000_000));
     }
 
-    #[test]
-    #[ignore]
-    fn test_recognition_with_audio_file() {
-        let samples = load_wav_samples(Path::new("assets/audio/asr_example_zh.wav"))
-            .expect("failed to load wav");
-
+    /// 把 `samples` 喂给 `recognition_loop` 跑完整识别, 返回 bus 收集到的
+    /// 全部 `AsrText`. 喂数据在独立线程 (audio_tx 端), 识别在主线程
+    /// (recognizer/vad 不是 Send); 尾部补 150 帧静音让 VAD 判停.
+    fn run_recognition_on_samples(samples: Vec<f32>) -> Vec<String> {
         let model_path = ModelManager::global()
             .get("sense_voice")
             .expect("sense_voice model not found");
@@ -520,29 +518,23 @@ mod tests {
 
         let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(4);
 
-        // Feed audio in a separate thread since audio_tx doesn't implement Send
         let handle = std::thread::spawn(move || {
             let chunk_size = 1600;
             for chunk in samples.chunks(chunk_size) {
                 audio_tx.send(chunk.to_vec()).expect("send failed");
             }
-
-            // Send silence frames to give VAD time to detect end of speech
+            // 静音帧给 VAD 时间检测 end of speech
             for _ in 0..150 {
-                audio_tx
-                    .send(vec![0.0f32; chunk_size])
-                    .expect("send failed");
+                audio_tx.send(vec![0.0f32; chunk_size]).expect("send failed");
             }
             drop(audio_tx);
         });
 
-        // Run recognition on main thread since recognizer/vad are not Send.
         // 识别结果经 EventBus 流出, 测试通过订阅 bus 收集.
         let bus = crate::event_bus::EventBus::new(64);
         let mut bus_rx = bus.subscribe();
         let running = Arc::new(AtomicBool::new(true));
         let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running);
-
         handle.join().expect("thread panicked");
 
         let mut results: Vec<String> = Vec::new();
@@ -551,6 +543,14 @@ mod tests {
                 results.push(t);
             }
         }
+        results
+    }
+
+    #[test]
+    #[ignore]
+    fn test_recognition_with_audio_file() {
+        let samples = load_wav_samples(&test_wav_path()).expect("failed to load wav");
+        let results = run_recognition_on_samples(samples);
         assert!(!results.is_empty(), "no recognition results");
         println!("Recognition results: {:?}", results);
     }
@@ -564,49 +564,7 @@ mod tests {
         let samples = load_wav_samples(&test_wav_path()).expect("failed to load wav");
         let expected = "欢迎大家来体验达摩院推出的语音识别模型";
 
-        let model_path = ModelManager::global()
-            .get("sense_voice")
-            .expect("sense_voice model not found");
-        let vad_path = ModelManager::global()
-            .get("silero_vad")
-            .expect("silero_vad model not found");
-        let tokens_path = ModelManager::global()
-            .get("sense_voice_tokens")
-            .expect("sense_voice_tokens not found");
-
-        let mut recognizer =
-            init_sense_voice(&model_path, &tokens_path).expect("Failed to create recognizer");
-        let mut vad = init_silero_vad(&vad_path).expect("Failed to create VAD");
-
-        let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<Vec<f32>>(4);
-
-        let handle = std::thread::spawn(move || {
-            let chunk_size = 1600;
-            for chunk in samples.chunks(chunk_size) {
-                audio_tx.send(chunk.to_vec()).expect("send failed");
-            }
-            for _ in 0..150 {
-                audio_tx
-                    .send(vec![0.0f32; chunk_size])
-                    .expect("send failed");
-            }
-            drop(audio_tx);
-        });
-
-        // 识别结果经 EventBus 流出, 测试通过订阅 bus 收集.
-        let bus = crate::event_bus::EventBus::new(64);
-        let mut bus_rx = bus.subscribe();
-        let running = Arc::new(AtomicBool::new(true));
-        let _ = recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running);
-        handle.join().expect("thread panicked");
-
-        let mut results: Vec<String> = Vec::new();
-        while let Ok(evt) = bus_rx.try_recv() {
-            if let crate::event_bus::BusEvent::AsrText(t) = evt {
-                results.push(t);
-            }
-        }
-        let recognized: String = results.join("");
+        let recognized: String = run_recognition_on_samples(samples).join("");
         let common = longest_common_prefix_chars(&recognized, expected);
 
         println!("===== test_recognition_no_lost_chars =====");
