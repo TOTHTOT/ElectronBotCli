@@ -288,6 +288,11 @@ fn should_publish_volume(current: i32, new_value: i32, last_ms: u64, now_ms: u64
 }
 
 /// Build audio input stream for ASR
+///
+/// 按设备 `default_input_config` 上报的采样格式建流, 回调内统一转 f32
+/// 交给 `process_audio_chunk`. 硬编码 f32 会在仅支持 S16 的硬件
+/// (USB 声卡的 `front:` / `hw:` PCM) 上被 cpal 直接拒绝:
+/// "Sample format 'f32' is not supported by hardware".
 pub fn build_asr_stream(
     device: &Device,
     volume: Arc<AtomicI32>,
@@ -302,16 +307,44 @@ pub fn build_asr_stream(
         sample_rate: SAMPLE_RATE as SampleRate,
         buffer_size: cpal::BufferSize::Fixed(512),
     };
-
     let channels = config.channels() as usize;
-    let volume_clone = volume.clone();
-    let bus_clone = bus.clone();
 
+    match config.sample_format() {
+        cpal::SampleFormat::I16 => {
+            build_typed_stream::<i16>(device, stream_config, channels, volume, audio_tx, bus)
+        }
+        cpal::SampleFormat::U16 => {
+            build_typed_stream::<u16>(device, stream_config, channels, volume, audio_tx, bus)
+        }
+        cpal::SampleFormat::I32 => {
+            build_typed_stream::<i32>(device, stream_config, channels, volume, audio_tx, bus)
+        }
+        cpal::SampleFormat::F32 => {
+            build_typed_stream::<f32>(device, stream_config, channels, volume, audio_tx, bus)
+        }
+        format => anyhow::bail!("Unsupported input sample format: {format}"),
+    }
+}
+
+/// 按具体采样类型建输入流, 回调里转成 f32 再走统一的音量/ASR 处理.
+fn build_typed_stream<T>(
+    device: &Device,
+    stream_config: cpal::StreamConfig,
+    channels: usize,
+    volume: Arc<AtomicI32>,
+    audio_tx: SyncSender<Vec<f32>>,
+    bus: crate::event_bus::EventBus,
+) -> anyhow::Result<Stream>
+where
+    T: cpal::SizedSample,
+    f32: cpal::FromSample<T>,
+{
     // 根据设置的stream_config申请音频流
     Ok(device.build_input_stream(
-        &stream_config,
-        move |data: &[f32], _: &_| {
-            process_audio_chunk(data, channels, &volume_clone, &audio_tx, &bus_clone);
+        stream_config,
+        move |data: &[T], _: &_| {
+            let f32_data: Vec<f32> = data.iter().map(|s| s.to_sample::<f32>()).collect();
+            process_audio_chunk(&f32_data, channels, &volume, &audio_tx, &bus);
         },
         |e| log::error!("Audio stream error: {e}"),
         None,
@@ -410,8 +443,12 @@ mod tests {
 
     #[test]
     fn test_load_wav_samples() {
-        let samples = load_wav_samples(Path::new("assets/audio/asr_example_zh.wav"))
-            .expect("failed to load wav");
+        // 锚到 workspace 根: cargo test 的 cwd 是 crate 目录, 相对路径会落空
+        let samples = load_wav_samples(Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/audio/asr_example_zh.wav"
+        )))
+        .expect("failed to load wav");
         assert!(!samples.is_empty());
         assert!(samples.len() >= 16000);
         assert!(
