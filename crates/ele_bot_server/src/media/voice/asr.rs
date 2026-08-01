@@ -21,7 +21,7 @@
 //! 阻塞 cpal backend 停回调的 race.
 #![allow(dead_code)]
 
-use crate::media::voice::VAD_WINDOW_SIZE;
+use crate::media::voice::{AsrModelPaths, VAD_WINDOW_SIZE};
 use cpal::traits::DeviceTrait;
 use cpal::{Device, SampleRate, Stream};
 use sherpa_onnx::{
@@ -353,15 +353,13 @@ where
 
 /// Speech recognition thread entry
 pub fn recognition_thread(
-    sense_voice_model_path: PathBuf,
-    silero_vad_model_path: PathBuf,
-    tokens_path: PathBuf,
+    model_path: AsrModelPaths,
     audio_rx: Receiver<Vec<f32>>,
     bus: crate::event_bus::EventBus,
     running: Arc<AtomicBool>,
 ) -> anyhow::Result<()> {
-    let mut recognizer = init_sense_voice(&sense_voice_model_path, &tokens_path)?;
-    let mut vad = init_silero_vad(&silero_vad_model_path)?;
+    let mut recognizer = init_sense_voice(&model_path.sense_voice, &model_path.tokens)?;
+    let mut vad = init_silero_vad(&model_path.silero_vad)?;
     recognition_loop(&mut recognizer, &mut vad, audio_rx, bus, running)
 }
 
@@ -525,7 +523,9 @@ mod tests {
             }
             // 静音帧给 VAD 时间检测 end of speech
             for _ in 0..150 {
-                audio_tx.send(vec![0.0f32; chunk_size]).expect("send failed");
+                audio_tx
+                    .send(vec![0.0f32; chunk_size])
+                    .expect("send failed");
             }
             drop(audio_tx);
         });

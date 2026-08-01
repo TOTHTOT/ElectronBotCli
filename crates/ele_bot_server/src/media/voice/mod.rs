@@ -32,7 +32,6 @@ pub const SAMPLE_RATE: u32 = 16000;
 ///
 /// 三者必须同时存在才能跑识别, 打包在一起避免漏传.
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct AsrModelPaths {
     pub sense_voice: PathBuf,
     pub silero_vad: PathBuf,
@@ -55,7 +54,6 @@ impl AsrModelPaths {
 
 /// TTS 模型路径集合 (vits 模型 + tokens + lexicon)
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub struct TtsModelPaths {
     pub model: PathBuf,
     pub tokens: PathBuf,
@@ -121,35 +119,21 @@ impl VoiceManager {
         let running = Arc::new(AtomicBool::new(true));
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
 
-        // 查找输入麦克风并建流. 配置的设备不可用 (枚举不到 / 建流失败) 时
-        // 回退系统默认输入设备; 都失败仅降级为无 ASR, 不影响 TTS 和主流程.
-        let stream = find_input_device(speech_name, speech_device_id)
-            .and_then(|device| {
-                build_asr_stream(&device, volume.clone(), audio_tx.clone(), bus.clone())
-            })
-            .or_else(|e| {
-                log::warn!("Configured input device unusable ({e}), trying default input");
-                let device = cpal::default_host().default_input_device().ok_or(e)?;
-                build_asr_stream(&device, volume.clone(), audio_tx, bus.clone())
-            })
-            .and_then(|stream| {
-                stream.play()?;
-                Ok(stream)
-            })
-            .map_err(|e| log::warn!("Cannot init input audio: {e}"))
-            .ok();
+        // 查找输入麦克风并建流; 失败仅降级为无 ASR, 不影响 TTS 和主流程.
+        let stream = open_input_stream(
+            speech_name,
+            speech_device_id,
+            volume.clone(),
+            audio_tx,
+            bus.clone(),
+        )
+        .map_err(|e| log::warn!("Cannot init input audio: {e}"))
+        .ok();
 
         // 创建解析音频线程, 识别结果经 EventBus 流向 LLM (不再有专用 text channel).
         let running_for_thread = running.clone();
         thread::spawn(move || {
-            if let Err(e) = recognition_thread(
-                asr_paths.sense_voice,
-                asr_paths.silero_vad,
-                asr_paths.tokens,
-                audio_rx,
-                bus,
-                running_for_thread,
-            ) {
+            if let Err(e) = recognition_thread(asr_paths, audio_rx, bus, running_for_thread) {
                 log::error!("recognition_thread failed: {e:?}");
             }
         });
@@ -305,7 +289,7 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
         })
         .collect();
     log::debug!(
-        "target: name={speech_name:?}, id={device_id:?}, input audio devices: {:?}",
+        "input target: name={speech_name:?}, id={device_id:#?}, input audio devices: {:#?}",
         devices
             .iter()
             .map(|(id, name, _)| (id.as_str(), name.as_str()))
@@ -349,6 +333,26 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
     }
 
     anyhow::bail!("No audio input device found: name={speech_name:?}, id={device_id:?}");
+}
+
+/// 找输入设备并建起 ASR 流: 优先配置的设备, 枚举不到 / 建流失败时
+/// 回退系统默认输入设备. 返回已 `play()` 的流.
+fn open_input_stream(
+    speech_name: &str,
+    speech_device_id: Option<&str>,
+    volume: Arc<AtomicI32>,
+    audio_tx: mpsc::SyncSender<Vec<f32>>,
+    bus: crate::event_bus::EventBus,
+) -> Result<Stream> {
+    let stream = find_input_device(speech_name, speech_device_id)
+        .and_then(|device| build_asr_stream(&device, volume.clone(), audio_tx.clone(), bus.clone()))
+        .or_else(|e| {
+            log::warn!("Configured input device unusable ({e}), trying default input");
+            let device = cpal::default_host().default_input_device().ok_or(e)?;
+            build_asr_stream(&device, volume, audio_tx, bus)
+        })?;
+    stream.play()?;
+    Ok(stream)
 }
 
 /// 设备信息 - 用于在设置页面中显示并区分同名设备
@@ -506,7 +510,7 @@ pub fn find_output_device(name: &str, device_id: Option<&str>) -> Option<Device>
         })
         .unwrap_or_default();
     log::debug!(
-        "target: name={name:?}, id={device_id:?}, output audio devices: {:?}",
+        "output target: name={name:?}, id={device_id:#?}, output audio devices: {:#?}",
         devices
             .iter()
             .map(|(id, name, _)| (id.as_str(), name.as_str()))
