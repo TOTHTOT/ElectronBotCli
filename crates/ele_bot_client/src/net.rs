@@ -37,7 +37,7 @@ impl Client {
                         continue;
                     }
                 };
-                if ws_tx.send(Message::Text(json)).await.is_err() {
+                if ws_tx.send(Message::Text(json.into())).await.is_err() {
                     log::debug!("ws send failed, connection closed");
                     break;
                 }

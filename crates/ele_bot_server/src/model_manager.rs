@@ -17,11 +17,24 @@ fn download_from_hf(
     key: &str,
     repo_id: &str,
     filename: &str,
-    api: &hf_hub::api::sync::Api,
+    client: &hf_hub::HFClientSync,
 ) -> Option<PathBuf> {
-    let repo = api.model(repo_id.to_string());
+    let (owner, name) = repo_id.split_once('/')?;
+    let repo = client.model(owner, name);
     log::info!("正在下载 [{key}] from {repo_id}/{filename} ...");
-    match repo.get(filename) {
+    // 离线优先: 设备常在弱网/无外网环境, 先查本地 HF 缓存,
+    // 未命中再走在线下载 (hf-hub 1.0 默认在线优先, 弱网下会在
+    // 元数据校验上反复重试卡死初始化).
+    let result = match repo
+        .download_file()
+        .filename(filename)
+        .local_files_only(true)
+        .send()
+    {
+        Ok(path) => Ok(path),
+        Err(_) => repo.download_file().filename(filename).send(),
+    };
+    match result {
         Ok(path) => {
             log::info!("✓ 资源就绪 [{key}]: {path:?}");
             Some(path)
@@ -68,8 +81,8 @@ impl ModelManager {
 
         #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
         {
-            use hf_hub::api::sync::Api;
-            let api = Api::new()?;
+            use hf_hub::HFClientSync;
+            let api = HFClientSync::new()?;
 
             for (key, repo, filename, rknn) in &models {
                 // 优先使用 rknn 路径, 否则使用 hf 默认路径
@@ -86,8 +99,8 @@ impl ModelManager {
 
         #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
         {
-            use hf_hub::api::sync::Api;
-            let api = Api::new()?;
+            use hf_hub::HFClientSync;
+            let api = HFClientSync::new()?;
 
             for (key, repo, filename, _rknn) in &models {
                 if let Some(path) = download_from_hf(key, repo, filename, &api) {

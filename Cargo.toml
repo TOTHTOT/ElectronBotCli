@@ -27,22 +27,23 @@ toml = "1.0.1"
 # 服务端专用
 electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git", version = "0.1.0" }
 BotEyes = { git = "https://github.com/TOTHTOT/BotEyes", version = "0.1.2" }
-cpal = "0.17.1"
-# 音频的asr推理框架 (default-features 关掉, 各平台显式选 static/shared)
-sherpa-onnx = { version = "1.12.39", default-features = false }
+cpal = "0.18.1"
+# 音频的asr推理框架 (default-features 关掉, 各平台显式选 static/shared;
+# 升级版本时必须同步替换 assets/lib/sherpa-onnx-rknn 的预编译库)
+sherpa-onnx = { version = "1.13.4", default-features = false }
 # 离线llm推理框架
-candle-core = "0.9"
-candle-transformers = "0.9"
-tokenizers = "0.22.2"
+candle-core = "0.11"
+candle-transformers = "0.11"
+tokenizers = "0.23.1"
 # 在线llm运行框架
-async-openai = { version = "0.34.0", features = ["_api", "chat-completion", "chat-completion-types"] }
+async-openai = { version = "0.41.2", features = ["_api", "chat-completion", "chat-completion-types"] }
 # hugging face 模型下载与管理
-hf-hub = { version = "0.5.0", default-features = false, features = ["ureq", "rustls-tls"] }
+hf-hub = { version = "1.0.0", default-features = false, features = ["blocking", "rustls-tls"] }
 sysinfo = "0.38"
 axum = { version = "0.8", features = ["ws", "macros"] }
 tokio-stream = "0.1"
 async-stream = "0.3"
-base64 = "0.22"
+base64 = "0.23"
 image = "0.25.9"
 chrono = "0.4"
 simplelog = "0.12"
@@ -58,8 +59,8 @@ ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "n
 # 客户端专用
 ratatui = "0.30.0"
 crossterm = "0.29.0"
-tokio-tungstenite = { version = "0.24", features = ["connect", "tokio-native-tls"] }
-unicode-width = "0.1"
+tokio-tungstenite = { version = "0.30", features = ["connect", "tokio-native-tls"] }
+unicode-width = "0.2"
 
 [profile.release]
 opt-level = 3

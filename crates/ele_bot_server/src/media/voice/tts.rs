@@ -303,7 +303,7 @@ impl TtsPlayer {
         };
 
         let stream = self.device.build_output_stream(
-            &config,
+            config.clone(),
             Self::write_audio_callback(audio.samples.clone(), played.clone()),
             |err| log::error!("TTS 流错误: {err}"),
             None,
@@ -363,7 +363,7 @@ impl TtsPlayer {
         // 的样本, 写进 cpal 推过来的输出 buffer. synthesis_done && buffer 空
         // 时设 playback_done, 让调用方通过 is_done() 退出.
         let stream = self.device.build_output_stream(
-            &config,
+            config,
             move |data: &mut [f32], _: &cpal::OutputCallbackInfo| {
                 let mut buffer = buffer_clone.lock().unwrap();
 
@@ -504,7 +504,11 @@ mod tests {
             .expect("Failed to synthesize");
 
         eprintln!("Saving WAV file...");
-        let output_path = "./assets/audio/tts_test_output.wav";
+        // 锚到 workspace 根: cargo test 的 cwd 是 crate 目录, 相对路径会落空
+        let output_path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/audio/tts_test_output.wav"
+        );
         audio
             .save_wav(output_path)
             .expect("Failed to save WAV file");
