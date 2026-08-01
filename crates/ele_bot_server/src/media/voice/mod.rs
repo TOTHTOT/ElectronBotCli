@@ -121,18 +121,25 @@ impl VoiceManager {
         let running = Arc::new(AtomicBool::new(true));
         let (audio_tx, audio_rx) = mpsc::sync_channel::<Vec<f32>>(4); // 原始音频数据传输通道
 
-        // 查找输入麦克风, 当设备不存在时也会继续执行, 只是不会运行到 asr 相关功能
-        let stream = match find_input_device(speech_name, speech_device_id) {
-            Ok(device) => {
-                let stream = build_asr_stream(&device, volume.clone(), audio_tx, bus.clone())?;
+        // 查找输入麦克风并建流. 配置的设备不可用 (枚举不到 / 建流失败) 时
+        // 回退系统默认输入设备; 都失败仅降级为无 ASR, 不影响 TTS 和主流程.
+        let stream = find_input_device(speech_name, speech_device_id)
+            .and_then(|device| {
+                build_asr_stream(&device, volume.clone(), audio_tx.clone(), bus.clone())
+            })
+            .or_else(|e| {
+                log::warn!("Configured input device unusable ({e}), trying default input");
+                let device = cpal::default_host()
+                    .default_input_device()
+                    .ok_or(e)?;
+                build_asr_stream(&device, volume.clone(), audio_tx, bus.clone())
+            })
+            .and_then(|stream| {
                 stream.play()?;
-                Some(stream)
-            }
-            Err(e) => {
-                log::warn!("Cannot find input device: {e}");
-                None
-            }
-        };
+                Ok(stream)
+            })
+            .map_err(|e| log::warn!("Cannot init input audio: {e}"))
+            .ok();
 
         // 创建解析音频线程, 识别结果经 EventBus 流向 LLM (不再有专用 text channel).
         let running_for_thread = running.clone();
@@ -608,7 +615,7 @@ fn play_output_samples(
     duration_ms: u32,
 ) -> Result<(), anyhow::Error> {
     let stream = device.build_output_stream(
-        config,
+        config.clone(),
         write_audio_callback(samples),
         |err| log::error!("Beep stream error: {err}"),
         None,
