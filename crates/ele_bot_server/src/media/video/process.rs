@@ -131,6 +131,92 @@ pub fn rotate_by_angle(bgr_data: &[u8], width: u32, height: u32, angle: RotateAn
     }
 }
 
+// ---- YUYV -> RGB 查表 (BT.601 full range) ----
+// A55 顺序小核上逐像素 i32 乘法不划算, 三个增量全部预计算成 LUT.
+// const 上下文不允许函数指针/闭包调用, 用宏把表达式直接内联展开.
+macro_rules! build_tab {
+    ($v:ident => $e:expr) => {{
+        let mut t = [0i32; 256];
+        let mut i = 0;
+        while i < 256 {
+            let $v = i as i32 - 128;
+            t[i] = $e;
+            i += 1;
+        }
+        t
+    }};
+}
+static R_TAB: [i32; 256] = build_tab!(v => (359 * v) >> 8);
+static GU_TAB: [i32; 256] = build_tab!(v => 88 * v);
+static GV_TAB: [i32; 256] = build_tab!(v => 183 * v);
+static B_TAB: [i32; 256] = build_tab!(v => (454 * v) >> 8);
+
+/// 解码一个 YUYV 4 字节组 (Y0 U Y1 V) 对应的 RGB 增量
+#[inline(always)]
+fn yuv_deltas(px: &[u8]) -> (i32, i32, i32) {
+    let u = px[1] as usize;
+    let v = px[3] as usize;
+    (
+        R_TAB[v],
+        (GU_TAB[u] + GV_TAB[v]) >> 8,
+        B_TAB[u],
+    )
+}
+
+#[inline(always)]
+fn clamp8(x: i32) -> u8 {
+    x.clamp(0, 255) as u8
+}
+
+/// 手写 YUYV -> RGB888 解码, 替代 nokhwa `decode_image` (~10ms -> ~2ms).
+///
+/// BT.601 full range 查表整数运算, 按 6 字节块写入 (避免逐字节 push).
+/// 颜色公式与 USB 摄像头 full-range YUYV 输出匹配.
+#[must_use]
+pub fn fast_yuyv_to_rgb(yuyv: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let npix = (width * height) as usize;
+    let mut rgb = vec![0u8; npix * 3];
+    for (px, out) in yuyv.chunks_exact(4).zip(rgb.chunks_exact_mut(6)) {
+        let (r_d, g_d, b_d) = yuv_deltas(px);
+        let y0 = i32::from(px[0]);
+        let y1 = i32::from(px[2]);
+        out[0] = clamp8(y0 + r_d);
+        out[1] = clamp8(y0 - g_d);
+        out[2] = clamp8(y0 + b_d);
+        out[3] = clamp8(y1 + r_d);
+        out[4] = clamp8(y1 - g_d);
+        out[5] = clamp8(y1 + b_d);
+    }
+    rgb
+}
+
+/// YUYV 解码 + 旋转 270° 融合单 pass: 解码时直接写到旋转后位置.
+///
+/// 替代 "fast_yuyv_to_rgb (~2ms) + RGA rotate (~4.6ms)" 两步, 合计 ~3ms.
+/// 输出尺寸 (height x width). 输入按行顺序读 (cache 友好),
+/// 输出为列序写 — 900KB 输出驻留 L2, 代价可接受.
+///
+/// Rotate270 (逆时针 90°) 映射: 输入 (x, y) -> 输出 (x'=y, y'=w-1-x),
+/// out_w = height, 故 out 偏移 = ((w-1-x)*height + y) * 3.
+#[must_use]
+pub fn fast_yuyv_to_rgb_rot270(yuyv: &[u8], width: u32, height: u32) -> Vec<u8> {
+    let (w, h) = (width as usize, height as usize);
+    let mut rgb = vec![0u8; w * h * 3];
+    for (i, px) in yuyv.chunks_exact(4).take(w * h / 2).enumerate() {
+        let y = i / (w / 2);
+        let x0 = (i % (w / 2)) * 2;
+        let (r_d, g_d, b_d) = yuv_deltas(px);
+        for (k, yv) in [i32::from(px[0]), i32::from(px[2])].into_iter().enumerate() {
+            let x = x0 + k;
+            let o = ((w - 1 - x) * h + y) * 3;
+            rgb[o] = clamp8(yv + r_d);
+            rgb[o + 1] = clamp8(yv - g_d);
+            rgb[o + 2] = clamp8(yv + b_d);
+        }
+    }
+    rgb
+}
+
 /// 绘制人脸框到图像上
 /// 使用 face 模块的统一画框函数
 fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w: f32, h: f32) {
@@ -158,25 +244,27 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 
 /// 处理视频帧, 添加人脸检测和框
 ///
-/// `face_detector` 为 `None` 时跳过检测 (face_info 为 `FaceDetectionResult::default()`,
-/// `has_face=false`). 这是 ort 2.0 RC 创建 session hang 的 fallback —
-/// detector 创建超时时 camera thread 不等它, 让帧照常出.
+/// `face_detector` 为 `None` 时跳过检测: 若给了 `cached_face` 则复用上次
+/// 结果 (隔帧检测: RKNN 推理 ~19ms 占满 30fps 帧预算, 隔一帧检测把均值
+/// 压回 ~19ms, 框刷新 15Hz 肉眼无感), 否则为 default (`has_face=false`,
+/// 这是 detector 创建超时/hang 的 fallback, 让帧照常出).
 ///
-/// owned `Option<Box<dyn Trait>>` 而非 `Option<&mut dyn Trait>`: capture loop
-/// `take()` 把所有权 move 给本函数, 内部 `as_deref_mut()` 借出短引用, 函数
-/// 返回后 Box drop, 借用回到 caller 之前已经释放. 这条路径绕过 NLL "借用
-/// 跨函数" 反复出现的死结.
+/// `&mut dyn` 借用而非 owned Box: 早期版本用 owned `Option<Box<dyn Trait>>`
+/// + 调用方 `take()`, 导致 detector 在第一帧就被 drop, 之后检测静默失效.
+///
+/// 借用随函数返回结束, capture loop 里每帧可重复借用.
 pub fn process_frame(
     mut rgb_data: Vec<u8>,
     width: u32,
     height: u32,
-    mut face_detector: Option<Box<dyn FaceDetectorTrait>>,
+    face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
+    cached_face: Option<&FaceDetectionResult>,
 ) -> anyhow::Result<FrameInfo> {
-    // 尝试检测人脸
-    let result = if let Some(detector) = face_detector.as_deref_mut() {
-        detector.detect(rgb_data.clone(), width, height)?
+    // 尝试检测人脸 (借用原帧, 不再 clone)
+    let result = if let Some(detector) = face_detector {
+        detector.detect(&rgb_data, width, height)?
     } else {
-        FaceDetectionResult::default()
+        cached_face.cloned().unwrap_or_default()
     };
     if result.has_face {
         // 绘制人脸框

@@ -39,7 +39,7 @@ impl RknnFaceDetector {
 
 /// Letterbox 预处理: 缩放 + BGR->RGB
 fn preprocess_image(
-    image_data: Vec<u8>,
+    image_data: &[u8],
     src_width: u32,
     src_height: u32,
     dst_width: u32,
@@ -49,20 +49,16 @@ fn preprocess_image(
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     {
         let helper = RGA_HELPER.get_or_init(RgaHelper::new);
-        // RGA resize 接收 Vec<u8> 所有权，避免拷贝
-        // 假设 RGA 总是成功（初始化成功后很少失败），失败则直接返回空结果
+        // RGA resize 零拷贝借用原帧, 失败时返回空数据 (实际不会走到)
         let result = helper
             .resize(image_data, src_width, src_height, dst_width, dst_height)
-            .unwrap_or_else(|| {
-                // RGA 失败时返回空数据，实际不会走到这里
-                vec![0u8; (dst_width * dst_height * 3) as usize]
-            });
+            .unwrap_or_else(|| vec![0u8; (dst_width * dst_height * 3) as usize]);
         return result;
     }
 
     #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
     {
-        let image_ref: &[u8] = &image_data;
+        let image_ref: &[u8] = image_data;
         let mut canvas = vec![0u8; (dst_width * dst_height * 3) as usize];
 
         let scale =
@@ -93,7 +89,7 @@ fn preprocess_image(
 impl FaceDetectorTrait for RknnFaceDetector {
     fn detect_multiple(
         &mut self,
-        rgb_data: Vec<u8>,
+        rgb_data: &[u8],
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
@@ -245,7 +241,7 @@ pub fn test_retinaface(model_path: PathBuf, test_image_path: PathBuf) -> anyhow:
 
     let rgb_data = rgb_img.as_raw().to_vec();
     test_detector_speed(width, height, &mut detector, &rgb_data)?;
-    let results = detector.detect_multiple(rgb_data.clone(), width, height)?;
+    let results = detector.detect_multiple(&rgb_data, width, height)?;
 
     let mut result_img = rgb_img.clone();
     for (i, face) in results.iter().enumerate() {
@@ -279,7 +275,7 @@ fn test_detector_speed(
     let iterations = 10;
     for i in 0..iterations {
         let start = Instant::now();
-        let results = detector.detect_multiple(rgb_data.clone(), width, height)?;
+        let results = detector.detect_multiple(rgb_data, width, height)?;
         let total = start.elapsed();
 
         if i == iterations - 1 {

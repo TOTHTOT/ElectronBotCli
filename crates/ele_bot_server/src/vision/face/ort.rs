@@ -55,15 +55,17 @@ impl OrtFaceDetector {
 impl FaceDetectorTrait for OrtFaceDetector {
     fn detect_multiple(
         &mut self,
-        image_data: Vec<u8>,
+        image_data: &[u8],
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>> {
         let scale =
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
 
+        // RgbImage::from_raw 需要 owned Vec, 这里 to_vec 一次 —
+        // 与原调用方 clone 的拷贝量相同, PC 路径性能不变
         let input_data = preprocess_image(
-            image_data,
+            image_data.to_vec(),
             width,
             height,
             self.input_width,

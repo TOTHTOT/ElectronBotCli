@@ -7,7 +7,6 @@ description = "ElectronBotCli 后端服务(持有所有硬件资源, 通过 WebS
 
 [features]
 default = []
-fps-counter = []
 
 [[bin]]
 name = "ele_bot_server"

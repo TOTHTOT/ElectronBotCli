@@ -224,6 +224,13 @@ deploy_binary() {
     local_hash=$(shasum -a 256 "$local_path" | awk '{print $1}')
     echo "本地 sha256: $local_hash"
 
+    # 先杀掉设备上正在运行的同名进程, 否则 scp 会因 "text file busy"
+    # (dest open Failure) 传不上去
+    local bin_name
+    bin_name=$(basename "$remote_path")
+    echo "停止设备上运行中的 $bin_name ..."
+    run_remote_cmd "pkill -x '$bin_name' 2>/dev/null; pkill -f '^\\./$bin_name' 2>/dev/null; sleep 1; true" || true
+
     # 先尝试 ssh 密钥
     if ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=5 \
         "$DEVICE" true 2>/dev/null; then
