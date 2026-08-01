@@ -29,7 +29,8 @@ electron-bot = { git = "https://github.com/TOTHTOT/ElectronBotLib.git", version 
 BotEyes = { git = "https://github.com/TOTHTOT/BotEyes", version = "0.1.2" }
 cpal = "0.18.1"
 # 音频的asr推理框架 (default-features 关掉, 各平台显式选 static/shared;
-# 升级版本时必须同步替换 assets/lib/sherpa-onnx-rknn 的预编译库)
+# 预编译库 assets/lib/sherpa-onnx-rknn 不进 git, 由 scripts/tools/fetch_sherpa_rknn.sh
+# 下载; 升级版本时同步改脚本默认版本并重跑)
 sherpa-onnx = { version = "1.13.4", default-features = false }
 # 离线llm推理框架
 candle-core = "0.11"
