@@ -29,7 +29,7 @@ use sherpa_onnx::{
     VadModelConfig, VoiceActivityDetector,
 };
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
@@ -66,18 +66,28 @@ static LAST_VOLUME_PUBLISH_MS: AtomicU64 = AtomicU64::new(0);
 
 /// Initialize `SenseVoice` recognizer using sherpa-onnx
 fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<OfflineRecognizer> {
+    // 模型是 .rknn 时走 Rockchip NPU: provider 必须声明 "rknn",
+    // 且 rknn sense-voice 不支持 ITN (官方示例均关闭).
+    let is_rknn = model_path
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("rknn"));
     let config = OfflineRecognizerConfig {
         model_config: OfflineModelConfig {
             sense_voice: OfflineSenseVoiceModelConfig {
                 model: Some(model_path.to_string_lossy().to_string()),
                 language: Some("auto".to_string()),
-                use_itn: true,
+                use_itn: !is_rknn,
             },
             tokens: Some(tokens_path.to_string_lossy().to_string()),
+            provider: is_rknn.then(|| "rknn".to_string()),
             ..Default::default()
         },
         ..Default::default()
     };
+    log::info!(
+        "SenseVoice recognizer: model={model_path:?}, provider={}",
+        if is_rknn { "rknn (NPU)" } else { "cpu" }
+    );
 
     OfflineRecognizer::create(&config)
         .ok_or_else(|| anyhow::anyhow!("Failed to create SenseVoice recognizer"))
@@ -370,7 +380,7 @@ mod tests {
     use crate::model_manager::ModelManager;
     use std::fs::File;
     use std::io::Read;
-    use std::path::Path;
+    use std::path::{Path, PathBuf};
 
     /// 仓库根目录, 编译期从 crate manifest 目录往上两级.
     ///

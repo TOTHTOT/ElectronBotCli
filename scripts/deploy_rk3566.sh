@@ -324,6 +324,9 @@ deploy_step() {
                 [[ -e "$so" ]] || continue
                 deploy_binary "$so" "$REMOTE_DIR/$(basename "$so")"
             done
+            # librknnrt 也随二进制走 $ORIGIN: 设备系统自带的版本 (2.3.x)
+            # 与 sherpa-onnx rknn 模型不兼容, 固定用 assets/lib 里验证过的版本
+            deploy_binary "assets/lib/librknnrt.so" "$REMOTE_DIR/librknnrt.so"
         fi
     done
     echo "=== 传输完成 ==="
