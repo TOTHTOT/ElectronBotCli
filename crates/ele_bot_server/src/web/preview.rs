@@ -21,6 +21,14 @@ use tokio::time::Instant;
 /// LCD 帧缓存
 type LcdFrameCache = Arc<Mutex<Option<Vec<u8>>>>;
 
+/// 探测本机局域网 IP: UDP "连接" 一个公网地址, 不发任何包,
+/// 仅靠路由表查出出口网卡的本地地址. 无默认路由 (纯单机) 时返回 None.
+fn lan_ip() -> Option<std::net::IpAddr> {
+    let socket = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    socket.local_addr().ok().map(|a| a.ip())
+}
+
 /// Web 预览服务器状态
 pub struct WebPreviewState {
     /// LCD 帧缓存
@@ -220,10 +228,17 @@ impl WebPreview {
     /// 启动服务器（阻塞）
     pub async fn run(self) {
         let addr = format!("0.0.0.0:{}", self.port);
-        log::info!(
-            "Starting web preview server at http://127.0.0.1:{}",
-            self.port
-        );
+        match lan_ip() {
+            Some(ip) => log::info!(
+                "Starting web preview server at http://127.0.0.1:{}, LAN: http://{ip}:{}",
+                self.port,
+                self.port
+            ),
+            None => log::info!(
+                "Starting web preview server at http://127.0.0.1:{}",
+                self.port
+            ),
+        }
 
         let app = Router::new()
             .route("/", get(index))
