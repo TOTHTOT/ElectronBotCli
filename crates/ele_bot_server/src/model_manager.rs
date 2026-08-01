@@ -58,7 +58,7 @@ impl ModelManager {
 
         // 模型配置: (key, repo_id, filename, rknn_path)
         let models: Vec<ModelConfig> = vec![
-            ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/sherpa-onnx-rk3566-20-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.rknn"),
+            ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/sherpa-onnx-rk3566-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.rknn"),
             ("sense_voice_tokens", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "tokens.txt", ""),
             ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", ""),
             ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),

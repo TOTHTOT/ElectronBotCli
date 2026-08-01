@@ -298,7 +298,21 @@ impl VideoCapture {
 
     /// 列出可用摄像头
     pub fn list_cameras() -> anyhow::Result<Vec<CameraInfo>> {
-        Ok(query(ApiBackend::Auto)?)
+        let list = query(ApiBackend::Auto)?;
+        // Linux 上 SoC 硬编解码器也会注册 v4l2 节点 (rk3566 BSP 命名为
+        // /dev/video-encN / /dev/video-decN), 它们不是摄像头, 不能出现在
+        // 下拉列表里 — 按节点名过滤掉. nokhwa v4l 枚举把节点路径放在
+        // description ("Video4Linux Device @ /dev/videoN"), misc 为空,
+        // 所以两个字段都要看
+        #[cfg(target_os = "linux")]
+        let list = list
+            .into_iter()
+            .filter(|ci| {
+                let path = format!("{} {}", ci.misc(), ci.description());
+                !(path.contains("video-enc") || path.contains("video-dec"))
+            })
+            .collect();
+        Ok(list)
     }
 
     /// 获取摄像头支持的格式列表
@@ -388,7 +402,11 @@ pub(crate) fn open_camera_default(index: CameraIndex) -> anyhow::Result<Camera> 
     ));
     log::debug!("Supported cameras: {:?}", VideoCapture::list_cameras());
     let query = RequestedFormat::new::<RgbFormat>(format_type);
-    Ok(Camera::new(index, query)?)
+    let mut camera = Camera::new(index, query)?;
+    // nokhwa 0.10: `Camera::new` 只初始化设备, 必须显式 `open_stream`
+    // 才会真正开流 (v4l 上不开流读帧直接报 "Stream Not Started")
+    camera.open_stream()?;
+    Ok(camera)
 }
 
 /// 捕获帧循环. `Camera::new` 在这里同步打开 (`open_camera_default`
@@ -419,9 +437,15 @@ fn capture_frames(
     // thread 内部同步等待, 超时放 None. Box<dyn ...> 在 capture loop 里
     // 每帧 `as_deref_mut` 借出去, 调完即 drop — 不存在跨函数 borrow.
     log::info!("Loading face detector...");
+    // aarch64 (rk3566) 用 RKNN RetinaFace, 其他平台用 ONNX yolo_face —
+    // 与 model_manager 的注册 key 保持一致
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    let face_model_key = "retinaface_rknn";
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+    let face_model_key = "yolo_face";
     let model_path = ModelManager::global()
-        .get("yolo_face")
-        .ok_or_else(|| anyhow::anyhow!("yolo_face model not loaded"))?;
+        .get(face_model_key)
+        .ok_or_else(|| anyhow::anyhow!("{face_model_key} model not loaded"))?;
     let (detector_tx, detector_rx) =
         std::sync::mpsc::sync_channel::<Option<Box<dyn FaceDetectorTrait>>>(1);
     thread::spawn(move || {

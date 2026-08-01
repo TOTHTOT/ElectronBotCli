@@ -40,8 +40,11 @@ const SAMPLE_RATE: usize = 16_000;
 /// 说话触发前的静音缓冲, 用作识别 buffer 的 pre-context.
 const PRE_ROLL_MS: usize = 500;
 const PRE_ROLL_SAMPLES: usize = SAMPLE_RATE / 1000 * PRE_ROLL_MS;
-/// 累计 ~120 帧静音 (~4 秒) 才把一截语音当成 "end of speech" 提交给 recognizer.
-const SILENCE_THRESHOLD: usize = 120;
+/// 累计 ~31 帧静音 (~1 秒) 就把一截语音当成 "end of speech" 提交给 recognizer.
+/// 对话机器人要的是响应快; VAD 自身还有 min_silence_duration=0.3s 防抖,
+/// 1s 判停足够. 注意尾巴会算进识别 buffer, 阈值过大会稀释 rknn 固定窗口
+/// (5s) 里有效语音的占比, 还徒增延迟.
+const SILENCE_THRESHOLD: usize = 30;
 /// 语音 buffer 小于这个 (0.5s) 不提交, 防止噪音抖动误触发.
 const MIN_AUDIO_LEN: usize = SAMPLE_RATE / 2;
 /// 说话时 buffer 上限 (30s), 防止过长录音占用 recognizer 内存.
@@ -80,6 +83,7 @@ fn init_sense_voice(model_path: &Path, tokens_path: &Path) -> anyhow::Result<Off
             },
             tokens: Some(tokens_path.to_string_lossy().to_string()),
             provider: is_rknn.then(|| "rknn".to_string()),
+            num_threads: 1,
             ..Default::default()
         },
         ..Default::default()
