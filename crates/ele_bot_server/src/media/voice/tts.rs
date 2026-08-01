@@ -303,7 +303,7 @@ impl TtsPlayer {
         };
 
         let stream = self.device.build_output_stream(
-            config.clone(),
+            config,
             Self::write_audio_callback(audio.samples.clone(), played.clone()),
             |err| log::error!("TTS 流错误: {err}"),
             None,

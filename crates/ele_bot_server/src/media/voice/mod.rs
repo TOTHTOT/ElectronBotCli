@@ -129,9 +129,7 @@ impl VoiceManager {
             })
             .or_else(|e| {
                 log::warn!("Configured input device unusable ({e}), trying default input");
-                let device = cpal::default_host()
-                    .default_input_device()
-                    .ok_or(e)?;
+                let device = cpal::default_host().default_input_device().ok_or(e)?;
                 build_asr_stream(&device, volume.clone(), audio_tx, bus.clone())
             })
             .and_then(|stream| {
@@ -572,7 +570,7 @@ pub fn play_beep(
         _channels,
     );
 
-    let _ = play_output_samples(&device, &config.into(), samples, _channels, duration_ms);
+    let _ = play_output_samples(&device, config.into(), samples, _channels, duration_ms);
 }
 
 fn generate_beep_samples(
@@ -609,13 +607,13 @@ fn generate_beep_samples(
 
 fn play_output_samples(
     device: &Device,
-    config: &cpal::StreamConfig,
+    config: cpal::StreamConfig,
     samples: Vec<f32>,
     _channels: usize,
     duration_ms: u32,
 ) -> Result<(), anyhow::Error> {
     let stream = device.build_output_stream(
-        config.clone(),
+        config,
         write_audio_callback(samples),
         |err| log::error!("Beep stream error: {err}"),
         None,
