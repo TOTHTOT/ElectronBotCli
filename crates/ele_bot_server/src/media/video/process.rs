@@ -189,11 +189,7 @@ static B_TAB: [i32; 256] = build_tab!(v => (454 * v) >> 8);
 fn yuv_deltas(px: &[u8]) -> (i32, i32, i32) {
     let u = px[1] as usize;
     let v = px[3] as usize;
-    (
-        R_TAB[v],
-        (GU_TAB[u] + GV_TAB[v]) >> 8,
-        B_TAB[u],
-    )
+    (R_TAB[v], (GU_TAB[u] + GV_TAB[v]) >> 8, B_TAB[u])
 }
 
 #[inline(always)]
@@ -326,4 +322,3 @@ pub fn process_frame(
         emotion: boteyes::Mood::Default,
     })
 }
-

@@ -471,8 +471,7 @@ fn capture_frames(
         } else {
             None
         };
-        let Ok(frame_info) =
-            process_frame_by_format(frame, &ctx, detector_arg, Some(&last_face))
+        let Ok(frame_info) = process_frame_by_format(frame, &ctx, detector_arg, Some(&last_face))
         else {
             continue;
         };
@@ -608,7 +607,14 @@ fn process_and_rotate(
     log::debug!("rotate used time: {:?}", start_time.elapsed());
 
     let detect_start = Instant::now();
-    let processed = process_frame(rotated, new_width, new_height, face_detector, cached_face, None)?;
+    let processed = process_frame(
+        rotated,
+        new_width,
+        new_height,
+        face_detector,
+        cached_face,
+        None,
+    )?;
     log::debug!("process_frame used time: {:?}", detect_start.elapsed());
     Ok(processed)
 }
@@ -716,7 +722,10 @@ fn process_yuyv_rga(
         ctx.out_height,
         ctx.rotate_angle,
     )?;
-    log::debug!("rga yuyv csc+rotate used time: {:?}", decode_start.elapsed());
+    log::debug!(
+        "rga yuyv csc+rotate used time: {:?}",
+        decode_start.elapsed()
+    );
 
     let det_input = face_detector
         .as_ref()
@@ -765,7 +774,10 @@ fn process_yuv_software(
     if ctx.format == FrameFormat::YUYV && ctx.rotate_angle == RotateAngle::Rotate270 {
         // 解码 + 旋转 270° 融合单 pass, 跳过独立的 rotate 步骤.
         let rotated = fast_yuyv_to_rgb_rot270(frame.buffer(), ctx.src_width, ctx.src_height);
-        log::debug!("yuyv decode+rotate270 used time: {:?}", decode_start.elapsed());
+        log::debug!(
+            "yuyv decode+rotate270 used time: {:?}",
+            decode_start.elapsed()
+        );
         let detect_start = Instant::now();
         let processed = process_frame(
             rotated,

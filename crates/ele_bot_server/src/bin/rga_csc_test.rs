@@ -68,8 +68,8 @@ fn main() {
     };
 
     let run_case = |dst_fmt: PixelFormat, bpp: usize, usage: Usage, label: &str| {
-        let (src, _s) = RgaBuffer::from_vec(yuyv.clone(), W, H, PixelFormat::Yuyv422)
-            .expect("src buffer");
+        let (src, _s) =
+            RgaBuffer::from_vec(yuyv.clone(), W, H, PixelFormat::Yuyv422).expect("src buffer");
         let (mut dst, dst_data) =
             RgaBuffer::from_vec_mut(vec![0u8; (W * H) as usize * bpp], W, H, dst_fmt)
                 .expect("dst buffer");
@@ -82,18 +82,32 @@ fn main() {
         }
     };
 
-    run_case(PixelFormat::Rgb888, 3, Usage::empty(), "YUYV -> RGB888 (CSC only)");
-    run_case(PixelFormat::Rgba8888, 4, Usage::empty(), "YUYV -> RGBA8888 (CSC only)");
+    run_case(
+        PixelFormat::Rgb888,
+        3,
+        Usage::empty(),
+        "YUYV -> RGB888 (CSC only)",
+    );
+    run_case(
+        PixelFormat::Rgba8888,
+        4,
+        Usage::empty(),
+        "YUYV -> RGBA8888 (CSC only)",
+    );
 
     // CSC + Rot270: 输出宽高交换 (480x640), 竖条变横条, 抽查旋转方向:
     // 输入 band0 (白) 在左列, Rot270 (逆时针) 后应出现在输出底部行.
     {
         let (ow, oh) = (H, W);
-        let (src, _s) = RgaBuffer::from_vec(yuyv.clone(), W, H, PixelFormat::Yuyv422)
-            .expect("src buffer");
-        let (mut dst, dst_data) =
-            RgaBuffer::from_vec_mut(vec![0u8; (ow * oh * 3) as usize], ow, oh, PixelFormat::Rgb888)
-                .expect("dst buffer");
+        let (src, _s) =
+            RgaBuffer::from_vec(yuyv.clone(), W, H, PixelFormat::Yuyv422).expect("src buffer");
+        let (mut dst, dst_data) = RgaBuffer::from_vec_mut(
+            vec![0u8; (ow * oh * 3) as usize],
+            ow,
+            oh,
+            PixelFormat::Rgb888,
+        )
+        .expect("dst buffer");
         let t = Instant::now();
         let r = librga::process(
             &src,
@@ -104,7 +118,10 @@ fn main() {
             None,
             Rotation::Rot270.to_usage(),
         );
-        println!("[YUYV -> RGB888 + Rot270] result={r:?} time={:?}", t.elapsed());
+        println!(
+            "[YUYV -> RGB888 + Rot270] result={r:?} time={:?}",
+            t.elapsed()
+        );
         if r.is_ok() {
             // 输出 (x', y') = (y, w-1-x): 输入左列 x=0 (白) -> y'=w-1 (底部行)
             let px = |x: usize, y: usize| {
