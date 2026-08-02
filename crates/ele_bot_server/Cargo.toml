@@ -57,6 +57,8 @@ nokhwa = { workspace = true, features = ["input-avfoundation"] }
 # RKNN only for aarch64 linux
 [target.'cfg(all(target_os = "linux", target_arch = "aarch64"))'.dependencies]
 rknn-rs = { workspace = true }
+# rknn_perf 诊断 bin 直调 sys crate (PERF_DETAIL 逐算子耗时, rknn-rs 未封装)
+rknn-sys-rs = "0.1.2"
 librga = { workspace = true }
 # aarch64 链接官方 RKNN 版预编译 shared 库 (provider="rknn" 走 NPU);
 # 库目录由交叉镜像 ENV SHERPA_ONNX_LIB_DIR 注入, sys crate 自动拷 .so + 加 $ORIGIN rpath

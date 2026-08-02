@@ -22,7 +22,7 @@
 set -euo pipefail
 
 TARGET="aarch64-unknown-linux-gnu"
-DEVICE="${RK_DEVICE:-radxa@192.168.2.159}"
+DEVICE="${RK_DEVICE:-lckfb@192.168.2.248}"
 REMOTE_DIR="${RK_REMOTE_DIR:-~/ElectronBotCli}"
 HTTP_PROXY="${HTTP_PROXY:-http://192.168.2.147:7890}"
 HTTPS_PROXY="${HTTPS_PROXY:-$HTTP_PROXY}"

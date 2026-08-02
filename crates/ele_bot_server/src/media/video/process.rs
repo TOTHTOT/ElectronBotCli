@@ -192,9 +192,11 @@ pub fn fast_yuyv_to_rgb(yuyv: &[u8], width: u32, height: u32) -> Vec<u8> {
 
 /// YUYV 解码 + 旋转 270° 融合单 pass: 解码时直接写到旋转后位置.
 ///
-/// 替代 "fast_yuyv_to_rgb (~2ms) + RGA rotate (~4.6ms)" 两步, 合计 ~3ms.
+/// 替代 "fast_yuyv_to_rgb (~6.8ms) + RGA rotate (~4.6ms)" 两步, 合计 ~6.5ms.
 /// 输出尺寸 (height x width). 输入按行顺序读 (cache 友好),
-/// 输出为列序写 — 900KB 输出驻留 L2, 代价可接受.
+/// 输出为列序写 — 看似分散, 但 RK3566 的 512KB L2 能兜住大部份
+/// write-allocate, 实测比 32x32 分块转置版 (p50 10.9ms) 更快:
+/// 分块要多过一遍内存 + 每像素索引/分支开销, 收益被吃光.
 ///
 /// Rotate270 (逆时针 90°) 映射: 输入 (x, y) -> 输出 (x'=y, y'=w-1-x),
 /// out_w = height, 故 out 偏移 = ((w-1-x)*height + y) * 3.
@@ -285,3 +287,4 @@ pub fn process_frame(
         emotion: boteyes::Mood::Default,
     })
 }
+

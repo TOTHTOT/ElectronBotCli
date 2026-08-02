@@ -1555,6 +1555,7 @@ dependencies = [
  "nokhwa",
  "ort",
  "rknn-rs",
+ "rknn-sys-rs",
  "serde",
  "serde_json",
  "sherpa-onnx",
