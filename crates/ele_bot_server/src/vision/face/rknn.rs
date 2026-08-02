@@ -31,7 +31,7 @@ impl RknnFaceDetector {
             rknn,
             input_width,
             input_height,
-            conf_threshold: 0.5,
+            conf_threshold: 0.3,
             priors,
         })
     }
@@ -100,8 +100,15 @@ impl FaceDetectorTrait for RknnFaceDetector {
             (self.input_width as f32 / width as f32).min(self.input_height as f32 / height as f32);
         let pad_x = (self.input_width as f32 - width as f32 * scale) / 2.0;
         let pad_y = (self.input_height as f32 - height as f32 * scale) / 2.0;
-        let input_data =
-            preprocess_image(rgb_data, width, height, self.input_width, self.input_height);
+        // 输入已是模型尺寸时跳过缩放: capture 管线在检测帧会直接喂
+        // "YUYV -> CSC+旋转+缩到 320x320" 单硬件 pass 的产物 (~1.2ms),
+        // 替代这里的全帧图再 resize (~2.9ms). 此时 scale=1/pad=0,
+        // 后处理坐标映射天然一致.
+        let input_data = if width == self.input_width && height == self.input_height {
+            rgb_data.to_vec()
+        } else {
+            preprocess_image(rgb_data, width, height, self.input_width, self.input_height)
+        };
         let preprocess_time = preprocess_start.elapsed();
 
         let inference_start = Instant::now();
@@ -151,6 +158,10 @@ impl FaceDetectorTrait for RknnFaceDetector {
         );
 
         Ok(results)
+    }
+
+    fn input_size(&self) -> Option<(u32, u32)> {
+        Some((self.input_width, self.input_height))
     }
 }
 

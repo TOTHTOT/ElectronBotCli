@@ -2878,8 +2878,8 @@ dependencies = [
 
 [[package]]
 name = "librga"
-version = "0.1.0"
-source = "git+https://github.com/TOTHTOT/librga-rs.git#f544d9ef4796334f4f79670180b69b5750a535ea"
+version = "0.3.0"
+source = "git+https://github.com/TOTHTOT/librga-rs.git#c10840703568bfa6515dd9dd767c3fbfa0cd2ea5"
 dependencies = [
  "bindgen 0.72.1",
  "bitflags 2.13.1",

@@ -52,7 +52,7 @@ nokhwa = { version = "0.10.10", default-features = false }
 
 # aarch64 linux 专用
 rknn-rs = "0.2.4"
-librga = { git = "https://github.com/TOTHTOT/librga-rs.git", version = "0.1.0"}
+librga = { git = "https://github.com/TOTHTOT/librga-rs.git", version = "0.3.0"}
 
 # pc 平台专用
 ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "ndarray", "load-dynamic", "api-24", "tls-native"] }

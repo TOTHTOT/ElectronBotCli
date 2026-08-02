@@ -1,7 +1,8 @@
 //! 视频模块 - 摄像头捕获
 
 use crate::media::video::process::{
-    fast_yuyv_to_rgb, fast_yuyv_to_rgb_rot270, process_frame, rotate_by_angle, RotateAngle,
+    fast_yuyv_to_rgb, fast_yuyv_to_rgb_rot270, process_frame, rga_yuyv_to_rgb, rotate_by_angle,
+    RotateAngle,
 };
 use crate::media::video::types::{CameraFormat as LocalCameraFormat, FrameCache, FrameInfo};
 use crate::model_manager::ModelManager;
@@ -607,7 +608,7 @@ fn process_and_rotate(
     log::debug!("rotate used time: {:?}", start_time.elapsed());
 
     let detect_start = Instant::now();
-    let processed = process_frame(rotated, new_width, new_height, face_detector, cached_face)?;
+    let processed = process_frame(rotated, new_width, new_height, face_detector, cached_face, None)?;
     log::debug!("process_frame used time: {:?}", detect_start.elapsed());
     Ok(processed)
 }
@@ -631,12 +632,12 @@ struct FramePipelineCtx {
 
 /// 根据帧格式处理数据: 解码 -> 旋转 -> 人脸检测/画框 -> `FrameInfo`.
 ///
-/// 各分支差异只在"字节流 -> RGB"的解码方式, 之后统一走
-/// `process_and_rotate`.
+/// YUYV 优先走硬件 RGA (`process_yuyv_rga`), 不可用回退软件
+/// (`process_yuv_software`); MJPEG 走 image crate 软件解码.
 fn process_frame_by_format(
     frame: nokhwa::Buffer,
     ctx: &FramePipelineCtx,
-    face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
+    mut face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
     cached_face: Option<&FaceDetectionResult>,
 ) -> anyhow::Result<FrameInfo> {
     match ctx.format {
@@ -648,41 +649,16 @@ fn process_frame_by_format(
                 frame.buffer().len()
             );
             let decode_start = Instant::now();
-            // YUYV 走手写快速解码 (~2ms), nokhwa decode_image 要 ~10ms.
-            // 注: 曾尝试 RGA 硬件 CSC, 但这颗 RGA2 对 YUYV 输入输出全绿, 放弃.
-            if ctx.format == FrameFormat::YUYV && ctx.rotate_angle == RotateAngle::Rotate270 {
-                // 解码 + 旋转 270° 融合单 pass (~3ms), 跳过独立的 RGA rotate (~4.6ms).
-                let rotated =
-                    fast_yuyv_to_rgb_rot270(frame.buffer(), ctx.src_width, ctx.src_height);
-                log::debug!("yuyv decode+rotate270 used time: {:?}", decode_start.elapsed());
-                let detect_start = Instant::now();
-                let processed = process_frame(
-                    rotated,
-                    ctx.out_width,
-                    ctx.out_height,
-                    face_detector,
-                    cached_face,
-                )?;
-                log::debug!("process_frame used time: {:?}", detect_start.elapsed());
-                return Ok(processed);
-            }
-            let rgb_data = if ctx.format == FrameFormat::YUYV {
-                fast_yuyv_to_rgb(frame.buffer(), ctx.src_width, ctx.src_height)
-            } else {
-                let Ok(d) = frame.decode_image::<RgbFormat>() else {
-                    anyhow::bail!("failed to decode image");
-                };
-                d.into_raw()
-            };
-            log::debug!("yuv decode used time: {:?}", decode_start.elapsed());
-            process_and_rotate(
-                rgb_data,
-                ctx.src_width,
-                ctx.src_height,
-                face_detector,
+            if let Some(res) = process_yuyv_rga(
+                &frame,
+                ctx,
+                face_detector.as_deref_mut(),
                 cached_face,
-                ctx.rotate_angle,
-            )
+                decode_start,
+            ) {
+                return res;
+            }
+            process_yuv_software(frame, ctx, face_detector, cached_face, decode_start)
         }
         FrameFormat::MJPEG => {
             // nokhwa 的 decode_image::<RgbFormat>() 不会解 MJPEG 压缩流;
@@ -711,6 +687,114 @@ fn process_frame_by_format(
             anyhow::bail!("Unsupported frame format {:?}", ctx.format);
         }
     }
+}
+
+/// YUYV 硬件路径: RGA CSC+旋转单 pass (~2.2ms, librga 1.10.6+),
+/// 检测帧顺带第二个 pass 直接产出 320x320 检测输入 (~1.2ms), 省掉
+/// 检测器内部 "全帧图再 resize" (~2.9ms).
+///
+/// 旧注: 曾尝试 RGA CSC 输出全绿 — 根因是设备系统自带 librga
+/// rga_api 1.3.2 太老 (彩条隔离测试证实), 现用 assets/lib 随包
+/// 部署的官方 1.10.6, $ORIGIN rpath 加载, 已验证 8 色彩条精确.
+///
+/// RGA 不可用/失败返回 None, 调用方回退 `process_yuv_software`.
+fn process_yuyv_rga(
+    frame: &nokhwa::Buffer,
+    ctx: &FramePipelineCtx,
+    face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
+    cached_face: Option<&FaceDetectionResult>,
+    decode_start: Instant,
+) -> Option<anyhow::Result<FrameInfo>> {
+    if ctx.format != FrameFormat::YUYV {
+        return None;
+    }
+    let rot = rga_yuyv_to_rgb(
+        frame.buffer(),
+        ctx.src_width,
+        ctx.src_height,
+        ctx.out_width,
+        ctx.out_height,
+        ctx.rotate_angle,
+    )?;
+    log::debug!("rga yuyv csc+rotate used time: {:?}", decode_start.elapsed());
+
+    let det_input = face_detector
+        .as_ref()
+        .and_then(|d| d.input_size())
+        .and_then(|(dw, dh)| {
+            rga_yuyv_to_rgb(
+                frame.buffer(),
+                ctx.src_width,
+                ctx.src_height,
+                dw,
+                dh,
+                ctx.rotate_angle,
+            )
+            .map(|v| (v, dw, dh))
+        });
+    if det_input.is_some() {
+        log::debug!(
+            "rga yuyv csc+rotate+resize (det input) total: {:?}",
+            decode_start.elapsed()
+        );
+    }
+
+    let detect_start = Instant::now();
+    let processed = process_frame(
+        rot,
+        ctx.out_width,
+        ctx.out_height,
+        face_detector,
+        cached_face,
+        det_input.as_ref().map(|(v, w, h)| (v.as_slice(), *w, *h)),
+    );
+    log::debug!("process_frame used time: {:?}", detect_start.elapsed());
+    Some(processed)
+}
+
+/// YUV 软件兜底: YUYV 手写 LUT 解码 (rot270 走解码+旋转融合单 pass
+/// ~6.5ms), NV12 走 nokhwa decode_image (~10ms), 之后统一
+/// `process_and_rotate`.
+fn process_yuv_software(
+    frame: nokhwa::Buffer,
+    ctx: &FramePipelineCtx,
+    face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
+    cached_face: Option<&FaceDetectionResult>,
+    decode_start: Instant,
+) -> anyhow::Result<FrameInfo> {
+    if ctx.format == FrameFormat::YUYV && ctx.rotate_angle == RotateAngle::Rotate270 {
+        // 解码 + 旋转 270° 融合单 pass, 跳过独立的 rotate 步骤.
+        let rotated = fast_yuyv_to_rgb_rot270(frame.buffer(), ctx.src_width, ctx.src_height);
+        log::debug!("yuyv decode+rotate270 used time: {:?}", decode_start.elapsed());
+        let detect_start = Instant::now();
+        let processed = process_frame(
+            rotated,
+            ctx.out_width,
+            ctx.out_height,
+            face_detector,
+            cached_face,
+            None,
+        )?;
+        log::debug!("process_frame used time: {:?}", detect_start.elapsed());
+        return Ok(processed);
+    }
+    let rgb_data = if ctx.format == FrameFormat::YUYV {
+        fast_yuyv_to_rgb(frame.buffer(), ctx.src_width, ctx.src_height)
+    } else {
+        let Ok(d) = frame.decode_image::<RgbFormat>() else {
+            anyhow::bail!("failed to decode image");
+        };
+        d.into_raw()
+    };
+    log::debug!("yuv decode used time: {:?}", decode_start.elapsed());
+    process_and_rotate(
+        rgb_data,
+        ctx.src_width,
+        ctx.src_height,
+        face_detector,
+        cached_face,
+        ctx.rotate_angle,
+    )
 }
 
 /// 解码 JPEG / MJPEG 字节流为 RGB 原始数据.

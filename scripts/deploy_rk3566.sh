@@ -334,6 +334,9 @@ deploy_step() {
             # librknnrt 也随二进制走 $ORIGIN: 设备系统自带的版本 (2.3.x)
             # 与 sherpa-onnx rknn 模型不兼容, 固定用 assets/lib 里验证过的版本
             deploy_binary "assets/lib/librknnrt.so" "$REMOTE_DIR/librknnrt.so"
+            # librga 同理: 设备系统自带的是 rga_api 1.3.2 (YUYV CSC 输出全绿),
+            # 必须用 assets/lib 里的官方 1.10.6 预编译版
+            deploy_binary "assets/lib/librga.so" "$REMOTE_DIR/librga.so"
         fi
     done
     echo "=== 传输完成 ==="

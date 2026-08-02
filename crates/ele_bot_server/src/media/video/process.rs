@@ -17,6 +17,39 @@ use std::sync::OnceLock;
 #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
 static RGA_HELPER: OnceLock<RgaHelper> = OnceLock::new();
 
+/// YUYV -> RGB888 CSC (+ 旋转 + 缩放) 优先走 RGA 硬件单 pass (aarch64 only).
+///
+/// `dst_w/dst_h` 传旋转后的输出尺寸; 与源不同时顺带做拉伸缩放 —
+/// 检测输入 (320x320) 一趟搞定, 省掉 "全帧转换 + 再 resize" 的第二趟.
+/// 硬件不可用/失败返回 None, 调用方回退软件路径 (fast_yuyv_to_rgb*).
+/// 依赖随包部署的官方 librga 1.10.6 — 系统自带 1.3.2 的 YUYV CSC 输出全绿.
+#[must_use]
+pub fn rga_yuyv_to_rgb(
+    yuyv: &[u8],
+    width: u32,
+    height: u32,
+    dst_w: u32,
+    dst_h: u32,
+    angle: RotateAngle,
+) -> Option<Vec<u8>> {
+    #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
+    {
+        let rotation = match angle {
+            RotateAngle::None => None,
+            RotateAngle::Rotate90 => Some(Rotation::Rot90),
+            RotateAngle::Rotate180 => Some(Rotation::Rot180),
+            RotateAngle::Rotate270 => Some(Rotation::Rot270),
+        };
+        let helper = RGA_HELPER.get_or_init(RgaHelper::new);
+        helper.yuyv_to_rgb(yuyv, width, height, dst_w, dst_h, rotation)
+    }
+    #[cfg(not(all(target_os = "linux", target_arch = "aarch64")))]
+    {
+        let _ = (yuyv, width, height, dst_w, dst_h, angle);
+        None
+    }
+}
+
 /// 旋转角度
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub enum RotateAngle {
@@ -246,6 +279,8 @@ fn draw_face_box(bgr_data: &mut [u8], width: u32, height: u32, x: f32, y: f32, w
 
 /// 处理视频帧, 添加人脸检测和框
 ///
+/// `detect_input`: 检测帧的外部预处理输入 (capture 用 "YUYV -> CSC+旋转
+/// +缩放" 单硬件 pass 直接产出 320x320), 给了就不再从全帧图缩放.
 /// `face_detector` 为 `None` 时跳过检测: 若给了 `cached_face` 则复用上次
 /// 结果 (隔帧检测: RKNN 推理 ~19ms 占满 30fps 帧预算, 隔一帧检测把均值
 /// 压回 ~19ms, 框刷新 15Hz 肉眼无感), 否则为 default (`has_face=false`,
@@ -261,10 +296,14 @@ pub fn process_frame(
     height: u32,
     face_detector: Option<&mut (dyn FaceDetectorTrait + 'static)>,
     cached_face: Option<&FaceDetectionResult>,
+    detect_input: Option<(&[u8], u32, u32)>,
 ) -> anyhow::Result<FrameInfo> {
     // 尝试检测人脸 (借用原帧, 不再 clone)
     let result = if let Some(detector) = face_detector {
-        detector.detect(&rgb_data, width, height)?
+        match detect_input {
+            Some((d, dw, dh)) => detector.detect(d, dw, dh)?,
+            None => detector.detect(&rgb_data, width, height)?,
+        }
     } else {
         cached_face.cloned().unwrap_or_default()
     };

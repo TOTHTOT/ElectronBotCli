@@ -44,6 +44,14 @@ pub trait FaceDetectorTrait: Send + Sync {
         width: u32,
         height: u32,
     ) -> anyhow::Result<Vec<FaceDetectionResult>>;
+
+    /// 模型的原生输入尺寸 (RKNN 检测器覆写为 320x320).
+    ///
+    /// capture 管线用它做"YUYV -> CSC+旋转+缩放"单硬件 pass 直接产出
+    /// 检测输入; None 表示无固定尺寸, 检测时内部自行缩放.
+    fn input_size(&self) -> Option<(u32, u32)> {
+        None
+    }
 }
 
 /// 在 RGB 原始数据上画空心矩形框（静态函数）
