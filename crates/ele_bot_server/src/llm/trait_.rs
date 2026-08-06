@@ -20,13 +20,4 @@ pub trait LlmTrait: Send {
     async fn chat(&mut self, _user_input: &str) -> Result<String> {
         Ok("[LLM chat not implemented]".to_string())
     }
-
-    /// 设置当前会话 ID
-    fn set_session_id(&mut self, _session_id: &str) {}
-
-    /// 清除指定会话的历史记录
-    fn clear_session_history(&mut self, _session_id: &str) {}
-
-    /// 清除所有会话的历史记录
-    fn clear_all_histories(&mut self) {}
 }

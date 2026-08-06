@@ -322,6 +322,12 @@ impl App {
             ServerEvent::SystemStats { stats } => {
                 server.sys_stats = Some(stats);
             }
+            ServerEvent::LlmMemoryCleared => {
+                log::info!("llm memory cleared by server");
+                if matches!(self.ui.mode.route, Route::LlmTest) {
+                    self.ai.llm_test_state.output_text = "对话记忆已清空".to_string();
+                }
+            }
             // InputDevices / OutputDevices / Cameras 已在 apply_event 入口短路处理
             ServerEvent::InputDevices { .. }
             | ServerEvent::OutputDevices { .. }
@@ -413,6 +419,19 @@ impl App {
 
     pub fn take_screenshot(&self) {
         self.send_cmd(ClientMessage::TakeScreenshot);
+    }
+
+    /// 发送清空 LLM 对话历史与个人记忆命令 (整体清空入口, spec FR-006)
+    pub fn clear_llm_memory(&self) {
+        self.send_cmd(ClientMessage::ClearLlmMemory);
+    }
+
+    /// 弹出"确认清空对话记忆"对话框
+    pub fn confirm_clear_llm_memory(&mut self) {
+        self.ui.mode.overlay = Some(Overlay::Popup {
+            config: PopupConfig::confirm_clear_llm_memory(),
+            on_dismiss: PopupDismiss::ConfirmClearLlmMemory,
+        });
     }
 
     pub fn set_config(&self, config: AppConfig) {

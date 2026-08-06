@@ -14,6 +14,23 @@ TUI 的输入分两层, 修改输入相关代码前必读:
 - `crates/ele_bot_client/src/input/mod.rs` 的 [`handle_event`] / [`handle_by_mode`]
 - 派发契约写在 `handle_event` 的 rustdoc 里, **不要绕过它直接调 `App` 方法**
 
+## LLM 链路 (zeroclaw 托管)
+
+- `chat` 对话回复 + 对话历史 + 用户记忆: 由设备端 `zeroclaw` 进程托管
+  (`ele_bot_server` 通过 ACP/JSON-RPC over stdio 调用, 见 `src/llm/acp.rs` / `src/llm/zeroclaw.rs`,
+  设计文档 `specs/001-zeroclaw-llm-integration/`)
+- `analyze_mood` 情感/动作分析: 保留现有在线/本地 LLM 链路, 不经过 zeroclaw
+- 本仓库代码**不得**再自行累积对话历史 (FR-002)
+- 部署依赖: `assets/zeroclaw/zeroclaw` (aarch64 musl 静态版, 锁定 v0.8.3),
+  由 `scripts/deploy_rk3566.sh` 下发; **zeroclaw 的配置 (provider/api_key/
+  人设 SOUL.md) 由用户在设备上自行维护** (默认 `~/.zeroclaw`), 本仓库不渲染、
+  不下发任何 zeroclaw 配置
+- 联调命令 (设备上): `./zeroclaw doctor` / `./zeroclaw memory stats`
+- 本机联调: 用 `ZCLAW_BIN` 环境变量指向 macOS 版 zeroclaw; ACP session 的
+  cwd 自动探测 `agents/*/workspace` (~/.zeroclaw 与 homebrew 位置均可),
+  可用 `ZCLAW_WORKSPACE` 覆盖 — cwd 必须命中 agent workspace, 否则
+  SOUL.md/MEMORY.md 不注入, 人设与长期记忆失效
+
 ## 注释规范
 
 ### 1. 公共 API 必须有 rustdoc

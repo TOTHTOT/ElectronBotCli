@@ -337,6 +337,10 @@ deploy_step() {
             # librga 同理: 设备系统自带的是 rga_api 1.3.2 (YUYV CSC 输出全绿),
             # 必须用 assets/lib 里的官方 1.10.6 预编译版
             deploy_binary "assets/lib/librga.so" "$REMOTE_DIR/librga.so"
+            # zeroclaw: LLM 对话/记忆托管进程 (aarch64 musl 静态版, 锁定 v0.8.3)
+            # 只下发二进制; zeroclaw 配置 (provider/api_key/人设) 由用户在
+            # 设备上自行维护 (默认 ~/.zeroclaw), 不随部署覆盖
+            deploy_binary "assets/zeroclaw/zeroclaw" "$REMOTE_DIR/zeroclaw"
         fi
     done
     echo "=== 传输完成 ==="

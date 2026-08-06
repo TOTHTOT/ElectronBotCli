@@ -13,17 +13,18 @@ use crate::llm::trait_::LlmTrait;
 use anyhow::{Context, Result};
 use async_openai::config::OpenAIConfig;
 use async_openai::types::chat::{
-    ChatCompletionRequestAssistantMessageArgs, ChatCompletionRequestMessage,
-    ChatCompletionRequestSystemMessageArgs, ChatCompletionRequestUserMessageArgs,
-    CreateChatCompletionRequestArgs,
+    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessageArgs,
+    ChatCompletionRequestUserMessageArgs, CreateChatCompletionRequestArgs,
 };
 use async_openai::Client;
 use async_trait::async_trait;
-use std::collections::{HashMap, VecDeque};
 
 /// 在线 LLM 实现
 ///
 /// 使用 async-openai 库的异步客户端，支持任意兼容 `OpenAI` API 格式的后端。
+/// 当前只承担 `analyze_mood` (情感/动作分析) 与无状态的兜底 `chat`;
+/// 对话历史由 zeroclaw 托管 (specs/001-zeroclaw-llm-integration FR-002),
+/// 本结构体 **不保存任何对话历史**.
 ///
 /// # 线程安全
 /// 该结构体实现了 `Send + Sync`，可以在多线程间共享同一个实例。
@@ -32,12 +33,6 @@ pub struct OnlineLlm {
     client: Client<OpenAIConfig>,
     /// 模型名称
     model: String,
-    /// `对话历史记录：session_id` -> 消息列表
-    histories: HashMap<String, VecDeque<ChatCompletionRequestMessage>>,
-    /// 当前会话 ID
-    current_session: String,
-    /// 历史消息容量
-    history_capacity: usize,
     /// 预构建的系统消息
     system_message: ChatCompletionRequestMessage,
 }
@@ -49,13 +44,7 @@ impl OnlineLlm {
     /// - `api_base`: API 基础 URL（如 `https://ark.cn-beijing.volces.com/api/v3`）
     /// - `api_key`: API 密钥
     /// - `model`: 模型名称（如 `doubao-voice-2025-01-25`）
-    /// - `history_capacity`: 每个会话的历史消息最大数量
-    pub fn new(
-        api_base: &str,
-        api_key: &str,
-        model: &str,
-        history_capacity: usize,
-    ) -> Result<Self> {
+    pub fn new(api_base: &str, api_key: &str, model: &str) -> Result<Self> {
         if api_base.is_empty() {
             anyhow::bail!("API base URL cannot be empty");
         }
@@ -78,9 +67,6 @@ impl OnlineLlm {
         Ok(Self {
             client,
             model: model.to_string(),
-            histories: HashMap::new(),
-            current_session: "default".to_string(),
-            history_capacity,
             system_message,
         })
     }
@@ -129,14 +115,6 @@ impl OnlineLlm {
 "#
     }
 
-    /// 确保会话存在，不存在则创建
-    fn ensure_session(&mut self) {
-        if !self.histories.contains_key(&self.current_session) {
-            self.histories
-                .insert(self.current_session.clone(), VecDeque::new());
-        }
-    }
-
     /// 创建用户消息
     fn create_user_message(content: &str) -> ChatCompletionRequestMessage {
         ChatCompletionRequestUserMessageArgs::default()
@@ -152,44 +130,10 @@ impl OnlineLlm {
             })
     }
 
-    /// 创建助手消息
-    fn create_assistant_message(content: &str) -> ChatCompletionRequestMessage {
-        ChatCompletionRequestAssistantMessageArgs::default()
-            .content(content.to_string())
-            .build()
-            .map(std::convert::Into::into)
-            .unwrap_or_else(|_| {
-                ChatCompletionRequestAssistantMessageArgs::default()
-                    .content(content.to_string())
-                    .build()
-                    .unwrap()
-                    .into()
-            })
-    }
-
-    /// 添加消息到历史记录
-    fn add_message_to_history(&mut self, msg: ChatCompletionRequestMessage) {
-        self.ensure_session();
-        // Safety: session is guaranteed to exist after ensure_session()
-        let history = self.histories.get_mut(&self.current_session).unwrap();
-        history.push_back(msg);
-        // 超过容量时移除最旧的消息
-        while history.len() > self.history_capacity {
-            history.pop_front();
-        }
-    }
-
-    /// 构建完整的消息列表（含历史）
-    fn build_messages_with_history(&self, user_prompt: &str) -> Vec<ChatCompletionRequestMessage> {
-        let mut messages = vec![self.system_message.clone()];
-        if let Some(history) = self.histories.get(&self.current_session) {
-            messages.extend(history.iter().cloned());
-        }
-        messages.push(Self::create_user_message(user_prompt));
-        messages
-    }
-
     /// 异步执行情感分析（内部实现）
+    ///
+    /// 单发请求 (system + user), 不携带历史: 历史由 zeroclaw 托管后,
+    /// 情感分析只需要当前输入 (spec: FR-002).
     ///
     /// # 错误处理
     /// 返回的错误可能来自：
@@ -197,7 +141,10 @@ impl OnlineLlm {
     /// - API 请求超时
     /// - API 返回错误（如认证失败、限流等）
     async fn analyze_mood_async(&mut self, user_input: &str) -> Result<LlmResponse> {
-        let messages = self.build_messages_with_history(user_input);
+        let messages = vec![
+            self.system_message.clone(),
+            Self::create_user_message(user_input),
+        ];
 
         // 构建请求
         let request = CreateChatCompletionRequestArgs::default()
@@ -236,17 +183,10 @@ impl OnlineLlm {
         let (mood_str, actions_str) = Self::split_response(&content);
         let mood = parse_mood(mood_str);
         let actions = parse_actions(actions_str);
-
         log::info!("Mood: {:?}, Actions count: {}", mood, actions.len());
         for action in &actions {
             log::info!("Action: {action:?}");
         }
-
-        // 保存 user message 到历史
-        self.add_message_to_history(Self::create_user_message(user_input));
-
-        // 保存 assistant message 到历史
-        self.add_message_to_history(Self::create_assistant_message(&content));
 
         Ok(LlmResponse { mood, actions })
     }
@@ -269,21 +209,19 @@ impl OnlineLlm {
         "你是一个桌面机器人, 用简短中文回复用户 (≤ 30 字). 不要解释, 不要 markdown."
     }
 
-    /// chat 用: 构造 [system + history + user] 消息序列, 跟 `analyze_mood` 共用 histories.
+    /// chat 用: 构造 [system + user] 消息序列 (无状态单发, 历史由 zeroclaw 托管).
     fn build_chat_messages(&self, user_input: &str) -> Vec<ChatCompletionRequestMessage> {
-        let mut messages = vec![ChatCompletionRequestSystemMessageArgs::default()
-            .content(Self::chat_system_prompt())
-            .build()
-            .expect("system message build")
-            .into()];
-        if let Some(history) = self.histories.get(&self.current_session) {
-            messages.extend(history.iter().cloned());
-        }
-        messages.push(Self::create_user_message(user_input));
-        messages
+        vec![
+            ChatCompletionRequestSystemMessageArgs::default()
+                .content(Self::chat_system_prompt())
+                .build()
+                .expect("system message build")
+                .into(),
+            Self::create_user_message(user_input),
+        ]
     }
 
-    /// chat 异步实现: 调 chat completions, 把 user + assistant 都写入 history, 返回内容.
+    /// chat 异步实现: 无状态单发, 仅作兜底/调试用 (生产 chat 走 zeroclaw).
     async fn chat_async(&mut self, user_input: &str) -> Result<String> {
         let messages = self.build_chat_messages(user_input);
         let request = CreateChatCompletionRequestArgs::default()
@@ -303,12 +241,7 @@ impl OnlineLlm {
             .first()
             .and_then(|c| c.message.content.clone())
             .unwrap_or_default();
-        let content = content.trim().to_string();
-
-        // 写入 history
-        self.add_message_to_history(Self::create_user_message(user_input));
-        self.add_message_to_history(Self::create_assistant_message(&content));
-        Ok(content)
+        Ok(content.trim().to_string())
     }
 }
 
@@ -320,21 +253,6 @@ impl LlmTrait for OnlineLlm {
 
     async fn chat(&mut self, user_input: &str) -> Result<String> {
         self.chat_async(user_input).await
-    }
-
-    fn set_session_id(&mut self, session_id: &str) {
-        self.current_session = session_id.to_string();
-        self.ensure_session();
-    }
-
-    fn clear_session_history(&mut self, session_id: &str) {
-        if let Some(history) = self.histories.get_mut(session_id) {
-            history.clear();
-        }
-    }
-
-    fn clear_all_histories(&mut self) {
-        self.histories.clear();
     }
 }
 

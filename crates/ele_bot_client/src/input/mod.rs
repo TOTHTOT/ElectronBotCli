@@ -394,12 +394,17 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
                         app.stop_comm_thread();
                     }
                     PopupDismiss::ConfirmQuit => {}
+                    PopupDismiss::ConfirmClearLlmMemory => {}
                 }
                 // 弹窗关闭 (take 已把 overlay 置为 None)
             }
             (KeyCode::Enter, PopupDismiss::ConfirmQuit) => {
                 // 确认退出
                 app.quit();
+            }
+            (KeyCode::Enter, PopupDismiss::ConfirmClearLlmMemory) => {
+                // 确认清空对话记忆 (take 已关弹窗)
+                app.clear_llm_memory();
             }
             (KeyCode::Enter, _) => {
                 // 其它变体不支持 Enter 确认, 弹窗保持

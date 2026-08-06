@@ -1,42 +1,51 @@
 //! LLM 模块
 //!
-//! 使用 Candle 加载 GGUF 模型进行推理，或使用在线 LLM API
+//! 双后端结构 (specs/001-zeroclaw-llm-integration):
+//! - `chat` 对话回复: 由 zeroclaw 进程托管 (含对话历史与用户记忆)
+//! - `analyze_mood` 情感/动作分析: 保留现有在线 LLM API 或本地 Candle GGUF 链路
 //!
 //! ## 使用方法
 //!
 //! ```ignore
-//! use ele_bot::llm::{QwenLlm, OnlineLlm, LlmManager};
-//!
-//! // 本地模型加载
-//! let mut llm = QwenLlm::load("your_path/qwen3-0.6b-rust-sft-q8_0.gguf")?;
-//! llm.load_tokenizer("your_path/tokenizer.json")?;
-//! let response = llm.analyze_mood("你好")?;
-//! println!("Mood: {:?}, Actions: {:?}", response.mood, response.actions);
+//! let manager = LlmManager::new(api_base, api_key, model, model_path, tokenizer_path)?;
+//! let reply = manager.chat("你好").await?;            // zeroclaw 托管历史
+//! let response = manager.analyze_mood("你好").await?;  // 现有链路
 //! ```
 //!
-//! ## 文件要求
+//! ## 文件要求 (本地 GGUF 兜底, analyze_mood 用)
 //!
 //! - 模型: `your_path/Qwen3-0.6B-Q3_K_M.gguf`
 //! - 分词器: `your_path/tokenizer.json`
 
+pub mod acp;
 pub mod online;
 pub mod qwen;
 pub mod response;
 pub mod trait_;
+pub mod zeroclaw;
 
 use crate::llm::online::OnlineLlm;
 use crate::llm::qwen::QwenLlm;
 pub use crate::llm::response::LlmResponse;
 use crate::llm::trait_::LlmTrait;
-use anyhow::Result;
+use crate::llm::zeroclaw::ZeroclawLlm;
+use anyhow::{bail, Result};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-/// LLM 管理器 - 根据网络状态自动选择在线或本地 LLM
+/// LLM 管理器
+///
+/// - `chat`: 走 zeroclaw (对话历史/记忆托管, zeroclaw 配置由用户自管理);
+///   进程级故障在首次 chat 时快速失败, 由上层降级播报 (spec US3)
+/// - `analyze_mood`: 根据网络状态自动选择在线或本地 LLM (spec Q2: 不迁移)
 pub struct LlmManager {
-    inner: Arc<Mutex<Box<dyn LlmTrait>>>,
+    /// analyze_mood 链路: 在线/本地 LLM
+    mood_llm: Arc<Mutex<Box<dyn LlmTrait>>>,
+    /// chat 链路: zeroclaw (始终启用, 惰性连接; None 仅为防御性兜底)
+    chat_llm: Option<Arc<Mutex<ZeroclawLlm>>>,
 }
+
 #[allow(dead_code)]
 impl LlmManager {
     /// 创建 LLM 管理器
@@ -51,7 +60,8 @@ impl LlmManager {
     ///
     /// # Returns
     ///
-    /// 如果有网络且配置有效，返回在线 LLM；否则返回本地 LLM
+    /// mood 链路: 有网络且配置有效用在线 LLM, 否则本地 LLM (失败则整体报错);
+    /// chat 链路: 始终启用, zeroclaw 进程故障在首次 chat 时快速失败降级
     pub fn new(
         api_base: &str,
         api_key: &str,
@@ -64,25 +74,32 @@ impl LlmManager {
 
         log::info!("Network status: {is_online}, trying to create LLM");
 
-        let inner: Box<dyn LlmTrait> = if is_online && !api_base.is_empty() && !api_key.is_empty() {
-            // 尝试创建在线 LLM
-            match OnlineLlm::new(api_base, api_key, model, 20) {
-                Ok(online) => {
-                    log::info!("Using online LLM");
-                    Box::new(online)
+        let mood_llm: Box<dyn LlmTrait> =
+            if is_online && !api_base.is_empty() && !api_key.is_empty() {
+                // 尝试创建在线 LLM
+                match OnlineLlm::new(api_base, api_key, model) {
+                    Ok(online) => {
+                        log::info!("Using online LLM");
+                        Box::new(online)
+                    }
+                    Err(e) => {
+                        log::warn!("Failed to create online LLM: {e}, falling back to local");
+                        Self::create_local_llm(model_path, tokenizer_path)?
+                    }
                 }
-                Err(e) => {
-                    log::warn!("Failed to create online LLM: {e}, falling back to local");
-                    Self::create_local_llm(model_path, tokenizer_path)?
-                }
-            }
-        } else {
-            log::info!("Using local Qwen LLM");
-            Self::create_local_llm(model_path, tokenizer_path)?
-        };
+            } else {
+                log::info!("Using local Qwen LLM");
+                Self::create_local_llm(model_path, tokenizer_path)?
+            };
+
+        // chat 链路始终启用: zeroclaw 配置由用户自己维护 (默认 ~/.zeroclaw),
+        // 进程级故障在首次 chat 时快速失败并降级播报 (spec US3)
+        log::info!("zeroclaw chat 链路已配置 (首次对话时惰性启动)");
+        let chat_llm = Some(Arc::new(Mutex::new(ZeroclawLlm::new())));
 
         Ok(Self {
-            inner: Arc::new(Mutex::new(inner)),
+            mood_llm: Arc::new(Mutex::new(mood_llm)),
+            chat_llm,
         })
     }
 
@@ -106,32 +123,25 @@ impl LlmManager {
 
     /// 分析情感
     pub async fn analyze_mood(&self, user_input: &str) -> Result<LlmResponse> {
-        let mut guard = self.inner.lock().await;
+        let mut guard = self.mood_llm.lock().await;
         guard.analyze_mood(user_input).await
     }
 
-    /// 生成对话文本回复 (走 TTS 播报). 内部 tokio Mutex 借用 `&self.inner`.
+    /// 生成对话文本回复 (走 TTS 播报, zeroclaw 托管历史与记忆).
+    /// 内部 tokio Mutex 借用 `&self.chat_llm`.
     pub async fn chat(&self, user_input: &str) -> Result<String> {
-        log::debug!("user_input qwen: {user_input}");
-        let mut guard = self.inner.lock().await;
-        guard.chat(user_input).await
+        log::debug!("user_input zeroclaw: {user_input}");
+        let Some(zc) = &self.chat_llm else {
+            bail!("zeroclaw 未启用 (llm 配置不完整或初始化失败)");
+        };
+        zc.lock().await.chat(user_input).await
     }
 
-    /// 设置当前会话 ID
-    pub async fn set_session_id(&self, session_id: &str) {
-        let mut guard = self.inner.lock().await;
-        guard.set_session_id(session_id);
-    }
-
-    /// 清除指定会话的历史记录
-    pub async fn clear_session_history(&self, session_id: &str) {
-        let mut guard = self.inner.lock().await;
-        guard.clear_session_history(session_id);
-    }
-
-    /// 清除所有会话的历史记录
-    pub async fn clear_all_histories(&self) {
-        let mut guard = self.inner.lock().await;
-        guard.clear_all_histories();
+    /// 清空全部对话历史与个人记忆 (spec: FR-006)
+    pub async fn clear_llm_memory(&self) -> Result<()> {
+        let Some(zc) = &self.chat_llm else {
+            bail!("zeroclaw 未启用, 无记忆可清空");
+        };
+        zc.lock().await.clear_memory().await
     }
 }

@@ -502,17 +502,25 @@ impl SharedState {
                         // 阶段 1: chat — 生成对话文本.
                         // state.llm 是 tokio::sync::Mutex, lock() 返 future.
                         // await 拿 Guard, Guard 跨 await 安全 (tokio Mutex 设计).
+                        // 超时给 60s: 记忆写入类轮次实测 40s+ (多次工具调用),
+                        // 普通轮次经代理 4-15s; zeroclaw 进程级故障走 spawn/
+                        // initialize 快速失败 (<5s), 不受此值影响 (spec US3).
                         let reply_text =
-                            state
-                                .llm
-                                .lock()
-                                .await
-                                .chat(&text)
-                                .await
-                                .unwrap_or_else(|e| {
+                            match tokio::time::timeout(std::time::Duration::from_secs(60), async {
+                                state.llm.lock().await.chat(&text).await
+                            })
+                            .await
+                            {
+                                Ok(Ok(reply)) => reply,
+                                Ok(Err(e)) => {
                                     log::warn!("chat failed: {e:?}");
-                                    format!("[LLM 错误: {e}]")
-                                });
+                                    "对话服务暂时不可用, 请稍后再试".to_string()
+                                }
+                                Err(_) => {
+                                    log::warn!("chat timeout (>60s), zeroclaw 可能挂起");
+                                    "对话服务暂时不可用, 请稍后再试".to_string()
+                                }
+                            };
                         log::info!("LLM reply: {reply_text}");
 
                         // 阶段 2: analyze_mood — 情感 + 舵机动作. analyze_mood 也是 async.

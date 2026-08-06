@@ -56,6 +56,9 @@ pub enum ClientMessage {
     ListOutputDevices,
     /// 请求所有摄像头 (服务端响应 `ServerEvent::Cameras`)
     ListCameras,
+    /// 清空 LLM 对话历史与个人记忆 (服务端响应 `ServerEvent::LlmMemoryCleared`
+    /// 或 `ServerEvent::Error`); 历史/记忆由 zeroclaw 托管, 此命令为整体清空入口
+    ClearLlmMemory,
 }
 
 impl ClientMessage {
@@ -111,6 +114,8 @@ pub enum ServerEvent {
     Cameras { cameras: Vec<CameraInfoDto> },
     /// 系统状态 (SoC 温度 / CPU / 内存), 服务端定时推送
     SystemStats { stats: SystemStatsDto },
+    /// LLM 对话历史与个人记忆已清空 (响应 `ClearLlmMemory`)
+    LlmMemoryCleared,
 }
 
 impl ServerEvent {
@@ -188,6 +193,21 @@ mod tests {
         assert!(json.contains("\"type\":\"list_cameras\""));
         let parsed = ClientMessage::from_json(&json).unwrap();
         assert!(matches!(parsed, ClientMessage::ListCameras));
+    }
+
+    #[test]
+    fn clear_llm_memory_roundtrip() {
+        let msg = ClientMessage::ClearLlmMemory;
+        let json = msg.to_json().unwrap();
+        assert!(json.contains("\"type\":\"clear_llm_memory\""));
+        let parsed = ClientMessage::from_json(&json).unwrap();
+        assert!(matches!(parsed, ClientMessage::ClearLlmMemory));
+
+        let evt = ServerEvent::LlmMemoryCleared;
+        let json = evt.to_json().unwrap();
+        assert!(json.contains("\"type\":\"llm_memory_cleared\""));
+        let parsed = ServerEvent::from_json(&json).unwrap();
+        assert!(matches!(parsed, ServerEvent::LlmMemoryCleared));
     }
 
     #[test]

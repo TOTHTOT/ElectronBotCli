@@ -284,6 +284,21 @@ async fn handle_command(
             let cameras = crate::media::video::capture::list_cameras_dto();
             let _ = out_tx.send(ServerEvent::Cameras { cameras });
         }
+        ClientMessage::ClearLlmMemory => {
+            // 整体清空入口 (spec: FR-006): 历史/记忆都在 zeroclaw 侧,
+            // 命令链 = session/stop + memory clear + 下次 chat 自动重建
+            match state.llm.lock().await.clear_llm_memory().await {
+                Ok(()) => {
+                    let _ = out_tx.send(ServerEvent::LlmMemoryCleared);
+                }
+                Err(e) => {
+                    log::warn!("clear llm memory failed: {e:?}");
+                    let _ = out_tx.send(ServerEvent::Error {
+                        message: format!("清空对话记忆失败: {e}"),
+                    });
+                }
+            }
+        }
     }
     Ok(())
 }

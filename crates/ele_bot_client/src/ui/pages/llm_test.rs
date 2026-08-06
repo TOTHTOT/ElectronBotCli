@@ -44,7 +44,7 @@ pub fn render(
     let input_style = Style::default().fg(Color::Yellow);
     let input_box = Paragraph::new(state.input_text.as_str()).block(
         Block::bordered()
-            .title("输入 (按回车发送)")
+            .title("输入 (回车发送, F2 清空记忆)")
             .style(input_style),
     );
     frame.render_widget(input_box, chunks[0]);

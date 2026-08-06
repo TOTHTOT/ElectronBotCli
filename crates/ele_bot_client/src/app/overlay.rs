@@ -85,6 +85,18 @@ impl PopupConfig {
             ..Self::default()
         }
     }
+
+    /// "确认清空对话记忆" 默认配置
+    #[must_use]
+    pub fn confirm_clear_llm_memory() -> Self {
+        Self {
+            title: " 清空对话记忆 ".to_string(),
+            content: "将清空全部对话历史与个人记忆!\n[Enter] 确认   [Esc] 取消".to_string(),
+            border_color: Color::Red,
+            title_color: Color::Red,
+            ..Self::default()
+        }
+    }
 }
 
 /// 弹窗 Esc 键的行为
@@ -96,6 +108,8 @@ pub enum PopupDismiss {
     CancelConnect,
     /// Esc 关闭弹窗(取消), Enter 确认退出程序
     ConfirmQuit,
+    /// Esc 关闭弹窗(取消), Enter 确认清空 LLM 对话记忆
+    ConfirmClearLlmMemory,
 }
 
 /// 模态层
