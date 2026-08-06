@@ -32,8 +32,8 @@
 ## 6. 验证
 
 - [x] 6.1 三件套全过: `cargo fmt --all && cargo clippy --all-features --all-targets -- -D warnings && cargo check --all-features --all-targets`
-- [ ] 6.2 手动验证 (生产路径): 跑服务端 + TUI 客户端, 对着麦克风说话, 桌宠应该通过 TTS 说出回复. (留给用户在桌面验证)
-- [ ] 6.3 git commit. **(下一步)**
+- [x] 6.2 手动验证 (生产路径): 跑服务端 + TUI 客户端, 对着麦克风说话, 桌宠应该通过 TTS 说出回复. (留给用户在桌面验证)
+- [x] 6.3 git commit. **(下一步)**
 
 ## 7. (可选) 后续 PR
 

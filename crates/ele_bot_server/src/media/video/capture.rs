@@ -845,3 +845,58 @@ fn encode_rgb_to_jpeg(rgb_data: &[u8], width: u32, height: u32) -> Option<Bytes>
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_camera_index_integer() {
+        assert!(matches!(parse_camera_index("1"), CameraIndex::Index(1)));
+        assert!(matches!(parse_camera_index("0"), CameraIndex::Index(0)));
+    }
+
+    #[test]
+    fn parse_camera_index_empty_defaults_to_zero() {
+        assert!(matches!(parse_camera_index(""), CameraIndex::Index(0)));
+    }
+
+    #[test]
+    fn parse_camera_index_non_integer_goes_string() {
+        match parse_camera_index("/dev/video0") {
+            CameraIndex::String(s) => assert_eq!(s, "/dev/video0"),
+            other => panic!("expected String index, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn camera_info_to_dto_empty_human_name_falls_back() {
+        // human_name 和 description 都为空 -> display 退化成 `Camera {id} (id={id})`
+        let ci = CameraInfo::new("", "", "/dev/video0", CameraIndex::Index(0));
+        let dto = camera_info_to_dto(&ci);
+        assert_eq!(dto.id, "0");
+        assert_eq!(dto.display, "Camera 0 (id=0)");
+    }
+
+    #[test]
+    fn camera_info_to_dto_dedups_driver_and_name() {
+        // description 缺失时 driver 也退到 `Camera {id}`, 与 name 相同,
+        // display 应合并为单段而不是 `Camera 0 Camera 0 (id=0)`.
+        let ci = CameraInfo::new("", "", "/dev/video0", CameraIndex::Index(1));
+        let dto = camera_info_to_dto(&ci);
+        assert_eq!(dto.display, "Camera 1 (id=1)");
+    }
+
+    #[test]
+    fn camera_info_to_dto_full_fields() {
+        let ci = CameraInfo::new(
+            "USB 2.0 PC Cam",
+            "V4L2 Camera",
+            "/dev/video0",
+            CameraIndex::Index(0),
+        );
+        let dto = camera_info_to_dto(&ci);
+        assert_eq!(dto.name, "USB 2.0 PC Cam");
+        assert_eq!(dto.display, "V4L2 Camera USB 2.0 PC Cam (id=0)");
+    }
+}
