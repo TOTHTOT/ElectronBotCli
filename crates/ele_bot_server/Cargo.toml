@@ -21,7 +21,6 @@ tokio = { workspace = true }
 anyhow = { workspace = true }
 log = { workspace = true }
 thiserror = { workspace = true }
-async-trait = { workspace = true }
 futures = { workspace = true }
 bytes = { workspace = true }
 chrono = { workspace = true }
@@ -37,10 +36,9 @@ sysinfo = { workspace = true }
 electron-bot = { workspace = true }
 BotEyes = { workspace = true }
 cpal = { workspace = true }
-candle-core = { workspace = true }
-candle-transformers = { workspace = true }
-tokenizers = { workspace = true }
-async-openai = { workspace = true }
+
+# ACP (Agent Client Protocol) 官方 SDK, 连接 zeroclaw acp 子进程
+agent-client-protocol = "2.0.0"
 
 # Web/WebSocket 服务
 axum = { workspace = true }

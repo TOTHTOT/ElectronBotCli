@@ -61,8 +61,6 @@ impl ModelManager {
             ("sense_voice", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "model.int8.onnx", "./model/sherpa-onnx-rk3566-5-seconds-sense-voice-zh-en-ja-ko-yue-2024-07-17/model.rknn"),
             ("sense_voice_tokens", "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17", "tokens.txt", ""),
             ("silero_vad", "deepghs/silero-vad-onnx", "silero_vad.onnx", ""),
-            ("qwen", "Qwen/Qwen2.5-0.5B-Instruct-GGUF", "qwen2.5-0.5b-instruct-q4_0.gguf", ""),
-            ("tokenizer", "onnx-community/Qwen2.5-0.5B-Instruct", "tokenizer.json", ""),
             // VITS TTS 模型 (中文) - 使用 HuggingFace
             ("vits_tts", "csukuangfj/sherpa-onnx-vits-zh-ll", "model.onnx", ""),
             ("vits_tts_tokens", "csukuangfj/sherpa-onnx-vits-zh-ll", "tokens.txt", ""),

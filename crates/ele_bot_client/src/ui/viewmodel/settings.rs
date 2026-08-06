@@ -62,21 +62,6 @@ impl SettingsViewModel {
                 label: "Wifi密码",
                 value: app.config.wifi_password.clone(),
             },
-            // LLM 三项 — 顺序需与 `app::SETTINGS_IDX_LLM_*` 索引常量一致;
-            // 即使其中某项为空字符串, 也保留位置, 渲染层负责用暗灰 `<未配置>`
-            // 占位. `llm_api_key` 不掩盖显示 (掩码 UX 是未来 change, 见 spec).
-            SettingItem {
-                label: "LLM API 地址",
-                value: app.config.llm_api_base.clone(),
-            },
-            SettingItem {
-                label: "LLM API Key",
-                value: app.config.llm_api_key.clone(),
-            },
-            SettingItem {
-                label: "LLM 模型",
-                value: app.config.llm_model.clone(),
-            },
         ];
 
         // 麦克风 / 扬声器: 显示当前选择的 display (查设备缓存, 找不到回退原值)

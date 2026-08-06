@@ -2,6 +2,11 @@
 
 **Date**: 2026-08-02 | **Feature**: [spec.md](../spec.md)
 
+> **2026-08-06 更新**: 传输层已迁移到官方 SDK `agent-client-protocol` v2.0
+> (typed schema 1.5.0), 本文档的帧格式/方法子集仅作协议参考存档,
+> 帧编解码不再由本仓库手写维护。session 关闭用标准 `session/close`
+> (zeroclaw 0.8.4 实测同时接受 `session/stop`)。
+
 本仓库 `ele_bot_server` 作为 ACP client，spawn `zeroclaw acp` 子进程，stdin/stdout 走 JSON-RPC 2.0。
 
 **帧格式已实测确认（zeroclaw v0.8.3）**：NDJSON，每行一个完整 JSON 对象，无 Content-Length 头。

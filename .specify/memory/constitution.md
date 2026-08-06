@@ -1,3 +1,11 @@
+<!--
+Sync Impact Report
+- Version change: 1.0.0 → 1.1.0 (MINOR: 原则 V 实质性扩充, 新增"更优方案 MUST 上报"条款)
+- Modified principles: V. 最小改动与简洁 → 同名, 增加例外条款
+- Added sections: 无
+- Removed sections: 无
+- Follow-up TODOs: 无
+-->
 # ElectronBotCli 宪法
 
 本文件是项目的最高治理约束，优先级高于任何临时实践与个人偏好。
@@ -49,6 +57,10 @@ CI（`.github/workflows/ci.yml`）执行 fmt / clippy / build / test，本地门
 三行相似代码好过一次过早抽象。新增第三方 crate 前，先确认 workspace 内没有
 现成能力，并优先复用已有依赖的版本与惯用法。
 
+**例外（ MUST 上报）**：若执行中发现存在明显更优的依赖或方案（官方 SDK、更小的
+实现成本、显著更好的可维护性），**必须先向用户说明权衡并征得同意**，再决定引入
+或替换；不得仅以"最小依赖"为由默默排除更优解，也不得未经确认擅自引入。
+
 ## 技术栈与平台约束
 
 - **Workspace 结构**：`ele_bot_proto`（共享协议类型）、`ele_bot_server`（串口舵机、
@@ -83,4 +95,4 @@ CI（`.github/workflows/ci.yml`）执行 fmt / clippy / build / test，本地门
 - 版本号规则：不兼容的原则删除/改义升 MAJOR，新增原则或章节升 MINOR，措辞澄清
   升 PATCH。
 
-**Version**: 1.0.0 | **Ratified**: 2026-07-30 | **Last Amended**: 2026-07-30
+**Version**: 1.1.0 | **Ratified**: 2026-07-30 | **Last Amended**: 2026-08-06

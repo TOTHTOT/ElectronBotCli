@@ -3,7 +3,6 @@
 //! 持有所有硬件资源(机器人、摄像头、麦克风、LLM 推理等),
 //! 通过 WebSocket 与客户端通信。
 
-pub mod emotion;
 pub mod event_bus;
 pub mod face_tracker;
 pub mod llm;

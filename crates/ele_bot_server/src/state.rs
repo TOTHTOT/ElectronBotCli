@@ -150,7 +150,7 @@ impl SharedState {
 
         // LLM
         log::debug!("start init llm");
-        let llm = Self::init_llm(&config)?;
+        let llm = Self::init_llm();
 
         let state = Arc::new(Self {
             config: RwLock::new(config),
@@ -230,21 +230,9 @@ impl SharedState {
         }
     }
 
-    fn init_llm(config: &AppConfig) -> anyhow::Result<LlmManager> {
-        let mm = ModelManager::global();
-        let Some(qw_tokenizer_path) = mm.get("tokenizer") else {
-            anyhow::bail!("tokenizer not found");
-        };
-        let Some(qw_path) = mm.get("qwen") else {
-            anyhow::bail!("qwen not found");
-        };
-        LlmManager::new(
-            &config.llm_api_base,
-            &config.llm_api_key,
-            &config.llm_model,
-            qw_path,
-            qw_tokenizer_path,
-        )
+    fn init_llm() -> LlmManager {
+        // 单后端 zeroclaw: 无配置项, 首次 chat/analyze_mood 时惰性连接
+        LlmManager::new()
     }
 
     /// 用当前 `AppConfig` 重新构造 `VoiceManager`, 替换 `self.voice`.

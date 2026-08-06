@@ -286,7 +286,7 @@ async fn handle_command(
         }
         ClientMessage::ClearLlmMemory => {
             // 整体清空入口 (spec: FR-006): 历史/记忆都在 zeroclaw 侧,
-            // 命令链 = session/stop + memory clear + 下次 chat 自动重建
+            // 命令链 = session/close + memory clear + 清 MEMORY.md/memory/ + 下次 chat 自动重建
             match state.llm.lock().await.clear_llm_memory().await {
                 Ok(()) => {
                     let _ = out_tx.send(ServerEvent::LlmMemoryCleared);
