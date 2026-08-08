@@ -79,6 +79,7 @@ profile (--debug 优先, 否则读 PROFILE 环境变量, 否则 release):
 
 内置检查:
   docker daemon / cross 二进制 / 磁盘 ≥8GB
+  传输前 sha256 比对, 设备端已是同一文件则跳过 (不重启进程)
   scp 后 sha256 校验 (传输截断自动报错)
   cargo 缓存挂载进 cross 容器 (增量编译命中)
 EOF
@@ -219,10 +220,20 @@ deploy_binary() {
     local local_path="$1"
     local remote_path="$2"
 
-    # 计算本地 sha256 用于后续校验
+    # 计算本地 sha256, 先与设备端比对
     local local_hash
     local_hash=$(shasum -a 256 "$local_path" | awk '{print $1}')
     echo "本地 sha256: $local_hash"
+
+    # 设备端已有同一文件则跳过传输 (不 pkill: 文件没变, 不动正在跑的进程;
+    # .so / zeroclaw 这类基本不变的文件每次部署能省下大头传输时间).
+    # 连接失败时静默继续走正常传输路径, 由 scp/校验阶段报错
+    local remote_hash
+    remote_hash=$(run_remote_cmd "sha256sum $remote_path 2>/dev/null | awk '{print \$1}'" 2>/dev/null || true)
+    if [[ -n "$remote_hash" && "$remote_hash" == "$local_hash" ]]; then
+        echo "设备端已是同一文件 (sha256 一致), 跳过传输"
+        return 0
+    fi
 
     # 先杀掉设备上正在运行的同名进程, 否则 scp 会因 "text file busy"
     # (dest open Failure) 传不上去

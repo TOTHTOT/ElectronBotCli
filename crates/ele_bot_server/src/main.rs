@@ -27,7 +27,7 @@ async fn main() -> anyhow::Result<()> {
     if let Ok(f) = File::create("server.log") {
         let _ = CombinedLogger::init(vec![
             TermLogger::new(
-                simplelog::LevelFilter::Debug,
+                simplelog::LevelFilter::Info,
                 Config::default(),
                 TerminalMode::Stderr,
                 ColorChoice::Auto,
