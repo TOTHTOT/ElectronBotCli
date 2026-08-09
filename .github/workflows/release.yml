@@ -1,0 +1,77 @@
+name: Release
+
+# 打 tag (v*) 触发, 编译三端并上传 GitHub Release:
+#   - aarch64-unknown-linux-gnu   RK3566 设备端 (cross + Dockerfile.cross)
+#   - x86_64-unknown-linux-gnu    PC Linux
+#   - aarch64-apple-darwin        macOS (Apple Silicon)
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-x86_64-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+      - name: Build release
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          tar -czf electronbot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz \
+            -C target/release ele_bot_server ele_bot_client
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: electronbot-${{ github.ref_name }}-x86_64-unknown-linux-gnu.tar.gz
+
+  build-aarch64-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch sherpa-onnx rknn prebuilt libs
+        # assets/lib/sherpa-onnx-rknn/ 被 gitignore (75MB), Dockerfile.cross
+        # COPY 它进交叉镜像, 必须先下载 (版本与 sherpa-onnx crate 对齐)
+        run: bash scripts/tools/fetch_sherpa_rknn.sh
+      - name: Install cross
+        uses: taiki-e/install-action@cross
+      - name: Build release (cross)
+        # Cross.toml 指向 Dockerfile.cross (注入 librknnrt + SHERPA_ONNX_LIB_DIR)
+        run: cross build --release --locked --target aarch64-unknown-linux-gnu
+      - name: Package
+        run: |
+          tar -czf electronbot-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz \
+            -C target/aarch64-unknown-linux-gnu/release ele_bot_server
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: electronbot-${{ github.ref_name }}-aarch64-unknown-linux-gnu.tar.gz
+
+  build-macos:
+    # macos-latest 即 Apple Silicon, 原生 aarch64-apple-darwin
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
+      - name: Build release
+        run: cargo build --release --locked
+      - name: Package
+        run: |
+          tar -czf electronbot-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz \
+            -C target/release ele_bot_server ele_bot_client
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: electronbot-${{ github.ref_name }}-aarch64-apple-darwin.tar.gz

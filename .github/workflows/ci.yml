@@ -4,47 +4,59 @@ on:
   push:
     branches: [main, master]
     paths:
-      - 'src/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
   pull_request:
     branches: [main, master]
     paths:
-      - 'src/**'
+      - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
+      - '.github/workflows/ci.yml'
 
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
 
+# 与本地/交叉编译一致的 toolchain, 避免新版 clippy 突然加 lint 打红 CI
+# (上次 1.97 的 unneeded_wildcard_pattern / manual_checked_ops 就是这么挂的)
 jobs:
   fmt:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
+          components: rustfmt
       - name: Check formatting
-        run: cargo fmt --check
+        run: cargo fmt --all -- --check
 
   clippy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
+          components: clippy
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Run Clippy
-        run: cargo clippy --all-features -- -D warnings
+        run: cargo clippy --all-features --all-targets -- -D warnings
 
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.94.1
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
       - name: Build

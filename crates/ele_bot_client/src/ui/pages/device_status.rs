@@ -85,11 +85,9 @@ pub fn render(frame: &mut Frame, area: Rect, app: &App, border_color: Color) {
                 .unwrap_or_else(|| "--".into());
             let temp_ok = s.soc_temp_c.is_none_or(|t| t < 80.0);
             let cpu_bar = render_bar(s.cpu_usage as i32);
-            let mem_pct = if s.mem_total_mb > 0 {
-                (s.mem_used_mb * 100 / s.mem_total_mb) as i32
-            } else {
-                0
-            };
+            let mem_pct = (s.mem_used_mb * 100)
+                .checked_div(s.mem_total_mb)
+                .map_or(0, |v| v as i32);
             let mem_bar = render_bar(mem_pct);
             (
                 temp,

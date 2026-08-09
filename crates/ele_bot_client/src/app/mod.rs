@@ -610,12 +610,7 @@ impl App {
 
     /// 取消编辑(Esc on `EditField` overlay)
     pub fn cancel_settings_edit(&mut self) {
-        if let Route::Settings {
-            editing,
-            selecting: _,
-            ..
-        } = &mut self.ui.mode.route
-        {
+        if let Route::Settings { editing, .. } = &mut self.ui.mode.route {
             *editing = None;
         }
     }
