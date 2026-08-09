@@ -1,11 +1,22 @@
 //! TTS 测试输入处理模块
 
 use crate::app::App;
-use crossterm::event::KeyCode;
+use crossterm::event::{KeyCode, KeyModifiers};
 use std::sync::atomic::Ordering;
 
 /// 处理 TTS 测试模式的输入
-pub fn handle(app: &mut App, code: KeyCode) {
+pub fn handle(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    // Ctrl+U 清空输入框 (先于 Char 通配分支拦截)
+    if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('u') {
+        app.ai.tts_test_state.input.clear();
+        return;
+    }
+    // 部分终端把 Backspace 发成 ^H (0x08), crossterm 解为 Char('h')+CONTROL,
+    // 不拦截会被 Char 通配分支当成字符 'h' 插入
+    if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('h') {
+        app.ai.tts_test_state.input.delete_back();
+        return;
+    }
     match code {
         KeyCode::Char('m' | 'M') => {
             app.ai.tts_test_state.is_streaming = !app.ai.tts_test_state.is_streaming;
@@ -26,11 +37,18 @@ pub fn handle(app: &mut App, code: KeyCode) {
             app.ai.tts_test_state.speed = new_speed;
             app.ai.tts_test_state.output_text = format!("速度: {new_speed:.1}");
         }
+        KeyCode::Left => app.ai.tts_test_state.input.move_left(1),
+        KeyCode::Right => app.ai.tts_test_state.input.move_right(1),
+        KeyCode::Home => app.ai.tts_test_state.input.move_to_start(),
+        KeyCode::End => app.ai.tts_test_state.input.move_to_end(),
         KeyCode::Backspace => {
-            app.ai.tts_test_state.input_text.pop();
+            app.ai.tts_test_state.input.delete_back();
+        }
+        KeyCode::Delete => {
+            app.ai.tts_test_state.input.delete_forward();
         }
         KeyCode::Enter => {
-            let input = app.ai.tts_test_state.input_text.clone();
+            let input = app.ai.tts_test_state.input.text().to_string();
             if !input.is_empty() && !app.ai.tts_test_state.is_playing.load(Ordering::SeqCst) {
                 // 设置正在播放(本地标记)
                 app.ai
@@ -55,9 +73,7 @@ pub fn handle(app: &mut App, code: KeyCode) {
         KeyCode::Esc => {
             // Esc 由 Route 层处理退到 Nav, 此处不再清空缓冲
         }
-        KeyCode::Char(c) => {
-            app.ai.tts_test_state.input_text.push(c);
-        }
+        KeyCode::Char(c) => app.ai.tts_test_state.input.insert_char(c),
         _ => {}
     }
 }

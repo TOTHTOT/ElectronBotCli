@@ -458,6 +458,8 @@ impl SharedState {
                 config.speech_device_id.as_deref(),
                 &config.output_device,
                 config.output_device_id.as_deref(),
+                config.speaker_volume,
+                config.mic_volume,
                 bus,
             )
         } else {
@@ -819,6 +821,19 @@ impl SharedState {
         self.config.read().unwrap().clone()
     }
 
+    /// 把 cfg 里的音量百分比热更新到当前 `VoiceManager` 的增益原子量.
+    ///
+    /// 只写原子量, 不触发 `rebuild_voice` — 调音量不需要重建音频流,
+    /// 播放/采集路径下次读取即生效. 必须在 `self.config` 更新后调用:
+    /// `audio_changed` 触发的 rebuild 会按旧 config 重建 VoiceManager,
+    /// 之后靠本函数把新音量补写进去.
+    fn apply_volume(&self, cfg: &AppConfig) {
+        if let Some(voice) = self.voice.lock().unwrap().as_ref() {
+            voice.set_speaker_volume(cfg.speaker_volume);
+            voice.set_mic_volume(cfg.mic_volume);
+        }
+    }
+
     /// 更新 config
     ///
     /// 若 `speech_name` / `output_device` 与旧值不同, 立即重建
@@ -875,6 +890,7 @@ impl SharedState {
                                 }));
                             cfg.save()?;
                             *self.config.write().unwrap() = cfg.clone();
+                            self.apply_volume(&cfg);
                             self.bus_tx
                                 .publish(BusEvent::ServerEvent(ServerEvent::Config {
                                     config: cfg.clone(),
@@ -918,6 +934,7 @@ impl SharedState {
         // 走到这里 audio + video rebuild 全部成功 → 落盘 + 推 Config
         cfg.save()?;
         *self.config.write().unwrap() = cfg.clone();
+        self.apply_volume(&cfg);
         self.bus_tx
             .publish(BusEvent::ServerEvent(ServerEvent::Config {
                 config: cfg.clone(),

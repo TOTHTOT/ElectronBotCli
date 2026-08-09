@@ -14,7 +14,7 @@ use rodio::buffer::SamplesBuffer;
 use rodio::{queue, ChannelCount, DeviceSinkBuilder, MixerDeviceSink, Player, SampleRate};
 use sherpa_onnx::{GenerationConfig, OfflineTts, OfflineTtsConfig, OfflineTtsVitsModelConfig};
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// Callback type for TTS progress reporting
@@ -180,6 +180,9 @@ impl TtsHandler {
 /// 音频设备时的 RAII 释放链保持不变 (见 `docs/voice-hot-swap.md`).
 pub struct TtsPlayer {
     sink: MixerDeviceSink,
+    /// 播放增益 (f32 bits, 1.0 = 原始音量). 原子量共享自 `VoiceManager`,
+    /// `set_config` 调音量时热更新, 下一次播放即生效, 无需重建输出流.
+    gain: Arc<AtomicU32>,
 }
 
 /// 流式 TTS 播放句柄.
@@ -247,7 +250,11 @@ impl TtsPlayer {
     /// let player = TtsPlayer::new("Speakers (Realtek)", None)?;
     /// let player = TtsPlayer::new("", Some("{0.0.0...}"))?; // 按 id 优先
     /// ```
-    pub fn new(output_device_name: &str, output_device_id: Option<&str>) -> Result<Self> {
+    pub fn new(
+        output_device_name: &str,
+        output_device_id: Option<&str>,
+        gain: Arc<AtomicU32>,
+    ) -> Result<Self> {
         let device = crate::media::voice::find_output_device(output_device_name, output_device_id)
             .ok_or_else(|| anyhow!("No audio output device found"))?;
 
@@ -274,7 +281,7 @@ impl TtsPlayer {
             sink_config.sample_format()
         );
 
-        Ok(Self { sink })
+        Ok(Self { sink, gain })
     }
 
     /// 在 rodio (cpal 0.17) 侧按设备名找回同一个物理输出设备.
@@ -313,12 +320,9 @@ impl TtsPlayer {
             .ok_or_else(|| anyhow!("invalid sample rate: {}", audio.sample_rate))?;
 
         let player = Player::connect_new(self.sink.mixer());
+        player.set_volume(self.current_gain());
         // mixer 自动包 UniformSourceIterator 做声道+采样率+位宽转换
-        player.append(SamplesBuffer::new(
-            channels,
-            sample_rate,
-            audio.samples,
-        ));
+        player.append(SamplesBuffer::new(channels, sample_rate, audio.samples));
         player.sleep_until_end();
 
         Ok(())
@@ -357,6 +361,7 @@ impl TtsPlayer {
         // 也不让 Player 提前判定结束.
         let (queue_input, queue_output) = queue::queue(true);
         let player = Player::connect_new(self.sink.mixer());
+        player.set_volume(self.current_gain());
         player.append(queue_output);
 
         Ok(StreamPlayerHandle {
@@ -366,12 +371,16 @@ impl TtsPlayer {
             sample_rate,
         })
     }
+    /// 读当前播放增益 (原子量存 f32 bits).
+    fn current_gain(&self) -> f32 {
+        f32::from_bits(self.gain.load(Ordering::Relaxed))
+    }
 }
 
 impl Default for TtsPlayer {
     fn default() -> Self {
         // unwrap is safe here as it only fails if no audio device exists
-        Self::new("", None).unwrap()
+        Self::new("", None, Arc::new(AtomicU32::new(1.0f32.to_bits()))).unwrap()
     }
 }
 

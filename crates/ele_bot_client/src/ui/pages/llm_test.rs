@@ -3,19 +3,19 @@
 //! 用于手动发送文本并调用 LLM 模型生成回复
 
 use crate::ui_components::create_block;
+use crate::ui_components::text_input::TextInput;
 use ele_bot_proto::Mood;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::Stylize,
     style::Color,
-    style::Style,
     Frame,
 };
 
 #[derive(Default)]
 pub struct LlmTestState {
-    pub input_text: String,
+    pub input: TextInput,
     pub output_text: String,
     pub current_mood: Option<Mood>,
 }
@@ -40,13 +40,12 @@ pub fn render(
             Constraint::Length(3), // 状态/情感显示
         ])
         .split(inner_area);
-    // 输入框
-    let input_style = Style::default().fg(Color::Yellow);
-    let input_box = Paragraph::new(state.input_text.as_str()).block(
-        Block::bordered()
-            .title("输入 (回车发送, F2 清空记忆)")
-            .style(input_style),
-    );
+    // 输入框: 块字符 caret 三段渲染, 超宽按 caret 横向滚动
+    let input_line = state
+        .input
+        .render_line(usize::from(chunks[0].width.saturating_sub(2)));
+    let input_box = Paragraph::new(input_line)
+        .block(Block::bordered().title("输入 (回车发送, Ctrl+U 清空, F2 清空记忆)"));
     frame.render_widget(input_box, chunks[0]);
 
     // 输出区域

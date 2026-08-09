@@ -7,9 +7,17 @@ use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{Device, Stream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
+
+/// 音量百分比 [0, 100] → 软件增益 (1.0 = 原始音量).
+///
+/// 超 100 的值按 100 钳位 — 增益 > 1 会在播放/采集两侧削波,
+/// 百分比语义也不允许. 供 `VoiceManager` 初始化与 `set_config` 共用.
+fn percent_to_gain(percent: u8) -> f32 {
+    f32::from(percent.min(100)) / 100.0
+}
 
 /// 从 cpal `Device` 同时取稳定 id 和 friendly name; 任一步失败返回 `None`.
 ///
@@ -79,6 +87,11 @@ pub struct VoiceManager {
     volume: Arc<AtomicI32>,
     tts_handler: TtsHandler,
     tts_player: Option<TtsPlayer>,
+    /// 扬声器播放增益 (f32 bits). 与 `TtsPlayer` 共享, `set_config` 调
+    /// 音量时热更新, 下一次播放生效, 不重建输出流.
+    speaker_gain: Arc<AtomicU32>,
+    /// 麦克风采集增益 (f32 bits). 采集回调每帧读取, 热更新即生效.
+    mic_gain: Arc<AtomicU32>,
     /// ASR 线程取消信号. 初始 true; `rebuild_voice` 重建前把旧实例
     /// 的 `running` 置 false, 旧 ASR 线程在 `audio_rx.recv_timeout`
     /// 唤醒时检查并主动退出.
@@ -101,6 +114,9 @@ impl VoiceManager {
     /// `speech_device_id` / `output_device_id` 是 cpal `DeviceId` 序列化的
     /// 稳定标识, 与 `speech_name` / `output_device_name` 配套传入; 任一为
     /// `None` 或空时 `find_*_device` 自动按 name 兜底.
+    // 参数多是因为设备名/id/音量都是独立配置维度, 合成 struct 会让
+    // 调用点 (state.rs) 多一层一次性包装, 与既有签名风格保持一致.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         asr_paths: AsrModelPaths,
         tts_paths: TtsModelPaths,
@@ -108,11 +124,20 @@ impl VoiceManager {
         speech_device_id: Option<&str>,
         output_device_name: &str,
         output_device_id: Option<&str>,
+        speaker_volume: u8,
+        mic_volume: u8,
         bus: crate::event_bus::EventBus,
     ) -> Result<Self> {
+        let speaker_gain = Arc::new(AtomicU32::new(percent_to_gain(speaker_volume).to_bits()));
+        let mic_gain = Arc::new(AtomicU32::new(percent_to_gain(mic_volume).to_bits()));
+
         // 初始化 TTS
         let tts_handler = TtsHandler::new(&tts_paths.model, &tts_paths.tokens, &tts_paths.lexicon)?;
-        let tts_player = Some(TtsPlayer::new(output_device_name, output_device_id)?);
+        let tts_player = Some(TtsPlayer::new(
+            output_device_name,
+            output_device_id,
+            speaker_gain.clone(),
+        )?);
 
         let volume = Arc::new(AtomicI32::new(0)); // 实时音量
         let running = Arc::new(AtomicBool::new(true));
@@ -122,6 +147,7 @@ impl VoiceManager {
         let stream = open_input_stream(
             speech_name,
             speech_device_id,
+            mic_gain.clone(),
             volume.clone(),
             audio_tx,
             bus.clone(),
@@ -142,8 +168,26 @@ impl VoiceManager {
             volume,
             tts_handler,
             tts_player,
+            speaker_gain,
+            mic_gain,
             running,
         })
+    }
+
+    /// 热更新扬声器音量 (百分比 [0, 100], 超限按 100 钳位).
+    ///
+    /// 只写原子量, 下一次播放生效 — 不中断当前播放, 不重建输出流.
+    pub fn set_speaker_volume(&self, percent: u8) {
+        self.speaker_gain
+            .store(percent_to_gain(percent).to_bits(), Ordering::Relaxed);
+    }
+
+    /// 热更新麦克风采集增益 (百分比 [0, 100], 超限按 100 钳位).
+    ///
+    /// 只写原子量, 采集回调下一帧生效; 电平显示与 ASR 输入同为增益后信号.
+    pub fn set_mic_volume(&self, percent: u8) {
+        self.mic_gain
+            .store(percent_to_gain(percent).to_bits(), Ordering::Relaxed);
     }
 
     /// 获取实时音量
@@ -339,16 +383,25 @@ fn find_input_device(speech_name: &str, device_id: Option<&str>) -> Result<Devic
 fn open_input_stream(
     speech_name: &str,
     speech_device_id: Option<&str>,
+    gain: Arc<AtomicU32>,
     volume: Arc<AtomicI32>,
     audio_tx: mpsc::SyncSender<Vec<f32>>,
     bus: crate::event_bus::EventBus,
 ) -> Result<Stream> {
     let stream = find_input_device(speech_name, speech_device_id)
-        .and_then(|device| build_asr_stream(&device, volume.clone(), audio_tx.clone(), bus.clone()))
+        .and_then(|device| {
+            build_asr_stream(
+                &device,
+                gain.clone(),
+                volume.clone(),
+                audio_tx.clone(),
+                bus.clone(),
+            )
+        })
         .or_else(|e| {
             log::warn!("Configured input device unusable ({e}), trying default input");
             let device = cpal::default_host().default_input_device().ok_or(e)?;
-            build_asr_stream(&device, volume, audio_tx, bus)
+            build_asr_stream(&device, gain, volume, audio_tx, bus)
         })?;
     stream.play()?;
     Ok(stream)

@@ -30,7 +30,7 @@ use sherpa_onnx::{
 };
 use std::collections::VecDeque;
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, SyncSender};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -237,20 +237,40 @@ fn peak_to_volume(peak: f32) -> i32 {
     (((db + 40.0) * (100.0 / 40.0)) as i32).clamp(0, 100)
 }
 
+/// 对一帧 f32 样本施加采集增益并 clamp 到 [-1.0, 1.0].
+///
+/// 增益 > 1 时不 clamp 会削波, 既破坏 ASR 输入也让电平显示恒打满;
+/// 增益 == 1 是绝大多数时间的常见路径, 直接跳过省一遍乘法.
+fn apply_gain(data: &mut [f32], gain: f32) {
+    if gain == 1.0 {
+        return;
+    }
+    for s in data.iter_mut() {
+        *s = (*s * gain).clamp(-1.0, 1.0);
+    }
+}
+
 /// 计算一帧音频的峰值音量并推进音量条 (attack/decay), 然后 downmix
 /// 到单声道推给识别线程.
+///
+/// 采集增益在进入本函数时立即施加 (`gain` 原子量, f32 bits), 之后的
+/// 峰值电平与 ASR 输入都是增益后信号 — 用户调麦克风音量立刻能在
+/// 电平条上看到效果.
 ///
 /// 音量条更新: 新峰值立即拉升, 否则按 0.95/帧 指数衰减 (半衰期约 0.4s).
 /// 多声道按左右声道算术均值降混; 单声道直通.
 /// 函数不获取 `volume` / `audio_tx` 的所有权, 由调用方持有 (通常是
 /// cpal 输入流闭包, 闭包负责把变量 move 进来).
 fn process_audio_chunk(
-    data: &[f32],
+    data: &mut [f32],
     channels: usize,
+    gain: &Arc<AtomicU32>,
     volume: &Arc<AtomicI32>,
     audio_tx: &SyncSender<Vec<f32>>,
     bus: &crate::event_bus::EventBus,
 ) {
+    apply_gain(data, f32::from_bits(gain.load(Ordering::Relaxed)));
+
     let peak = data.iter().fold(0.0f32, |acc, &s| acc.max(s.abs()));
     let peak_value = peak_to_volume(peak);
     let current = volume.load(Ordering::Relaxed);
@@ -309,6 +329,7 @@ fn should_publish_volume(current: i32, new_value: i32, last_ms: u64, now_ms: u64
 /// "Sample format 'f32' is not supported by hardware".
 pub fn build_asr_stream(
     device: &Device,
+    gain: Arc<AtomicU32>,
     volume: Arc<AtomicI32>,
     audio_tx: SyncSender<Vec<f32>>,
     bus: crate::event_bus::EventBus,
@@ -325,16 +346,16 @@ pub fn build_asr_stream(
 
     match config.sample_format() {
         cpal::SampleFormat::I16 => {
-            build_typed_stream::<i16>(device, stream_config, channels, volume, audio_tx, bus)
+            build_typed_stream::<i16>(device, stream_config, channels, gain, volume, audio_tx, bus)
         }
         cpal::SampleFormat::U16 => {
-            build_typed_stream::<u16>(device, stream_config, channels, volume, audio_tx, bus)
+            build_typed_stream::<u16>(device, stream_config, channels, gain, volume, audio_tx, bus)
         }
         cpal::SampleFormat::I32 => {
-            build_typed_stream::<i32>(device, stream_config, channels, volume, audio_tx, bus)
+            build_typed_stream::<i32>(device, stream_config, channels, gain, volume, audio_tx, bus)
         }
         cpal::SampleFormat::F32 => {
-            build_typed_stream::<f32>(device, stream_config, channels, volume, audio_tx, bus)
+            build_typed_stream::<f32>(device, stream_config, channels, gain, volume, audio_tx, bus)
         }
         format => anyhow::bail!("Unsupported input sample format: {format}"),
     }
@@ -345,6 +366,7 @@ fn build_typed_stream<T>(
     device: &Device,
     stream_config: cpal::StreamConfig,
     channels: usize,
+    gain: Arc<AtomicU32>,
     volume: Arc<AtomicI32>,
     audio_tx: SyncSender<Vec<f32>>,
     bus: crate::event_bus::EventBus,
@@ -357,8 +379,8 @@ where
     Ok(device.build_input_stream(
         stream_config,
         move |data: &[T], _: &_| {
-            let f32_data: Vec<f32> = data.iter().map(|s| s.to_sample::<f32>()).collect();
-            process_audio_chunk(&f32_data, channels, &volume, &audio_tx, &bus);
+            let mut f32_data: Vec<f32> = data.iter().map(|s| s.to_sample::<f32>()).collect();
+            process_audio_chunk(&mut f32_data, channels, &gain, &volume, &audio_tx, &bus);
         },
         |e| log::error!("Audio stream error: {e}"),
         None,
@@ -494,6 +516,29 @@ mod tests {
         assert_eq!(peak_to_volume(1.0), 100);
         // 超过 1.0 (理论上不会, 但保险) -> clamp 到 100
         assert_eq!(peak_to_volume(2.0), 100);
+    }
+
+    #[test]
+    fn apply_gain_scales_and_clamps() {
+        // 单位增益: 原样 (常见路径)
+        let mut d = vec![0.5, -0.5];
+        apply_gain(&mut d, 1.0);
+        assert_eq!(d, vec![0.5, -0.5]);
+
+        // 半增益: 峰值减半 (调低麦克风音量的效果)
+        let mut d = vec![0.4, -0.2];
+        apply_gain(&mut d, 0.5);
+        assert_eq!(d, vec![0.2, -0.1]);
+
+        // 静音: 全零
+        let mut d = vec![0.4, -0.2];
+        apply_gain(&mut d, 0.0);
+        assert_eq!(d, vec![0.0, 0.0]);
+
+        // 过增益: clamp 不削波越界
+        let mut d = vec![0.8, -0.6];
+        apply_gain(&mut d, 2.0);
+        assert_eq!(d, vec![1.0, -1.0]);
     }
 
     #[test]

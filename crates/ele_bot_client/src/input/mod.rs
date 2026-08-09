@@ -148,9 +148,9 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     } else if matches!(app.ui.mode.route, Route::Settings { .. }) {
         handle_settings(app, code);
     } else if matches!(app.ui.mode.route, Route::LlmTest) {
-        handle_llm_test_route(app, code);
+        handle_llm_test_route(app, code, modifiers);
     } else if matches!(app.ui.mode.route, Route::TtsTest) {
-        handle_tts_test_route(app, code);
+        handle_tts_test_route(app, code, modifiers);
     } else if matches!(app.ui.mode.route, Route::About) {
         handle_about(app, code);
     }
@@ -274,6 +274,9 @@ fn handle_settings(app: &mut App, code: KeyCode) {
     let event = match code {
         KeyCode::Up => Some(AppEvent::Settings(SettingsEvent::Up)),
         KeyCode::Down => Some(AppEvent::Settings(SettingsEvent::Down)),
+        // ←→ 直调音量条 (非音量行 no-op, 见 `App::adjust_volume`)
+        KeyCode::Left => Some(AppEvent::Settings(SettingsEvent::VolumeAdjust(-5))),
+        KeyCode::Right => Some(AppEvent::Settings(SettingsEvent::VolumeAdjust(5))),
         KeyCode::Enter => {
             // 麦克风 / 扬声器行 (2/3) 走 picker; 其它 (0/1 Wifi) 走文本编辑
             let selected = if let Route::Settings { selected, .. } = &app.ui.mode.route {
@@ -301,12 +304,12 @@ fn handle_settings(app: &mut App, code: KeyCode) {
     }
 }
 
-fn handle_llm_test_route(app: &mut App, code: KeyCode) {
-    handle_llm_test(app, code);
+fn handle_llm_test_route(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    handle_llm_test(app, code, modifiers);
 }
 
-fn handle_tts_test_route(app: &mut App, code: KeyCode) {
-    handle_tts_test(app, code);
+fn handle_tts_test_route(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
+    handle_tts_test(app, code, modifiers);
 }
 
 fn handle_about(_app: &mut App, _code: KeyCode) {}

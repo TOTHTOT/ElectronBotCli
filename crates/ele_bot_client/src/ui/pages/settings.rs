@@ -16,7 +16,7 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_colo
     )
     .split(inner_area);
 
-    render_info_bar(frame, chunks[0], vm.in_edit_mode, border_color);
+    render_info_bar(frame, chunks[0], vm, border_color);
     render_settings_list(frame, chunks[1], vm, border_color);
 
     // picker overlay 居中弹窗
@@ -29,16 +29,19 @@ pub fn render(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_colo
     }
 }
 
-fn render_info_bar(frame: &mut Frame, area: Rect, in_edit: bool, border_color: Color) {
+fn render_info_bar(frame: &mut Frame, area: Rect, vm: &SettingsViewModel, border_color: Color) {
     let outer_block = create_block("操作说明".to_string(), border_color, border_color);
     let inner_area = outer_block.inner(area);
     frame.render_widget(outer_block, area);
 
-    let text = if in_edit {
+    let text = if vm.in_edit_mode {
         // 编辑态: 列出全部支持的按键. 中文混排, 终端窄 (<80 列) 时
         // Paragraph 默认会截断, 这里不加 wrap=Word; 用户实际使用的
         // 终端多在 100 列以上, 80 列以下截断不致命.
         "操作: [Enter] 保存  [Esc] 取消  [Backspace] 删前  [Delete] 删后  [←→] 移动  [Home/End] 跳首尾"
+    } else if vm.selected_is_volume {
+        // 音量条行: ←→ 直调, 无编辑态
+        "操作: [←→] 调节音量  [↑/↓] 选择  [Esc] 退出"
     } else {
         "操作: [↑/↓] 选择  [Enter] 编辑/选设备  [Esc] 退出  [R] 刷新设备列表"
     };
@@ -85,6 +88,7 @@ fn render_settings_list(
             is_selected,
             is_editing,
             &item.value,
+            item.volume_bar.as_ref(),
         );
     }
 }
@@ -128,6 +132,7 @@ fn render_setting_item(
     is_selected: bool,
     is_editing: bool,
     raw_value: &str,
+    volume_bar: Option<&crate::ui::viewmodel::settings::VolumeBarVm>,
 ) {
     let indicator = get_indicator(is_selected, is_editing);
 
@@ -143,6 +148,25 @@ fn render_setting_item(
         base_style.add_modifier(Modifier::BOLD),
     );
     let label_span = Span::styled(format!(" {label}: "), base_style);
+
+    // 音量条行: 增益条 + 百分比 (+ 麦克风行实时电平), 无编辑态/占位色
+    if let Some(bar) = volume_bar {
+        let mut spans = vec![
+            indicator_span,
+            label_span,
+            Span::styled(render_gain_bar(bar.percent), Style::new().fg(Color::Green)),
+            Span::styled(format!(" {value}"), Style::new().fg(Color::Yellow)),
+        ];
+        if let Some(level) = bar.level {
+            spans.push(Span::styled(
+                format!("  电平 {} {}", render_level_bar(level), level),
+                Style::new().fg(Color::DarkGray),
+            ));
+        }
+        let widget = Paragraph::new(vec![Line::from_iter(spans)]);
+        frame.render_widget(widget, area);
+        return;
+    }
 
     let text = if is_editing {
         // 三段拼接: before + caret(块字符) + after
@@ -334,4 +358,59 @@ fn centered_rect(w: u16, h: u16, area: Rect) -> Rect {
     let x = area.x + area.width.saturating_sub(w) / 2;
     let y = area.y + area.height.saturating_sub(h) / 2;
     Rect::new(x, y, w, h)
+}
+
+/// 增益条内宽 (字符数). 与 device_status 的音量条风格同族,
+/// 但不带 `│` 游标 — 这里的数值直接在右侧以百分比给出.
+const GAIN_BAR_WIDTH: usize = 15;
+/// 电平条内宽 (字符数), 比增益条短, 作为附加指示不抢视觉.
+const LEVEL_BAR_WIDTH: usize = 10;
+
+/// 把增益百分比 [0, 100] 渲染成 `[██████░░░░░░░░░]` 形.
+fn render_gain_bar(percent: u8) -> String {
+    let filled = usize::from(percent.min(100)) * GAIN_BAR_WIDTH / 100;
+    let mut bar = String::with_capacity(GAIN_BAR_WIDTH + 2);
+    bar.push('[');
+    for i in 0..GAIN_BAR_WIDTH {
+        bar.push(if i < filled { '█' } else { '░' });
+    }
+    bar.push(']');
+    bar
+}
+
+/// 把实时电平 [0, 100] 渲染成短条 (clamp 防御越界值).
+fn render_level_bar(level: i32) -> String {
+    let filled = level.clamp(0, 100) as usize * LEVEL_BAR_WIDTH / 100;
+    let mut bar = String::with_capacity(LEVEL_BAR_WIDTH + 2);
+    bar.push('[');
+    for i in 0..LEVEL_BAR_WIDTH {
+        bar.push(if i < filled { '█' } else { '░' });
+    }
+    bar.push(']');
+    bar
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gain_bar_shape_and_bounds() {
+        // 0%: 全空但形态可见
+        assert_eq!(render_gain_bar(0), "[░░░░░░░░░░░░░░░]");
+        // 100%: 全满
+        assert_eq!(render_gain_bar(100), "[███████████████]");
+        // 50%: 7 满 8 空 (15 * 50 / 100 = 7)
+        assert_eq!(render_gain_bar(50), "[███████░░░░░░░░]");
+        // 超界按 100 钳位 (防御非 client 来源值)
+        assert_eq!(render_gain_bar(255), render_gain_bar(100));
+    }
+
+    #[test]
+    fn level_bar_clamps() {
+        assert_eq!(render_level_bar(0), "[░░░░░░░░░░]");
+        assert_eq!(render_level_bar(100), "[██████████]");
+        assert_eq!(render_level_bar(-5), render_level_bar(0));
+        assert_eq!(render_level_bar(150), render_level_bar(100));
+    }
 }

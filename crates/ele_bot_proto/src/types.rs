@@ -133,6 +133,20 @@ pub struct AppConfig {
     pub tts_enabled: bool,
     pub tts_speed: f32,
     pub tts_voice: String,
+    /// 扬声器播放增益百分比 [0, 100], 缺省 100 (不改变既有行为).
+    /// 服务端映射为 rodio `Player::set_volume(v/100)` 软件增益.
+    #[serde(default = "default_100")]
+    pub speaker_volume: u8,
+    /// 麦克风采集增益百分比 [0, 100], 缺省 100 (不改变既有行为).
+    /// 服务端在采集回调内逐样本乘 v/100 并 clamp.
+    #[serde(default = "default_100")]
+    pub mic_volume: u8,
+}
+
+/// `speaker_volume` / `mic_volume` 的 serde 默认值: 100 = 单位增益,
+/// 保证旧 config.toml / 旧 client 回写时行为与升级前一致.
+fn default_100() -> u8 {
+    100
 }
 
 impl Default for AppConfig {
@@ -149,6 +163,8 @@ impl Default for AppConfig {
             tts_enabled: true,
             tts_speed: 1.0,
             tts_voice: "af_sarah".to_string(),
+            speaker_volume: 100,
+            mic_volume: 100,
         }
     }
 }
@@ -262,5 +278,55 @@ impl AppConfig {
         let content = toml::to_string_pretty(self)?;
         std::fs::write(std::path::Path::new(Self::CONFIG_PATH), content)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 旧 config.toml (无音量字段) 解析后音量应为默认 100 — 升级不改变既有行为
+    #[test]
+    fn old_toml_without_volume_fields_defaults_to_100() {
+        let toml = r#"
+            speech_name = "麦克风阵列"
+            camera_index = "0"
+            rotation = "rotate270"
+            wifi_ssid = ""
+            wifi_password = ""
+            output_device = ""
+            tts_enabled = true
+            tts_speed = 1.0
+            tts_voice = "af_sarah"
+        "#;
+        let cfg: AppConfig = toml::from_str(toml).expect("old toml should parse");
+        assert_eq!(cfg.speaker_volume, 100);
+        assert_eq!(cfg.mic_volume, 100);
+    }
+
+    /// 新字段 TOML roundtrip
+    #[test]
+    fn volume_fields_toml_roundtrip() {
+        let cfg = AppConfig {
+            speaker_volume: 70,
+            mic_volume: 35,
+            ..AppConfig::default()
+        };
+        let s = toml::to_string(&cfg).expect("serialize");
+        let back: AppConfig = toml::from_str(&s).expect("deserialize");
+        assert_eq!(back.speaker_volume, 70);
+        assert_eq!(back.mic_volume, 35);
+    }
+
+    /// 旧 client 发来的 JSON (无音量字段) 反序列化不报错且默认 100
+    #[test]
+    fn old_json_without_volume_fields_deserializes() {
+        let cfg = AppConfig::default();
+        let mut v = serde_json::to_value(&cfg).expect("to json");
+        v.as_object_mut().unwrap().remove("speaker_volume");
+        v.as_object_mut().unwrap().remove("mic_volume");
+        let back: AppConfig = serde_json::from_value(v).expect("old json should parse");
+        assert_eq!(back.speaker_volume, 100);
+        assert_eq!(back.mic_volume, 100);
     }
 }

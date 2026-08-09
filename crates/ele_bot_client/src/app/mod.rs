@@ -72,23 +72,28 @@ pub type Runtime = tokio::runtime::Runtime;
 /// 1. 在数组末尾 (设备项之前) 插入新 label
 /// 2. 在下面追加新常量
 /// 3. `begin_settings_edit` / `commit_settings_edit` 加 match 分支
-pub const SETTINGS_LABELS: [&str; 5] = [
-    "Wifi名称", // 0
-    "Wifi密码", // 1
-    "麦克风",   // 2 - picker
-    "扬声器",   // 3 - picker
-    "摄像头",   // 4 - picker
+pub const SETTINGS_LABELS: [&str; 7] = [
+    "Wifi名称",   // 0
+    "Wifi密码",   // 1
+    "麦克风",     // 2 - picker
+    "扬声器",     // 3 - picker
+    "扬声器音量", // 4 - volume bar (←→ 调节)
+    "麦克风音量", // 5 - volume bar (←→ 调节, 附实时电平)
+    "摄像头",     // 6 - picker
 ];
 
 /// 设置项索引常量 — 列表顺序变更时, 引用方必须同步更新
 ///
-/// 设备项 (SPEECH/OUTPUT/CAMERA) 在 idx 2/3/4.
-/// `begin_settings_edit` 的 `_ => return` 兜底让设备项继续走 picker.
+/// 设备项 (SPEECH/OUTPUT/CAMERA) 在 idx 2/3/6, 音量条项 (SPK/MIC_VOLUME)
+/// 在 idx 4/5. `begin_settings_edit` 的 `_ => return` 兜底让设备项继续走
+/// picker、音量项不进编辑态 (音量行走 `adjust_volume` 的 ←→ 直调).
 pub const SETTINGS_IDX_WIFI_SSID: usize = 0;
 pub const SETTINGS_IDX_WIFI_PASSWORD: usize = 1;
 pub const SETTINGS_IDX_SPEECH: usize = 2;
 pub const SETTINGS_IDX_OUTPUT: usize = 3;
-pub const SETTINGS_IDX_CAMERA: usize = 4;
+pub const SETTINGS_IDX_SPK_VOLUME: usize = 4;
+pub const SETTINGS_IDX_MIC_VOLUME: usize = 5;
+pub const SETTINGS_IDX_CAMERA: usize = 6;
 
 /// UI 状态
 #[derive(Debug)]
@@ -558,6 +563,25 @@ impl App {
                 cursor,
             ));
         }
+    }
+
+    /// 音量条 ←→ 调节 (设置页音量行选中时).
+    ///
+    /// ±delta (百分点), clamp 到 [0, 100], 立即把 mirror config 全量回写
+    /// `SetConfig` — server 端热更新增益原子量 + 落盘, 无需防抖 (键盘
+    /// 步进频率低). 非音量行选中时 no-op, 让 ←→ 在其它行无绑定安全穿过.
+    pub fn adjust_volume(&mut self, delta: i8) {
+        let selected = match &self.ui.mode.route {
+            Route::Settings { selected, .. } => *selected,
+            _ => return,
+        };
+        let field = match selected {
+            SETTINGS_IDX_SPK_VOLUME => &mut self.config.speaker_volume,
+            SETTINGS_IDX_MIC_VOLUME => &mut self.config.mic_volume,
+            _ => return,
+        };
+        *field = (i16::from(*field) + i16::from(delta)).clamp(0, 100) as u8;
+        self.set_config(self.config.clone());
     }
 
     /// 提交编辑(Enter on `EditField` overlay)

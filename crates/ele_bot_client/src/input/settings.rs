@@ -31,6 +31,8 @@ pub enum SettingsEvent {
     PickerConfirm,
     /// picker 内 Esc — 取消
     PickerCancel,
+0    /// 音量条 ←→ 调节 (仅音量行选中时生效, 其它行 no-op)
+    VolumeAdjust(i8),
     /// picker 内 R — 重新拉列表, 保留 cursor 框架
     PickerRefresh,
 }
@@ -45,6 +47,7 @@ pub fn handle(app: &mut App, event: SettingsEvent) {
             app.enter_device_picker(kind);
         }
         SettingsEvent::RefreshList => app.refresh_device_lists_in_settings(),
+        SettingsEvent::VolumeAdjust(delta) => app.adjust_volume(delta),
         SettingsEvent::PickerUp => app.picker_up(),
         SettingsEvent::PickerDown => app.picker_down(),
         SettingsEvent::PickerConfirm => app.confirm_device_picker(),

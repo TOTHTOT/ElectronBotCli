@@ -15,12 +15,25 @@ pub struct SettingsViewModel {
     pub edit_cursor: usize,
     pub picker: Option<PickerVm>,
     pub failure_overlay: Option<FailureVm>,
+    /// 当前选中行是否音量条行 (info bar 切换 ←→ 提示用)
+    pub selected_is_volume: bool,
 }
 
 #[allow(dead_code)]
 pub struct SettingItem {
     pub label: &'static str,
     pub value: String,
+    /// 音量条行专用: 增益百分比 + 实时电平 (仅麦克风行有电平).
+    /// 普通文本/设备行为 `None`.
+    pub volume_bar: Option<VolumeBarVm>,
+}
+
+/// 音量条视图模型 — 扬声器行只有增益; 麦克风行附实时输入电平
+/// (增益后信号, 来自 `ServerEvent::Volume` 的 client 镜像).
+#[allow(dead_code)]
+pub struct VolumeBarVm {
+    pub percent: u8,
+    pub level: Option<i32>,
 }
 
 /// picker 视图模型 — `Overlay::DevicePicker` 的纯数据投影
@@ -57,10 +70,12 @@ impl SettingsViewModel {
             SettingItem {
                 label: "Wifi名称",
                 value: app.config.wifi_ssid.clone(),
+                volume_bar: None,
             },
             SettingItem {
                 label: "Wifi密码",
                 value: app.config.wifi_password.clone(),
+                volume_bar: None,
             },
         ];
 
@@ -68,15 +83,39 @@ impl SettingsViewModel {
         items.push(SettingItem {
             label: "麦克风",
             value: display_for(&app.devices.inputs, &app.config.speech_name),
+            volume_bar: None,
         });
         items.push(SettingItem {
             label: "扬声器",
             value: display_for(&app.devices.outputs, &app.config.output_device),
+            volume_bar: None,
         });
+
+        // 音量条行 (←→ 直调): 扬声器行只显增益; 麦克风行附实时输入电平
+        // (server.volume 是 `ServerEvent::Volume` 的本地镜像, 增益后信号).
+        items.push(SettingItem {
+            label: "扬声器音量",
+            value: format!("{}%", app.config.speaker_volume),
+            volume_bar: Some(VolumeBarVm {
+                percent: app.config.speaker_volume,
+                level: None,
+            }),
+        });
+        let mic_level = app.server.lock().unwrap().volume;
+        items.push(SettingItem {
+            label: "麦克风音量",
+            value: format!("{}%", app.config.mic_volume),
+            volume_bar: Some(VolumeBarVm {
+                percent: app.config.mic_volume,
+                level: Some(mic_level),
+            }),
+        });
+
         // 摄像头: 显示当前 index, 查 cameras 缓存拿 display 替换.
         items.push(SettingItem {
             label: "摄像头",
             value: display_for_camera(&app.devices.cameras, &app.config.camera_index),
+            volume_bar: None,
         });
 
         // 从 Route::Settings 取 selected + editing + cursor
@@ -153,6 +192,11 @@ impl SettingsViewModel {
 
         let _ = selecting; // suppress unused if pattern destructured
 
+        let selected_is_volume = matches!(
+            selected_index,
+            crate::app::SETTINGS_IDX_SPK_VOLUME | crate::app::SETTINGS_IDX_MIC_VOLUME
+        );
+
         Self {
             settings_items: items,
             selected_index,
@@ -161,6 +205,7 @@ impl SettingsViewModel {
             edit_cursor,
             picker,
             failure_overlay,
+            selected_is_volume,
         }
     }
 }

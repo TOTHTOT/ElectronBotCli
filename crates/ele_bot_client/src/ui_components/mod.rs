@@ -1,3 +1,5 @@
+pub mod text_input;
+
 use crate::app::PopupConfig;
 use ratatui::{
     prelude::*,

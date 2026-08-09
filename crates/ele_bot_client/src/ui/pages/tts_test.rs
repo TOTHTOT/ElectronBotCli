@@ -3,12 +3,12 @@
 //! 用于测试 TTS 语音合成功能
 
 use crate::ui_components::create_block;
+use crate::ui_components::text_input::TextInput;
 use ratatui::widgets::{Block, Paragraph, Wrap};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     prelude::Stylize,
     style::Color,
-    style::Style,
     Frame,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 #[derive(Default)]
 pub struct TtsTestState {
-    pub input_text: String,
+    pub input: TextInput,
     pub output_text: String,
     pub speed: f32,                  // 0.5 ~ 2.0, 默认 1.0
     pub is_streaming: bool,          // true=流式, false=阻塞
@@ -39,13 +39,13 @@ pub fn render(frame: &mut Frame, area: Rect, state: &TtsTestState, border_color:
         ])
         .split(inner_area);
 
-    // 输入框
-    let input_style = Style::default().fg(Color::Yellow);
-    let input_box = Paragraph::new(state.input_text.as_str()).block(
-        Block::bordered()
-            .title("输入 (按回车播放)")
-            .style(input_style),
-    );
+    // 输入框: 块字符 caret 三段渲染, 超宽按 caret 横向滚动
+    // (内容区宽 = 框宽 - 2 列边框)
+    let input_line = state
+        .input
+        .render_line(usize::from(chunks[0].width.saturating_sub(2)));
+    let input_box =
+        Paragraph::new(input_line).block(Block::bordered().title("输入 (回车播放, Ctrl+U 清空)"));
     frame.render_widget(input_box, chunks[0]);
 
     // 控制面板：速度 + 模式
