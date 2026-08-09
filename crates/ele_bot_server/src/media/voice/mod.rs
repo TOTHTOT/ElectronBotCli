@@ -1,6 +1,7 @@
 pub mod asr;
 pub mod tts;
 
+use self::tts::{TtsHandler, TtsPlayer};
 use crate::media::voice::asr::{build_asr_stream, recognition_thread};
 use anyhow::{anyhow, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -8,6 +9,7 @@ use cpal::{Device, Stream};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::{mpsc, Arc};
+use std::thread;
 
 /// 从 cpal `Device` 同时取稳定 id 和 friendly name; 任一步失败返回 `None`.
 ///
@@ -18,9 +20,6 @@ fn device_id_and_name(d: &Device) -> Option<(String, String)> {
     let name = d.description().ok()?.name().to_string();
     Some((id, name))
 }
-use std::thread;
-
-use self::tts::{TtsHandler, TtsPlayer};
 
 pub const VAD_WINDOW_SIZE: i32 = 512;
 #[allow(dead_code)]
@@ -204,7 +203,7 @@ impl VoiceManager {
         let audio = self.tts_handler.synthesize(text, speed)?;
         log::info!("synthesized audio took: {:?}", start.elapsed());
         if let Some(player) = &self.tts_player {
-            player.play(&audio)?;
+            player.play(audio)?;
             if let Some(callback) = on_complete {
                 callback(Ok(()));
             }

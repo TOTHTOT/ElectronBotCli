@@ -43,6 +43,7 @@ agent-client-protocol = "2.0.0"
 # Web/WebSocket 服务
 axum = { workspace = true }
 tokio-stream = { workspace = true }
+rodio = { version = "0.22.2", default-features = false, features = ["playback"] }
 
 # 平台特定
 [target.'cfg(windows)'.dependencies]
