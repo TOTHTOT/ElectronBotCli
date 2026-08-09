@@ -113,7 +113,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     // (0) 全局热键 (Esc / Ctrl+C 跨所有 mode)
     if code == KeyCode::Esc {
         if app.ui.mode.overlay.is_some() {
-            handle_overlay(app, code);
+            handle_overlay(app, code, modifiers);
             return;
         }
         match &app.ui.mode.route {
@@ -136,7 +136,7 @@ pub fn handle_by_mode(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
 
     // (1) Overlay 优先
     if app.ui.mode.overlay.is_some() {
-        handle_overlay(app, code);
+        handle_overlay(app, code, modifiers);
         return;
     }
 
@@ -337,7 +337,18 @@ fn handle_about(_app: &mut App, _code: KeyCode) {}
 ///
 /// 不在表内的 `KeyCode` (`F1`/`PageUp`/...) 原样穿透, 不动 buffer
 /// 不动 cursor, 跟改前的 `_ => Some(Overlay::EditField(field))` 语义一致.
-fn apply_edit_key(f: &mut EditField, code: KeyCode) {
+///
+/// ## Backspace 的两种编码
+///
+/// 终端可能把 Backspace 发成 `KeyCode::Backspace` (0x7f) 或 ^H
+/// (`Char('h')` + CONTROL, 0x08), 两种都映射为 `delete_back`.
+fn apply_edit_key(f: &mut EditField, code: KeyCode, modifiers: KeyModifiers) {
+    // 部分终端把 Backspace 发成 ^H (0x08), crossterm 解为 Char('h')+CONTROL,
+    // 不拦截会被 Char 通配分支当成字符 'h' 插入
+    if modifiers.contains(KeyModifiers::CONTROL) && code == KeyCode::Char('h') {
+        let _ = f.delete_back();
+        return;
+    }
     match code {
         KeyCode::Left => f.move_cursor_left(1),
         KeyCode::Right => f.move_cursor_right(1),
@@ -355,7 +366,7 @@ fn apply_edit_key(f: &mut EditField, code: KeyCode) {
 }
 
 /// 模态层: overlay 优先消费按键
-fn handle_overlay(app: &mut App, code: KeyCode) {
+fn handle_overlay(app: &mut App, code: KeyCode, modifiers: KeyModifiers) {
     let overlay = app.ui.mode.overlay.take();
     match overlay {
         Some(Overlay::EditField(field)) => {
@@ -378,7 +389,7 @@ fn handle_overlay(app: &mut App, code: KeyCode) {
                 // 跟现状兼容, 避免未来再加新按键时让 match 越来越胖.
                 code => {
                     let mut f = field;
-                    apply_edit_key(&mut f, code);
+                    apply_edit_key(&mut f, code, modifiers);
                     // buffer / cursor 改变后回写 Route.editing, 让 viewmodel 下一帧
                     // 拿到新值; 同时把 f 放回 overlay 供后续按键继续.
                     if let Route::Settings { editing, .. } = &mut app.ui.mode.route {

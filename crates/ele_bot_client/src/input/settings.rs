@@ -31,7 +31,7 @@ pub enum SettingsEvent {
     PickerConfirm,
     /// picker 内 Esc — 取消
     PickerCancel,
-0    /// 音量条 ←→ 调节 (仅音量行选中时生效, 其它行 no-op)
+    /// 音量条 ←→ 调节 (仅音量行选中时生效, 其它行 no-op)
     VolumeAdjust(i8),
     /// picker 内 R — 重新拉列表, 保留 cursor 框架
     PickerRefresh,
