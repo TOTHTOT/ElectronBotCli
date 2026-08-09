@@ -9,6 +9,10 @@ on:
     tags:
       - 'v*'
 
+# GITHUB_TOKEN 默认只读, 创建 Release / 传产物必须显式放开写权限
+permissions:
+  contents: write
+
 env:
   CARGO_TERM_COLOR: always
 
