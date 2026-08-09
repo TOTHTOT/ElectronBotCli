@@ -64,6 +64,20 @@ async fn main() -> anyhow::Result<()> {
     let state = SharedState::new().await?;
     log::info!("hardware initialized");
 
+    // 全局 LCD 渲染循环: 不依赖客户端连接, 机器人连上后屏幕即开始渲染
+    state.spawn_lcd_render_loop();
+
+    // 检测到 ElectronBot 已插入则自动连接 (与客户端 ConnectRobot 同一路径,
+    // 失败不阻塞服务启动, 之后客户端仍可手动 ConnectRobot)
+    if ele_bot_server::robot::is_device_present() {
+        match state.connect_robot() {
+            Ok(()) => log::info!("robot auto-connected"),
+            Err(e) => log::warn!("robot auto-connect failed: {e}"),
+        }
+    } else {
+        log::info!("no robot device found, skip auto-connect");
+    }
+
     // 系统状态采集 (SoC 温度 / CPU / 内存), 周期性广播给 WS 客户端
     ele_bot_server::sysmon::spawn(state.bus_tx.clone());
 

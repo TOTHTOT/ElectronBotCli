@@ -723,6 +723,56 @@ impl SharedState {
             }));
     }
 
+    /// 启动全局 LCD 渲染循环 (50ms tick)
+    ///
+    /// 原逻辑在 ws.rs 每个客户端连接里: 无客户端时屏幕不渲染, 多客户端
+    /// 还会重复推帧. 改为 server 级单循环 — 机器人已连接时生成 LCD 帧
+    /// 推给 USB 通信线程, 并写 web preview 的 `lcd_frame_cache`.
+    pub fn spawn_lcd_render_loop(self: &Arc<Self>) {
+        let state = Arc::clone(self);
+        tokio::spawn(async move {
+            let mut interval = tokio::time::interval(std::time::Duration::from_millis(50));
+            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                interval.tick().await;
+                if state.robot_connected.load(Ordering::Relaxed) {
+                    let pixels = state.generate_lcd_frame();
+                    if !pixels.is_empty() {
+                        state.push_frame_to_robot(pixels.clone());
+                        // 写 web preview 缓存
+                        if let Ok(mut guard) = state.lcd_frame_cache.lock() {
+                            *guard = Some(pixels);
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /// 建立与 ElectronBot 的 USB 连接
+    ///
+    /// `ConnectRobot` 命令与启动时自动连接共用同一路径: 先停掉已有
+    /// 通信线程再开新线程. 成功广播 `Connection(true)`, 失败广播
+    /// `Connection(false)` 并返回 `Err`.
+    pub fn connect_robot(&self) -> anyhow::Result<()> {
+        self.stop_robot_comm();
+        let (tx, rx) = std::sync::mpsc::sync_channel::<(Vec<u8>, crate::robot::JointConfig)>(1);
+        *self.bot_tx.lock().unwrap() = Some(tx);
+        match crate::robot::start_comm_thread(rx) {
+            Ok((comm_state, _handle)) => {
+                *self.comm_state.lock().unwrap() = Some(comm_state);
+                self.notify_connection(true);
+                Ok(())
+            }
+            Err(e) => {
+                log::warn!("failed to connect: {e}");
+                *self.bot_tx.lock().unwrap() = None;
+                self.notify_connection(false);
+                Err(e)
+            }
+        }
+    }
+
     /// 停止机器人通信线程
     pub fn stop_robot_comm(&self) {
         *self.bot_tx.lock().unwrap() = None;

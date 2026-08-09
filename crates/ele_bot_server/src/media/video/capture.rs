@@ -571,7 +571,7 @@ impl LoopStats {
         self.frames += 1;
         let elapsed = self.start.elapsed();
         if elapsed >= Duration::from_secs(5) {
-            log::info!(
+            log::debug!(
                 "capture stats: {} frames in {:.1}s = {:.1} FPS",
                 self.frames,
                 elapsed.as_secs_f64(),

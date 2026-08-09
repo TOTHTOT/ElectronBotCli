@@ -3,7 +3,7 @@
 //! 接受客户端连接, 接收命令, 推送事件 (从 `EventBus` 订阅, 按 variant 过滤).
 
 use crate::event_bus::BusEvent;
-use crate::robot::{self, CommState, DisplayMode, JointConfig};
+use crate::robot::{CommState, DisplayMode};
 use crate::state::{mood_from_proto, SharedState};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::State;
@@ -14,7 +14,6 @@ use ele_bot_proto::{ClientMessage, ServerEvent, SERVO_COUNT};
 use futures::{SinkExt, StreamExt};
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::sync::mpsc;
 
 const WS_PATH: &str = "/ws";
@@ -99,57 +98,31 @@ async fn handle_connection(socket: WebSocket, state: Arc<SharedState>) {
     state.broadcast_joint_state();
     state.broadcast_joint_config();
 
-    // 主循环
-    let mut frame_interval = tokio::time::interval(Duration::from_millis(50));
-    frame_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-
-    loop {
-        tokio::select! {
-            biased;
-
-            msg = ws_rx.next() => {
-                match msg {
-                    Some(Ok(Message::Text(text))) => {
-                        match ClientMessage::from_json(&text) {
-                            Ok(cmd) => {
-                                if let Err(e) = handle_command(&state, cmd, &out_tx).await {
-                                    log::warn!("handle command error: {e}");
-                                }
-                            }
-                            Err(e) => {
-                                log::warn!("invalid client message: {e}");
-                                if let Err(e) = out_tx.send(ServerEvent::Error {
-                                    message: e.to_string(),
-                                }){
-                                    log::warn!("error sending error: {e}");
-                                }
-                            }
-                        }
-                    }
-                    Some(Ok(Message::Close(_))) | None => break,
-                    Some(Err(e)) => {
-                        log::warn!("ws error: {e}");
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-
-            _ = frame_interval.tick() => {
-                if state.robot_connected.load(Ordering::Relaxed) {
-                    let pixels = state.generate_lcd_frame();
-                    if !pixels.is_empty() {
-                        state.push_frame_to_robot(pixels.clone());
-                        // 写 web preview 缓存
-                        if let Ok(mut guard) = state.lcd_frame_cache.lock() {
-                            *guard = Some(pixels);
-                        }
+    // 主循环 (LCD 渲染在 SharedState::spawn_lcd_render_loop 全局单循环,
+    // 这里只处理客户端消息)
+    while let Some(msg) = ws_rx.next().await {
+        match msg {
+            Ok(Message::Text(text)) => match ClientMessage::from_json(&text) {
+                Ok(cmd) => {
+                    if let Err(e) = handle_command(&state, cmd, &out_tx).await {
+                        log::warn!("handle command error: {e}");
                     }
                 }
-                // 音量推送: 由 voice 主动 publish BusEvent::Volume, ws.rs
-                // 通过 sub_task 订阅 BusEvent::Volume 转 ServerEvent::Volume
-                // 外发. 这里不再 50ms tick 轮询.
+                Err(e) => {
+                    log::warn!("invalid client message: {e}");
+                    if let Err(e) = out_tx.send(ServerEvent::Error {
+                        message: e.to_string(),
+                    }) {
+                        log::warn!("error sending error: {e}");
+                    }
+                }
+            },
+            Ok(Message::Close(_)) => break,
+            Err(e) => {
+                log::warn!("ws error: {e}");
+                break;
             }
+            _ => {}
         }
     }
 
@@ -177,20 +150,7 @@ async fn handle_command(
             state.set_config(config)?;
         }
         ClientMessage::ConnectRobot => {
-            state.stop_robot_comm();
-            let (tx, rx) = std::sync::mpsc::sync_channel::<(Vec<u8>, JointConfig)>(1);
-            *state.bot_tx.lock().unwrap() = Some(tx);
-            match robot::start_comm_thread(rx) {
-                Ok((comm_state, _handle)) => {
-                    *state.comm_state.lock().unwrap() = Some(comm_state);
-                    state.notify_connection(true);
-                }
-                Err(e) => {
-                    log::warn!("failed to connect: {e}");
-                    *state.bot_tx.lock().unwrap() = None;
-                    state.notify_connection(false);
-                }
-            }
+            let _ = state.connect_robot();
         }
         ClientMessage::DisconnectRobot => {
             state.stop_robot_comm();
